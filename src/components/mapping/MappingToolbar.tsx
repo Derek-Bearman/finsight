@@ -1,0 +1,207 @@
+'use client';
+
+import React, { useState } from 'react';
+import { AuditLogSheet } from './AuditLogSheet';
+import type { AuditEntry } from '@/types';
+
+export interface MappingToolbarProps {
+  view: 'type' | 'behavior';
+  onViewChange: (v: 'type' | 'behavior') => void;
+  searchQuery: string;
+  onSearchChange: (q: string) => void;
+  onReset: () => void;
+  totalAccounts: number;
+  manualCount: number;
+  auditEntries: AuditEntry[];
+}
+
+export function MappingToolbar({
+  view,
+  onViewChange,
+  searchQuery,
+  onSearchChange,
+  onReset,
+  totalAccounts,
+  manualCount,
+  auditEntries,
+}: MappingToolbarProps) {
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  function handleReset() {
+    onReset();
+    setConfirmReset(false);
+  }
+
+  return (
+    <>
+      <div
+        data-testid="mapping-toolbar"
+        className="flex flex-wrap items-center gap-3 rounded-xl border p-3"
+        style={{
+          borderColor: 'hsl(var(--border))',
+          background: 'hsl(var(--card))',
+        }}
+      >
+        {/* Left: View toggle */}
+        <div
+          className="flex rounded-lg border overflow-hidden"
+          style={{ borderColor: 'hsl(var(--border))' }}
+          role="group"
+          aria-label="Mapping view"
+        >
+          <button
+            type="button"
+            onClick={() => onViewChange('type')}
+            className="px-3 py-1.5 text-sm font-medium transition-colors"
+            style={{
+              background:
+                view === 'type' ? 'hsl(var(--primary))' : 'hsl(var(--background))',
+              color:
+                view === 'type' ? 'hsl(var(--primary-foreground))' : 'hsl(var(--foreground))',
+              borderRight: '1px solid hsl(var(--border))',
+            }}
+          >
+            Account Types
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewChange('behavior')}
+            className="px-3 py-1.5 text-sm font-medium transition-colors"
+            style={{
+              background:
+                view === 'behavior' ? 'hsl(var(--primary))' : 'hsl(var(--background))',
+              color:
+                view === 'behavior'
+                  ? 'hsl(var(--primary-foreground))'
+                  : 'hsl(var(--foreground))',
+            }}
+          >
+            Cost Behavior
+          </button>
+        </div>
+
+        {/* Center: Search */}
+        <div className="flex-1 min-w-48">
+          <div className="relative">
+            <span
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm"
+              style={{ color: 'hsl(var(--muted-foreground))' }}
+              aria-hidden
+            >
+              🔍
+            </span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Search accounts..."
+              className="w-full rounded-lg border pl-8 pr-3 py-1.5 text-sm"
+              style={{
+                borderColor: 'hsl(var(--border))',
+                background: 'hsl(var(--background))',
+                color: 'hsl(var(--foreground))',
+                outline: 'none',
+              }}
+              aria-label="Search accounts"
+            />
+          </div>
+        </div>
+
+        {/* Right: Stats & actions */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Manual overrides badge */}
+          <span
+            className="rounded-full border px-2.5 py-1 text-xs font-medium"
+            style={{
+              borderColor: manualCount > 0 ? 'hsl(var(--primary) / 0.4)' : 'hsl(var(--border))',
+              color: manualCount > 0 ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))',
+              background:
+                manualCount > 0 ? 'hsl(var(--primary) / 0.08)' : 'hsl(var(--muted) / 0.5)',
+            }}
+          >
+            Manual overrides: {manualCount}
+          </span>
+
+          {/* Audit log */}
+          <button
+            type="button"
+            onClick={() => setAuditOpen(true)}
+            className="rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors"
+            style={{
+              borderColor: 'hsl(var(--border))',
+              color: 'hsl(var(--foreground))',
+              background: 'hsl(var(--background))',
+            }}
+          >
+            Audit log: {auditEntries.length}
+          </button>
+
+          {/* Reset */}
+          {!confirmReset ? (
+            <button
+              type="button"
+              onClick={() => setConfirmReset(true)}
+              disabled={manualCount === 0}
+              className="rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors"
+              style={{
+                borderColor: manualCount > 0 ? 'hsl(0 72% 51% / 0.5)' : 'hsl(var(--border))',
+                color: manualCount > 0 ? 'hsl(0 72% 51%)' : 'hsl(var(--muted-foreground))',
+                background: 'hsl(var(--background))',
+                cursor: manualCount === 0 ? 'not-allowed' : 'pointer',
+                opacity: manualCount === 0 ? 0.5 : 1,
+              }}
+            >
+              Reset to auto-classify
+            </button>
+          ) : (
+            <div
+              className="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm"
+              style={{
+                borderColor: 'hsl(0 72% 51% / 0.5)',
+                background: 'hsl(0 72% 51% / 0.06)',
+              }}
+            >
+              <span style={{ color: 'hsl(0 72% 40%)' }}>
+                Revert {manualCount} manual override{manualCount !== 1 ? 's' : ''}?
+              </span>
+              <button
+                type="button"
+                onClick={() => setConfirmReset(false)}
+                className="text-xs font-medium underline underline-offset-2"
+                style={{ color: 'hsl(var(--muted-foreground))' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="rounded px-2 py-0.5 text-xs font-semibold"
+                style={{
+                  background: 'hsl(0 72% 51%)',
+                  color: 'white',
+                }}
+              >
+                Reset
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Stats row */}
+      <div className="flex items-center gap-4 px-1 mt-1">
+        <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          {totalAccounts} total accounts
+        </span>
+      </div>
+
+      {/* Audit log slide-over */}
+      <AuditLogSheet
+        entries={auditEntries}
+        isOpen={auditOpen}
+        onClose={() => setAuditOpen(false)}
+      />
+    </>
+  );
+}

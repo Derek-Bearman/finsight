@@ -1,0 +1,26 @@
+{
+  // FinSight — Cloudflare Workers deployment via @opennextjs/cloudflare
+  "name": "finsight",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+
+  // ─── Environments ─────────────────────────────────────────────────────────
+  // Add D1/KV/R2 bindings here when you add a backend database (Phase Supabase).
+  // Example (uncomment when ready):
+  // "kv_namespaces": [
+  //   { "binding": "CACHE", "id": "YOUR_KV_NAMESPACE_ID" }
+  // ],
+  // "d1_databases": [
+  //   { "binding": "DB", "database_name": "finsight", "database_id": "YOUR_DB_ID" }
+  // ],
+
+  "observability": {
+    "enabled": true
+  }
+}
