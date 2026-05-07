@@ -1306,9 +1306,16 @@ interface PageProps {
 export default function WorkspacePage({ params }: PageProps) {
   const { clientId } = use(params);
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
+  const batchUpdateAccountsOuter = useWorkspaceStore((s) => s.batchUpdateAccounts);
+  const setValuesOuter = useWorkspaceStore((s) => s.setValues);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [hydrated, setHydrated] = useState(false);
   const tourHook = useTour();
+
+  const clearWorkspaceData = useCallback((wsId: string) => {
+    batchUpdateAccountsOuter(wsId, []);
+    setValuesOuter(wsId, []);
+  }, [batchUpdateAccountsOuter, setValuesOuter]);
   useEffect(() => {
     // If already hydrated (e.g. store was reused), skip waiting
     if (useWorkspaceStore.persist.hasHydrated()) {
@@ -1402,6 +1409,19 @@ export default function WorkspacePage({ params }: PageProps) {
             >
               {workspace.scenarios.length} scenarios
             </div>
+            <button
+              type="button"
+              data-testid="clear-data-btn"
+              onClick={() => {
+                if (window.confirm('Clear all imported data? Accounts and values will be removed. Scenarios are kept.')) {
+                  clearWorkspaceData(clientId);
+                }
+              }}
+              className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-red-50"
+              style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--destructive))' }}
+            >
+              Clear Data
+            </button>
           </div>
         </div>
       </header>

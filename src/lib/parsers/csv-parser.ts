@@ -234,10 +234,11 @@ export function detectColumnMapping(headers: string[]): ColumnMapping {
     usedIndices.add(0);
   }
 
-  // Second pass: identify period columns
+  // Second pass: identify period columns (skip summary columns like 'Total')
   for (let i = 0; i < headers.length; i++) {
     if (usedIndices.has(i)) continue;
     const h = (headers[i] ?? '').trim();
+    if (isSummaryColumn(h)) { usedIndices.add(i); continue; }
     const expanded = expandPeriodHeader(h);
     if (expanded) {
       periodColumns.push({ header: h, period: expanded.firstPeriod });
@@ -258,9 +259,42 @@ export function detectColumnMapping(headers: string[]): ColumnMapping {
 // Totals row detection
 // ─────────────────────────────────────────────
 
-/** Returns true if the account name looks like a QBO totals/subtotal row that should be skipped. */
+/**
+ * Returns true if the account name looks like a QBO totals/subtotal/section-header
+ * row that should be skipped.
+ *
+ * Skips:
+ * - "Total for Income", "Total for COGS", etc.
+ * - "Net Operating Income", "Net Income", "Gross Profit" (subtotal summary lines)
+ * - "Total for Expenses", "Total for Liabilities", etc.
+ * - Pure section headers: "Income", "Cost of Goods Sold", "Expenses",
+ *   "Assets", "Liabilities", "Equity", "Current Assets", etc.
+ *   (rows that are category labels with no account-level data)
+ */
 function isTotalsRow(name: string): boolean {
-  return /^\s*(total|subtotal|net|grand\s+total)\b/i.test(name);
+  const trimmed = name.trim();
+  // Explicit total/subtotal/net patterns
+  if (/^(total|subtotal|net|grand\s+total)\b/i.test(trimmed)) return true;
+  // QBO section header labels — these are category groupings, not leaf accounts
+  const SECTION_HEADERS = [
+    'income', 'cost of goods sold', 'cogs', 'expenses', 'expense',
+    'other income', 'other expenses', 'other expense',
+    'assets', 'current assets', 'fixed assets', 'other assets',
+    'liabilities', 'current liabilities', 'long-term liabilities',
+    'equity', 'bank accounts', 'other current assets',
+    'other current liabilities', 'credit cards',
+    'liabilities and equity',
+  ];
+  if (SECTION_HEADERS.includes(trimmed.toLowerCase())) return true;
+  return false;
+}
+
+/**
+ * Returns true if this column header should be skipped as a non-period summary column.
+ * Handles QBO's trailing "Total" column.
+ */
+function isSummaryColumn(header: string): boolean {
+  return /^\s*total\s*$/i.test(header.trim());
 }
 
 // ─────────────────────────────────────────────
@@ -362,9 +396,28 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
     };
   }
 
-  // First row is headers
-  const rawHeaders: string[] = (data[0] ?? []).map((h) => String(h ?? '').trim());
-  const dataRows = data.slice(1);
+  // ── Find the real header row ──────────────────────────────────────────────
+  // QBO exports often have 2-4 preamble rows (title, company name, date range,
+  // blank) before the actual column headers. The real header row is the first
+  // row that contains at least one recognisable period-style column (e.g. "Jan-22",
+  // "Jan 2024") OR a recognisable account-name header ("Account", "Name", or a
+  // blank first cell followed by period-like values in subsequent cells).
+  // We scan up to the first 10 rows to find it.
+  let headerRowIndex = 0;
+  for (let i = 0; i < Math.min(10, data.length); i++) {
+    const row = data[i] ?? [];
+    const hasPeriodCol = row.some((cell) => expandPeriodHeader(String(cell ?? '').trim()) !== null);
+    // Also accept a row whose first cell is blank/empty (QBO P&L style: first cell = account name header, blank)
+    const firstCellBlank = String(row[0] ?? '').trim() === '';
+    const secondCellIsPeriod = row.length > 1 && expandPeriodHeader(String(row[1] ?? '').trim()) !== null;
+    if (hasPeriodCol || (firstCellBlank && secondCellIsPeriod)) {
+      headerRowIndex = i;
+      break;
+    }
+  }
+
+  const rawHeaders: string[] = (data[headerRowIndex] ?? []).map((h) => String(h ?? '').trim());
+  const dataRows = data.slice(headerRowIndex + 1);
 
   const columnMapping = detectColumnMapping(rawHeaders);
   const { accountNameColumn, accountNumberColumn } = columnMapping;
@@ -387,6 +440,8 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
   const richPeriodCols: RichPeriodCol[] = [];
   for (let i = 0; i < rawHeaders.length; i++) {
     const h = rawHeaders[i] ?? '';
+    // Skip summary columns like QBO's trailing "Total" column
+    if (isSummaryColumn(h)) continue;
     const expanded = expandPeriodHeader(h);
     if (expanded) {
       richPeriodCols.push({ colIndex: i, ...expanded });

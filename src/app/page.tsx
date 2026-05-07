@@ -167,32 +167,49 @@ function ProfileCard({
 function WorkspaceCard({
   workspace,
   onClick,
+  onDelete,
 }: {
   workspace: ClientWorkspace;
   onClick: () => void;
+  onDelete: (e: React.MouseEvent) => void;
 }) {
   const profile = ALL_PROFILES.find((p) => p.id === workspace.industryProfileId);
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-testid={`workspace-card-${workspace.id}`}
-      className="text-left rounded-xl border p-4 hover:bg-muted/50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    <div
+      className="relative group rounded-xl border transition-colors"
       style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
     >
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-lg">{profile?.icon ?? '🏢'}</span>
-        <span className="font-semibold text-sm" style={{ color: 'hsl(var(--foreground))' }}>
-          {workspace.name}
-        </span>
-      </div>
-      <div className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
-        {profile?.name} · {workspace.accounts.length} accounts
-      </div>
-      <div className="text-xs mt-0.5" style={{ color: 'hsl(var(--muted-foreground))' }}>
-        {new Date(workspace.createdAt).toLocaleDateString()}
-      </div>
-    </button>
+      <button
+        type="button"
+        onClick={onClick}
+        data-testid={`workspace-card-${workspace.id}`}
+        className="text-left w-full p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl"
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-lg">{profile?.icon ?? '🏢'}</span>
+          <span className="font-semibold text-sm" style={{ color: 'hsl(var(--foreground))' }}>
+            {workspace.name}
+          </span>
+        </div>
+        <div className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          {profile?.name} · {workspace.accounts.length} accounts
+        </div>
+        <div className="text-xs mt-0.5" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          {new Date(workspace.createdAt).toLocaleDateString()}
+        </div>
+      </button>
+      {/* Delete button — visible on hover */}
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label="Delete workspace"
+        data-testid={`delete-workspace-${workspace.id}`}
+        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity rounded-md w-6 h-6 flex items-center justify-center text-xs"
+        style={{ background: 'hsl(var(--destructive) / 0.1)', color: 'hsl(var(--destructive))' }}
+      >
+        ✕
+      </button>
+    </div>
   );
 }
 
@@ -363,7 +380,7 @@ function buildAccountsFromParseResult(
 
 export default function HomePage() {
   const router = useRouter();
-  const { workspaces, addWorkspace, setActiveWorkspace } = useWorkspaceStore();
+  const { workspaces, addWorkspace, setActiveWorkspace, deleteWorkspace } = useWorkspaceStore();
   const tourHook = useTour();
 
   const [step, setStep] = useState<Step>('profile');
@@ -557,13 +574,15 @@ export default function HomePage() {
         </div>
         <div className="flex items-center gap-3">
           <HelpButton onOpen={() => tourHook.openTour(0)} />
-          <Link
-            href="/dev"
-            className="text-sm font-medium transition-colors"
-            style={{ color: 'hsl(var(--muted-foreground))' }}
-          >
-            Dev Inspector →
-          </Link>
+          {process.env.NODE_ENV === 'development' && (
+            <Link
+              href="/dev"
+              className="text-sm font-medium transition-colors"
+              style={{ color: 'hsl(var(--muted-foreground))' }}
+            >
+              Dev Inspector →
+            </Link>
+          )}
         </div>
       </header>
 
@@ -640,12 +659,17 @@ export default function HomePage() {
             {/* Recent workspaces */}
             {workspaces.length > 0 && (
               <div>
-                <p
-                  className="text-xs font-medium uppercase tracking-wide mb-3"
-                  style={{ color: 'hsl(var(--muted-foreground))' }}
-                >
-                  Recent Workspaces
-                </p>
+                <div className="flex items-center justify-between mb-3">
+                  <p
+                    className="text-xs font-medium uppercase tracking-wide"
+                    style={{ color: 'hsl(var(--muted-foreground))' }}
+                  >
+                    Recent Workspaces
+                  </p>
+                  <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                    Saved in this browser only
+                  </span>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {workspaces
                     .slice(-6)
@@ -655,6 +679,12 @@ export default function HomePage() {
                         key={ws.id}
                         workspace={ws}
                         onClick={() => router.push(`/workspace/${ws.id}`)}
+                        onDelete={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`Delete "${ws.name}"? This cannot be undone.`)) {
+                            deleteWorkspace(ws.id);
+                          }
+                        }}
                       />
                     ))}
                 </div>
