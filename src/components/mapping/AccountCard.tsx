@@ -14,6 +14,25 @@ export interface AccountCardProps {
   onClick?: () => void;
   /** When true, renders without the useDraggable hook (e.g. inside DragOverlay) */
   isOverlay?: boolean;
+  /**
+   * When true, renders the card with an amber "Review" badge.
+   * An account needs review when it was auto-classified with low (or no) confidence
+   * and has not yet been manually confirmed.
+   */
+  needsReview?: boolean;
+}
+
+/**
+ * Returns true if an account needs user review:
+ * - not manually classified AND
+ * - confidence is 'low' OR confidence is undefined
+ */
+export function accountNeedsReview(account: Account): boolean {
+  return (
+    !account.isManuallyClassified &&
+    (account.classificationConfidence === 'low' ||
+      account.classificationConfidence === undefined)
+  );
 }
 
 function ConfidenceBadge({ level }: { level: string | undefined }) {
@@ -40,6 +59,7 @@ function AccountCardInner({
   isDragging,
   conflictWarning,
   onClick,
+  needsReview,
   dragHandleProps,
 }: AccountCardProps & { dragHandleProps?: Record<string, unknown> }) {
   const [showTooltip, setShowTooltip] = useState(false);
@@ -62,9 +82,22 @@ function AccountCardInner({
       }}
       {...dragHandleProps}
     >
+      {/* Unreviewed amber dot indicator */}
+      {needsReview && (
+        <div
+          className="absolute top-1.5 left-1.5 flex items-center gap-1"
+          title="Needs review — low classification confidence"
+        >
+          <span
+            className="inline-block h-2 w-2 rounded-full"
+            style={{ background: 'hsl(38 92% 50%)' }}
+          />
+        </div>
+      )}
+
       {/* Top row */}
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-center gap-1.5 min-w-0" style={{ paddingLeft: needsReview ? '14px' : undefined }}>
           {account.number && (
             <span
               className="font-mono text-xs shrink-0"
@@ -81,6 +114,14 @@ function AccountCardInner({
           </span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          {needsReview && (
+            <span
+              className="rounded px-1 py-0.5 text-xs font-medium"
+              style={{ background: 'hsl(38 92% 50% / 0.15)', color: 'hsl(38 80% 35%)' }}
+            >
+              Review
+            </span>
+          )}
           {conflictWarning && (
             <div className="relative">
               <button

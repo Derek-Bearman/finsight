@@ -45,6 +45,12 @@ export interface Account {
   mixedFixedPercent?: number;
   parentId?: string;
   isManuallyClassified: boolean;
+  /**
+   * When true, this account is excluded from all calculations.
+   * Used for summary/subtotal rows (e.g. "Net Income", "Gross Profit") that
+   * QBO sometimes exports as data rows — including them would double-count.
+   */
+  isExcluded?: boolean;
   /** Which classifier hint fired */
   classificationSource?: 'account_number' | 'baseline_keyword' | 'profile_keyword' | 'manual';
   classificationConfidence?: ConfidenceLevel;

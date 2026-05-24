@@ -275,6 +275,13 @@ function isTotalsRow(name: string): boolean {
   const trimmed = name.trim();
   // Explicit total/subtotal/net patterns
   if (/^(total|subtotal|net|grand\s+total)\b/i.test(trimmed)) return true;
+  // Explicit QBO P&L summary row names that must always be excluded
+  const EXPLICIT_TOTALS = [
+    'total revenue', 'total income', 'total expenses', 'total expense',
+    'total cost of goods sold', 'total cogs', 'total other income',
+    'total other expenses', 'total other expense',
+  ];
+  if (EXPLICIT_TOTALS.includes(trimmed.toLowerCase())) return true;
   // QBO section header labels — these are category groupings, not leaf accounts
   const SECTION_HEADERS = [
     'income', 'cost of goods sold', 'cogs', 'expenses', 'expense',
@@ -287,6 +294,32 @@ function isTotalsRow(name: string): boolean {
   ];
   if (SECTION_HEADERS.includes(trimmed.toLowerCase())) return true;
   return false;
+}
+
+/**
+ * Remove parent rows when they have child rows.
+ * In QBO P&L exports, parent category rows (lower indentLevel) repeat the sum
+ * of their children — importing both would double-count revenue/expenses.
+ * We keep only the leaf (child) rows and drop any row immediately followed by
+ * a row with a HIGHER indent level (indicating the prior row is a parent).
+ *
+ * Only applied for P&L data (revenue/expense sections). Balance sheet assets /
+ * liabilities have a different structure and are not affected because their
+ * section headers are already removed by isTotalsRow.
+ */
+function deduplicateParentRows(rows: ParsedRow[]): ParsedRow[] {
+  if (rows.length === 0) return rows;
+  const result: ParsedRow[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    const nextRow = rows[i + 1];
+    // If the very next row has a HIGHER indent level, this row is a parent — skip it
+    if (nextRow && nextRow.indentLevel > row.indentLevel) {
+      continue; // drop the parent row to avoid double-counting
+    }
+    result.push(row);
+  }
+  return result;
 }
 
 /**
@@ -514,8 +547,13 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
       rawHeaders,
     );
 
+  // Remove parent rows whose values are the sum of their children (QBO hierarchy).
+  // Applies only for P&L exports; balance sheet parent rows are already removed
+  // via isTotalsRow. This prevents double-counting of revenue/expense categories.
+  const deduped = deduplicateParentRows(rows);
+
   return {
-    rows,
+    rows: deduped,
     columnMapping,
     detectedStatementType,
     rawHeaders,

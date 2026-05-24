@@ -54,6 +54,26 @@ export function ColumnMappingPreview({
 
   const periodCount = Object.values(roles).filter((r) => r === 'period').length;
 
+  // Compute date range for period columns
+  const periodDateRange = (() => {
+    const sortedPeriods = [...mapping.periodColumns].sort(
+      (a, b) =>
+        a.period.year !== b.period.year
+          ? a.period.year - b.period.year
+          : a.period.month - b.period.month
+    );
+    if (sortedPeriods.length === 0) return null;
+    const first = sortedPeriods[0]!;
+    const last = sortedPeriods[sortedPeriods.length - 1]!;
+    const fmt = (p: { period: { year: number; month: number } }) =>
+      new Date(p.period.year, p.period.month - 1).toLocaleDateString('en-US', {
+        month: 'short',
+        year: 'numeric',
+      });
+    if (first === last) return fmt(first);
+    return `${fmt(first)} – ${fmt(last)}`;
+  })();
+
   const buildUpdatedMapping = (): ColumnMapping => {
     const accountNameColumn =
       Object.entries(roles).find(([, r]) => r === 'account_name')?.[0] ?? mapping.accountNameColumn;
@@ -95,16 +115,34 @@ export function ColumnMappingPreview({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between">
         <div>
           <h3 className="text-base font-semibold">Review Column Mapping</h3>
           <p className="text-sm mt-0.5" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            Confirm how each column maps to data fields.{' '}
-            <span className="font-medium" style={{ color: 'hsl(var(--foreground))' }}>
-              {periodCount} period {periodCount === 1 ? 'column' : 'columns'} detected
-            </span>
+            Confirm how each column maps to data fields.
           </p>
         </div>
+        {/* Period detection badge — prominent, with date range */}
+        {periodCount > 0 && (
+          <div
+            className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shrink-0"
+            style={{
+              borderColor: 'hsl(142 76% 36% / 0.4)',
+              background: 'hsl(142 76% 36% / 0.08)',
+              color: 'hsl(142 76% 28%)',
+            }}
+          >
+            <span>&#10003;</span>
+            <span>
+              {periodCount} period {periodCount === 1 ? 'column' : 'columns'} detected
+              {periodDateRange && (
+                <span className="font-normal ml-1" style={{ color: 'hsl(142 76% 34%)' }}>
+                  ({periodDateRange})
+                </span>
+              )}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Column role editor */}
@@ -130,6 +168,8 @@ export function ColumnMappingPreview({
             {headers.map((header, idx) => {
               const role = roles[header];
               const periodLabel = getPeriodLabel(header, mapping);
+              // Lock account_name and account_number columns — no dropdown needed
+              const isLocked = role === 'account_name' || role === 'account_number';
               return (
                 <tr
                   key={header}
@@ -141,23 +181,39 @@ export function ColumnMappingPreview({
                     {header}
                   </td>
                   <td className="px-4 py-2">
-                    <select
-                      value={role}
-                      onChange={(e) => handleRoleChange(header, e.target.value as ColumnRole)}
-                      data-testid={`role-select-${idx}`}
-                      className="rounded-md border px-2 py-1 text-sm outline-none focus:ring-2"
-                      style={{
-                        borderColor: 'hsl(var(--border))',
-                        background: 'hsl(var(--background))',
-                        color: 'hsl(var(--foreground))',
-                      }}
-                    >
-                      {(Object.entries(ROLE_LABELS) as [ColumnRole, string][]).map(([val, label]) => (
-                        <option key={val} value={val}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
+                    {isLocked ? (
+                      // Fixed badge for auto-detected account name/number columns
+                      <span
+                        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium"
+                        style={{
+                          borderColor: 'hsl(var(--border))',
+                          background: 'hsl(142 76% 36% / 0.08)',
+                          color: 'hsl(142 76% 28%)',
+                        }}
+                        title="Auto-detected — no change needed"
+                      >
+                        <span>&#10003;</span>
+                        {ROLE_LABELS[role]}
+                      </span>
+                    ) : (
+                      <select
+                        value={role}
+                        onChange={(e) => handleRoleChange(header, e.target.value as ColumnRole)}
+                        data-testid={`role-select-${idx}`}
+                        className="rounded-md border px-2 py-1 text-sm outline-none focus:ring-2"
+                        style={{
+                          borderColor: 'hsl(var(--border))',
+                          background: 'hsl(var(--background))',
+                          color: 'hsl(var(--foreground))',
+                        }}
+                      >
+                        {(Object.entries(ROLE_LABELS) as [ColumnRole, string][]).map(([val, label]) => (
+                          <option key={val} value={val}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </td>
                   <td className="px-4 py-2">
                     {role === 'period' && periodLabel && (

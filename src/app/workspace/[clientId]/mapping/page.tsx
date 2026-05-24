@@ -131,6 +131,15 @@ export default function MappingPage({ params }: PageProps) {
   const profile = getProfile(workspace.industryProfileId);
   const manualCount = workspace.accounts.filter((a) => a.isManuallyClassified).length;
 
+  // An account is "reviewed" if it was manually classified OR has high/medium confidence.
+  // Once all accounts are reviewed, show the "Ready to analyze" banner.
+  const unreviewedCount = workspace.accounts.filter(
+    (a) =>
+      !a.isManuallyClassified &&
+      (a.classificationConfidence === 'low' || a.classificationConfidence === undefined)
+  ).length;
+  const allReviewed = unreviewedCount === 0 && workspace.accounts.length > 0;
+
   return (
     <div className="min-h-screen" style={{ background: 'hsl(var(--background))' }}>
       {/* Header */}
@@ -191,6 +200,36 @@ export default function MappingPage({ params }: PageProps) {
               onAuditEntry={handleAuditEntry}
               onRememberMapping={handleRememberMapping}
             />
+          )}
+
+          {/* Ready-to-analyze banner — appears once all accounts have been reviewed */}
+          {allReviewed && (
+            <div
+              className="mt-4 flex items-center justify-between rounded-xl border px-5 py-4"
+              style={{
+                borderColor: 'hsl(142 76% 36% / 0.4)',
+                background: 'hsl(142 76% 36% / 0.06)',
+              }}
+            >
+              <div>
+                <p className="text-sm font-semibold" style={{ color: 'hsl(142 76% 28%)' }}>
+                  ✓ All accounts reviewed
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: 'hsl(142 76% 34%)' }}>
+                  Your account mapping is complete and ready for financial analysis.
+                </p>
+              </div>
+              <Link
+                href={`/workspace/${clientId}/reports`}
+                className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-colors"
+                style={{
+                  background: 'hsl(142 76% 36%)',
+                  color: '#fff',
+                }}
+              >
+                View Reports →
+              </Link>
+            </div>
           )}
         </div>
       </main>

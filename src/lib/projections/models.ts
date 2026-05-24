@@ -140,8 +140,19 @@ export function projectLinear(input: ProjectionInput): ProjectionOutput {
     return { projected, model: 'linear', impliedGrowthRate: 0, residualStdDev: 0 };
   }
 
-  const xs = history.map((_, i) => i);
-  const ys = history.map((h) => h.amount);
+  // Recent-weighted regression: when history is longer than 12 months, duplicate
+  // the last 12 months' data points to give them 2x weight. This makes the trend
+  // more responsive to recent performance and prevents old weak data from dragging
+  // down projections for growing businesses.
+  let xs = history.map((_, i) => i);
+  let ys = history.map((h) => h.amount);
+
+  if (n > 12) {
+    const recentXs = xs.slice(n - 12);
+    const recentYs = ys.slice(n - 12);
+    xs = [...xs, ...recentXs];
+    ys = [...ys, ...recentYs];
+  }
 
   let { slope, intercept } = linearRegression(xs, ys);
 
@@ -153,15 +164,17 @@ export function projectLinear(input: ProjectionInput): ProjectionOutput {
     intercept = lastY - slope * (n - 1);
   }
 
-  // Residuals for historical points
-  const residuals = ys.map((y, i) => y - (intercept + slope * i));
+  // Residuals for historical points — always computed on original (unweighted) history
+  const origXs = history.map((_, i) => i);
+  const origYs = history.map((h) => h.amount);
+  const residuals = origYs.map((y, i) => y - (intercept + slope * i));
   const residualSd = stddev(residuals);
 
-  const xMean = xs.reduce((s, v) => s + v, 0) / n;
-  const ssxx = xs.reduce((s, x) => s + (x - xMean) ** 2, 0);
+  const xMean = origXs.reduce((s, v) => s + v, 0) / n;
+  const ssxx = origXs.reduce((s, x) => s + (x - xMean) ** 2, 0);
 
   const lastPeriod = history[n - 1]!.period;
-  const lastHistorical = ys[n - 1]!;
+  const lastHistorical = origYs[n - 1]!;
   const projected: ProjectionPoint[] = [];
 
   for (let i = 1; i <= horizonMonths; i++) {
@@ -203,8 +216,9 @@ export function projectSeasonal(input: ProjectionInput): ProjectionOutput {
   const history = fillGaps(input.history);
   const n = history.length;
 
-  // Need at least 13 months of history; fall back to linear if fewer
-  if (n < 13) {
+  // Need at least 24 months of history for reliable seasonal indices (each month
+  // bucket needs ≥2 observations). Fall back to linear if fewer than 24.
+  if (n < 24) {
     return projectLinear({ ...input, model: 'linear' });
   }
 
@@ -240,6 +254,22 @@ export function projectSeasonal(input: ProjectionInput): ProjectionOutput {
   const siSum = rawSeasonalIndices.reduce((s, v) => s + v, 0);
   if (siSum > 0) {
     rawSeasonalIndices = rawSeasonalIndices.map((si) => (si * 12) / siSum);
+  }
+
+  // Clamp seasonal indices to a plausible range: [0.3, 3.0].
+  // A seasonal index below 0.3 (70%+ drop from average) or above 3.0 (3× spike)
+  // almost always reflects noise from too few observations rather than real
+  // seasonality. Extreme indices cause projected values to collapse or explode.
+  const SEASONAL_INDEX_MIN = 0.3;
+  const SEASONAL_INDEX_MAX = 3.0;
+  rawSeasonalIndices = rawSeasonalIndices.map((si) =>
+    Math.min(SEASONAL_INDEX_MAX, Math.max(SEASONAL_INDEX_MIN, si))
+  );
+
+  // Re-normalize after clamping so indices still sum to 12
+  const siSumClamped = rawSeasonalIndices.reduce((s, v) => s + v, 0);
+  if (siSumClamped > 0) {
+    rawSeasonalIndices = rawSeasonalIndices.map((si) => (si * 12) / siSumClamped);
   }
 
   const seasonalIndices = rawSeasonalIndices;
@@ -320,6 +350,12 @@ export function projectYoY(input: ProjectionInput): ProjectionOutput {
     annualRate = trailing12 / prior12 - 1;
   } else {
     annualRate = 0;
+  }
+
+  // Cap negative (decline) projections at -30% annually to prevent runaway
+  // extrapolation from a single bad year. Only floor the downside; no cap on upside.
+  if (annualRate < -0.3) {
+    annualRate = -0.3;
   }
 
   const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;

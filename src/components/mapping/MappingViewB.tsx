@@ -61,9 +61,14 @@ export function MappingViewB({
 
   const latestAmounts = getLatestAmounts(workspace.accounts, workspace.values);
 
-  // Only COGS and expense accounts
+  // Only COGS and expense accounts are eligible for cost behavior classification.
+  // Revenue accounts have no cost behavior (they ARE the revenue).
+  // Asset, liability, and equity are balance sheet accounts — cost behavior
+  // (fixed/variable/mixed) is a P&L concept and is meaningless for them.
+  // Excluded accounts (isExcluded=true) are also omitted since they don't participate
+  // in any calculations.
   const eligible = workspace.accounts.filter(
-    (a) => a.type === 'cogs' || a.type === 'expense'
+    (a) => (a.type === 'cogs' || a.type === 'expense') && !a.isExcluded
   );
 
   const columnAccounts = (behavior: CostBehavior) =>

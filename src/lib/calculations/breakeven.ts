@@ -64,7 +64,8 @@ function computeBreakevenCosts(
   let fixedCosts = 0;
   let variableCosts = 0;
 
-  const expenseAccounts = accounts.filter(a => a.type === 'expense');
+  // Filter out excluded accounts (summary/subtotal rows) to prevent double-counting.
+  const expenseAccounts = accounts.filter(a => a.type === 'expense' && !a.isExcluded);
 
   for (const acc of expenseAccounts) {
     const amount = amountByAccount.get(acc.id) ?? 0;

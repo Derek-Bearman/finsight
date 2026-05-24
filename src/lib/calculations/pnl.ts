@@ -82,6 +82,8 @@ function isMarketing(account: Account): boolean {
 
 /**
  * Sum all amounts for accounts of the given types in the given period(s).
+ * Accounts with isExcluded=true are always filtered out to prevent double-counting
+ * summary rows (e.g. "Net Income", "Gross Profit") exported by QBO.
  */
 export function sumByType(
   accounts: Account[],
@@ -92,7 +94,9 @@ export function sumByType(
   const periodArr = normalizePeriods(periods);
   const periodKeys = new Set(periodArr.map(periodToKey));
   const typeSet = new Set(types);
-  const accountIds = new Set(accounts.filter(a => typeSet.has(a.type)).map(a => a.id));
+  const accountIds = new Set(
+    accounts.filter(a => typeSet.has(a.type) && !a.isExcluded).map(a => a.id)
+  );
 
   const filtered = filterValues(filterByAccounts(values, accountIds), periodKeys);
   return sumAmounts(filtered);

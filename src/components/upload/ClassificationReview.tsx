@@ -12,11 +12,20 @@ interface ClassificationReviewProps {
   profileId: string;
   onConfirm: (accounts: Account[]) => void;
   onBack: () => void;
+  /**
+   * Restricts which account types appear in the Type dropdown.
+   * 'pnl' shows: revenue, cogs, expense
+   * 'balance_sheet' shows: asset, liability, equity
+   * Omit to show all types (default behaviour).
+   */
+  statementType?: 'pnl' | 'balance_sheet';
 }
 
 type FilterMode = 'all' | 'review' | 'manual';
 
-const ACCOUNT_TYPES: AccountType[] = ['revenue', 'cogs', 'expense', 'asset', 'liability', 'equity'];
+const ALL_ACCOUNT_TYPES: AccountType[] = ['revenue', 'cogs', 'expense', 'asset', 'liability', 'equity'];
+const PNL_ACCOUNT_TYPES: AccountType[] = ['revenue', 'cogs', 'expense'];
+const BS_ACCOUNT_TYPES: AccountType[] = ['asset', 'liability', 'equity'];
 const COST_BEHAVIORS: CostBehavior[] = ['variable', 'fixed', 'mixed', 'unclassified'];
 
 const CONFIDENCE_STYLES: Record<ConfidenceLevel, { bg: string; text: string; label: string }> = {
@@ -37,7 +46,15 @@ export function ClassificationReview({
   classificationResults,
   onConfirm,
   onBack,
+  statementType,
 }: ClassificationReviewProps) {
+  // Determine which account type options to show based on statement type
+  const accountTypeOptions: AccountType[] =
+    statementType === 'pnl'
+      ? PNL_ACCOUNT_TYPES
+      : statementType === 'balance_sheet'
+      ? BS_ACCOUNT_TYPES
+      : ALL_ACCOUNT_TYPES;
   const [localAccounts, setLocalAccounts] = useState<Account[]>(accounts);
   const [filter, setFilter] = useState<FilterMode>('all');
 
@@ -184,7 +201,7 @@ export function ClassificationReview({
                         color: 'hsl(var(--foreground))',
                       }}
                     >
-                      {ACCOUNT_TYPES.map((t) => (
+                      {accountTypeOptions.map((t) => (
                         <option key={t} value={t}>
                           {t}
                         </option>

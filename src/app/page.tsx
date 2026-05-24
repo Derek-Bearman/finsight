@@ -19,6 +19,30 @@ import { parseCSV } from '@/lib/parsers/csv-parser';
 import { classifyAll } from '@/lib/classifiers';
 import { validateImport } from '@/lib/parsers/import-validator';
 
+// ── Auto-exclude summary line names ─────────────────────────────────────────
+
+/**
+ * Account names that are subtotals/summaries rather than individual GL lines.
+ * QBO and other systems sometimes export these as data rows — including them
+ * in calculations would double-count figures.
+ */
+const AUTO_EXCLUDE_NAMES = new Set([
+  'net income',
+  'net profit',
+  'net loss',
+  'gross profit',
+  'gross margin',
+  'operating income',
+  'operating profit',
+  'total income',
+  'total revenue',
+  'total expenses',
+  'total cost of goods sold',
+  'net operating income',
+  'net other income',
+  'net revenue',
+]);
+
 // ── Wizard steps ────────────────────────────────────────────────────────────
 
 type Step = 'profile' | 'pnl' | 'balance_sheet' | 'classify' | 'done';
@@ -226,6 +250,10 @@ interface UploadStepProps {
   onSkip: () => void;
   onShowManual: () => void;
   showManual: boolean;
+  /** Called when user clicks "Continue" from the done state */
+  onContinue?: () => void;
+  /** Called when user clicks "Replace file" from the done state */
+  onReplace?: () => void;
 }
 
 function UploadStep({
@@ -239,6 +267,8 @@ function UploadStep({
   onSkip,
   onShowManual,
   showManual,
+  onContinue,
+  onReplace,
 }: UploadStepProps) {
   if (state.phase === 'mapping' && state.mapping) {
     return (
@@ -254,22 +284,42 @@ function UploadStep({
 
   if (state.phase === 'done') {
     return (
-      <div className="flex flex-col items-center gap-3 py-8 text-center">
+      <div className="flex flex-col items-center gap-4 py-8 text-center">
         <div
           className="flex h-12 w-12 items-center justify-center rounded-full text-2xl"
-          style={{ background: 'hsl(var(--accent))' }}
+          style={{ background: 'hsl(142 76% 36% / 0.15)' }}
         >
-          ✓
+          <span style={{ color: 'hsl(142 76% 36%)' }}>✓</span>
         </div>
-        <p className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
-          {state.accounts.length} accounts imported
-        </p>
-        <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
-          {state.file?.name}
-        </p>
+        <div>
+          <p className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
+            <span style={{ color: 'hsl(142 76% 36%)' }}>✓</span>{' '}
+            {state.file?.name} — {state.accounts.length} accounts imported
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            File mapping confirmed. Ready to continue.
+          </p>
+        </div>
         {state.warnings.length > 0 && (
           <ImportValidationBanner warnings={state.warnings} />
         )}
+        <div className="flex gap-3 mt-1">
+          {onReplace && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onReplace}
+              data-testid="replace-file"
+            >
+              Replace file
+            </Button>
+          )}
+          {onContinue && (
+            <Button onClick={onContinue} data-testid="upload-continue">
+              Continue →
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
@@ -445,8 +495,7 @@ export default function HomePage() {
       // Apply classification to accounts
       const classifiedAccounts: Account[] = rawAccounts.map((a) => {
         const cr = classifyResults.get(a.id);
-        if (!cr) return a;
-        return {
+        const base = !cr ? a : {
           ...a,
           type: cr.accountType ?? a.type,
           costBehavior: cr.costBehavior ?? undefined,
@@ -455,6 +504,11 @@ export default function HomePage() {
           classificationHintFired: cr.hintFired,
           isManuallyClassified: false,
         };
+        // Auto-exclude summary/subtotal lines that would double-count in calculations
+        const normalizedName = base.name.toLowerCase().trim();
+        return AUTO_EXCLUDE_NAMES.has(normalizedName)
+          ? { ...base, isExcluded: true }
+          : base;
       });
 
       // Validate
@@ -720,6 +774,8 @@ export default function HomePage() {
               onSkip={handlePnlNext}
               onShowManual={() => setShowPnlManual((v) => !v)}
               showManual={showPnlManual}
+              onContinue={handlePnlNext}
+              onReplace={() => setPnlUpload(EMPTY_UPLOAD)}
             />
 
             <div className="flex justify-between">
@@ -762,6 +818,8 @@ export default function HomePage() {
               onSkip={handleBsNext}
               onShowManual={() => setShowBsManual((v) => !v)}
               showManual={showBsManual}
+              onContinue={handleBsNext}
+              onReplace={() => setBsUpload(EMPTY_UPLOAD)}
             />
 
             <div className="flex justify-between">
@@ -789,6 +847,10 @@ export default function HomePage() {
               </p>
             </div>
 
+{/* Derive the statement type for classification filtering.
+               If only P&L was uploaded → restrict to P&L types.
+               If only BS was uploaded → restrict to BS types.
+               If both → show all (undefined). */}
             {mergedAccounts.length === 0 ? (
               <div className="text-center py-8">
                 <p style={{ color: 'hsl(var(--muted-foreground))' }} className="text-sm">
@@ -810,6 +872,13 @@ export default function HomePage() {
                 profileId={selectedProfileId}
                 onConfirm={handleClassifyConfirm}
                 onBack={() => goToStep('balance_sheet')}
+                statementType={
+                  pnlUpload.phase === 'done' && bsUpload.phase !== 'done'
+                    ? 'pnl'
+                    : bsUpload.phase === 'done' && pnlUpload.phase !== 'done'
+                    ? 'balance_sheet'
+                    : undefined
+                }
               />
             )}
           </div>
@@ -860,6 +929,10 @@ export default function HomePage() {
                 </div>
               </dl>
             </div>
+
+            <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
+              Mapping complete. Your workspace is ready for analysis.
+            </p>
 
             <Button
               onClick={() => router.push(`/workspace/${newWorkspaceId}`)}

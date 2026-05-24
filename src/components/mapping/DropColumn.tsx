@@ -3,7 +3,7 @@
 import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import type { Account } from '@/types';
-import { AccountCard } from './AccountCard';
+import { AccountCard, accountNeedsReview } from './AccountCard';
 import { formatCurrency } from '@/lib/utils/accounts';
 
 export interface DropColumnProps {
@@ -17,6 +17,8 @@ export interface DropColumnProps {
   conflictWarnings: Map<string, string>;
   searchQuery: string;
   onCardClick?: (account: Account) => void;
+  /** When true, cards that need review will show the amber Review badge. Default true. */
+  showNeedsReview?: boolean;
 }
 
 export function DropColumn({
@@ -29,6 +31,7 @@ export function DropColumn({
   conflictWarnings,
   searchQuery,
   onCardClick,
+  showNeedsReview = true,
 }: DropColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
@@ -108,6 +111,7 @@ export function DropColumn({
               latestAmount={latestAmounts.get(account.id)}
               conflictWarning={conflictWarnings.get(account.id)}
               onClick={() => onCardClick?.(account)}
+              needsReview={showNeedsReview && accountNeedsReview(account)}
             />
           ))
         )}

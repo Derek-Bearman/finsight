@@ -12,7 +12,8 @@ import { addMonths } from '@/lib/utils/period';
 // ─────────────────────────────────────────────
 
 export interface WorkspaceProjectionOptions {
-  model: ProjectionModel;
+  /** Projection model to use. If not set, falls back to profileDefaultModel then 'linear'. */
+  model?: ProjectionModel;
   horizonMonths: number; // e.g. 12, 36, 60, 120
   growthRateOverride?: number;
 }
@@ -69,9 +70,11 @@ export function projectWorkspace(
   accounts: Account[],
   values: AccountValue[],
   options: WorkspaceProjectionOptions,
-  _profileDefaultModel?: ProjectionModel
+  profileDefaultModel?: ProjectionModel
 ): WorkspaceProjectionResult {
-  const { model, horizonMonths, growthRateOverride } = options;
+  // Model selection: options.model → profileDefaultModel → 'linear'
+  const model: ProjectionModel = options.model ?? profileDefaultModel ?? 'linear';
+  const { horizonMonths, growthRateOverride } = options;
 
   // ── Per-account projections ──────────────────────────────────────────────────
 
@@ -107,7 +110,21 @@ export function projectWorkspace(
 
     const history = acctValues.map((v) => ({ period: v.period, amount: v.amount }));
 
-    const result = project({ history, horizonMonths, model, growthRateOverride });
+    let result = project({ history, horizonMonths, model, growthRateOverride });
+
+    // Sanity check: if the first projected month is more than 80% below the
+    // average of the last 3 actual months, the model has gone badly wrong
+    // (typically from extreme seasonal indices or a regression dominated by
+    // old weak data). Fall back to linear in that case.
+    if (result.model !== 'linear' && result.projected.length > 0 && history.length >= 3) {
+      const lastThree = history.slice(-3);
+      const last3Avg = lastThree.reduce((s, h) => s + h.amount, 0) / lastThree.length;
+      const firstProjected = result.projected[0]!.value;
+      if (last3Avg > 0 && firstProjected < last3Avg * 0.2) {
+        // First projection is >80% below recent average — fall back to linear
+        result = project({ history, horizonMonths, model: 'linear', growthRateOverride });
+      }
+    }
 
     accountProjections.push({ accountId: account.id, model: result.model, points: result.projected });
     projectedByAccount.set(account.id, result.projected);
@@ -291,6 +308,6 @@ export function projectWorkspace(
     accountProjections,
     rolledUp,
     annualSummary,
-    options,
+    options: { ...options, model },
   };
 }
