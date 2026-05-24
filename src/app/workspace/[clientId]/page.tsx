@@ -2,7 +2,7 @@
 
 import React, { use, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { TourOverlay, useTour, HelpButton, TOUR_STEPS } from '@/components/tutorial';
+import { TourOverlay, useTour, HelpButton, WORKSPACE_TOUR_STEPS } from '@/components/tutorial';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { ALL_PROFILES, getProfile } from '@/lib/profiles';
 import { classifyAll, applyClassification } from '@/lib/classifiers';
@@ -1363,7 +1363,7 @@ export default function WorkspacePage({ params }: PageProps) {
     <div className="min-h-screen" style={{ background: 'hsl(var(--background))' }}>
       {tourHook.isOpen && (
         <TourOverlay
-          steps={TOUR_STEPS}
+          steps={WORKSPACE_TOUR_STEPS}
           onComplete={tourHook.completeTour}
           onSkip={tourHook.skipTour}
           startAtStep={tourHook.startStep}

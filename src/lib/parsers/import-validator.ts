@@ -206,6 +206,9 @@ function checkAllZeroAccounts(
 
   const globalPeriods = allPeriodKeys(values);
   if (globalPeriods.size === 0) return [];
+  // Don't flag zero accounts on single-period imports — it's normal for
+  // a sub-account to show $0 in one month (e.g. a revenue stream not used that period).
+  if (globalPeriods.size <= 1) return [];
 
   for (const account of accounts) {
     const accountPeriods = allPeriodsForAccount.get(account.id);
@@ -215,7 +218,7 @@ function checkAllZeroAccounts(
     const nonZero = nonZeroByAccount.get(account.id);
     if (!nonZero || nonZero.size === 0) {
       warnings.push({
-        type: 'balance_sheet_mismatch', // closest available type; using a generic warning
+        type: 'balance_sheet_mismatch',
         severity: 'info',
         accountId: account.id,
         message:

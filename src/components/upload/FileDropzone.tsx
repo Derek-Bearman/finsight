@@ -13,9 +13,9 @@ interface FileDropzoneProps {
 
 export function FileDropzone({
   onFile,
-  accept = '.csv',
-  label = 'Drop a CSV file here or click to browse',
-  sublabel = 'Supports .csv files exported from QuickBooks, Xero, and most accounting systems',
+  accept = '.csv,.xlsx,.xls,.xlsm',
+  label = 'Drop your file here or click to browse',
+  sublabel = 'Supports .csv, .xlsx, and .xls exports from QuickBooks, Xero, and most accounting software',
   disabled = false,
   isLoading = false,
 }: FileDropzoneProps) {

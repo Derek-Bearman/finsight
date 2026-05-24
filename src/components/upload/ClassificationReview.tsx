@@ -29,9 +29,9 @@ const BS_ACCOUNT_TYPES: AccountType[] = ['asset', 'liability', 'equity'];
 const COST_BEHAVIORS: CostBehavior[] = ['variable', 'fixed', 'mixed', 'unclassified'];
 
 const CONFIDENCE_STYLES: Record<ConfidenceLevel, { bg: string; text: string; label: string }> = {
-  high: { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-700 dark:text-green-400', label: 'High' },
-  medium: { bg: 'bg-amber-100 dark:bg-amber-900/30', text: 'text-amber-700 dark:text-amber-400', label: 'Medium' },
-  low: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-400', label: 'Low' },
+  high: { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-800 dark:text-green-300', label: 'High' },
+  medium: { bg: 'bg-amber-50 dark:bg-amber-900/30', text: 'text-amber-900 dark:text-amber-300', label: 'Medium' },
+  low: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-800 dark:text-red-300', label: 'Low' },
 };
 
 const SOURCE_BADGE: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {

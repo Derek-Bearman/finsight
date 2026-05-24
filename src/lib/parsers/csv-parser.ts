@@ -52,17 +52,19 @@ export interface ParsedRow {
  * @returns The parsed numeric value.
  */
 export function parseAmount(raw: string): number {
-  const trimmed = raw.trim();
+  // Strip ALL whitespace including tabs (QBO sometimes exports "$ \t72,500.00")
+  const trimmed = raw.replace(/[\t\r\n]/g, ' ').trim();
   if (trimmed === '' || trimmed === '-') return 0;
 
   // Detect negative via parentheses (before or after dollar sign)
-  const isNegative = trimmed.startsWith('(') || trimmed.startsWith('$(');
+  const isNegative = /[($]/.test(trimmed.slice(0, 2)) && trimmed.includes('(');
 
-  // Strip dollar signs, commas, parentheses
+  // Strip dollar signs, commas, parentheses, spaces, tabs
   const cleaned = trimmed
     .replace(/\$/g, '')
     .replace(/,/g, '')
     .replace(/[()]/g, '')
+    .replace(/\s+/g, '') // strip any remaining whitespace including tabs between $ and number
     .trim();
 
   const value = parseFloat(cleaned);
@@ -440,10 +442,11 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
   for (let i = 0; i < Math.min(10, data.length); i++) {
     const row = data[i] ?? [];
     const hasPeriodCol = row.some((cell) => expandPeriodHeader(String(cell ?? '').trim()) !== null);
-    // Also accept a row whose first cell is blank/empty (QBO P&L style: first cell = account name header, blank)
     const firstCellBlank = String(row[0] ?? '').trim() === '';
     const secondCellIsPeriod = row.length > 1 && expandPeriodHeader(String(row[1] ?? '').trim()) !== null;
-    if (hasPeriodCol || (firstCellBlank && secondCellIsPeriod)) {
+    // QBO single-period: blank first cell + second cell is 'Total' = this is the header row
+    const secondCellIsTotal = row.length > 1 && /^total$/i.test(String(row[1] ?? '').trim());
+    if (hasPeriodCol || (firstCellBlank && secondCellIsPeriod) || (firstCellBlank && secondCellIsTotal && row.length >= 2)) {
       headerRowIndex = i;
       break;
     }
@@ -451,6 +454,28 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
 
   const rawHeaders: string[] = (data[headerRowIndex] ?? []).map((h) => String(h ?? '').trim());
   const dataRows = data.slice(headerRowIndex + 1);
+
+  // ── Single-period 'Total' column handling ────────────────────────────────
+  // QBO single-month exports have a header row of ",Total,,,..." — the data
+  // column is labelled "Total" not a date.  Scan the preamble rows (before
+  // the header row) for a recognisable month string and replace the "Total"
+  // header with it so the period detection works normally.
+  if (rawHeaders.some(h => /^total$/i.test(h)) &&
+      !rawHeaders.some(h => expandPeriodHeader(h) !== null)) {
+    // Look for a period in the preamble rows
+    for (let pi = 0; pi < headerRowIndex; pi++) {
+      const pRow = data[pi] ?? [];
+      for (const cell of pRow) {
+        const periodFromCell = expandPeriodHeader(String(cell ?? '').trim());
+        if (periodFromCell) {
+          // Replace "Total" with the found period header
+          const totalIdx = rawHeaders.findIndex(h => /^total$/i.test(h));
+          if (totalIdx >= 0) rawHeaders[totalIdx] = String(cell ?? '').trim();
+          break;
+        }
+      }
+    }
+  }
 
   const columnMapping = detectColumnMapping(rawHeaders);
   const { accountNameColumn, accountNumberColumn } = columnMapping;

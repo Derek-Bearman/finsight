@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { TourOverlay, useTour, HelpButton, TOUR_STEPS } from '@/components/tutorial';
+import { TourOverlay, useTour, HelpButton, HOME_TOUR_STEPS } from '@/components/tutorial';
 import { ALL_PROFILES, PROFILE_MAP } from '@/lib/profiles';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { FileDropzone } from '@/components/upload/FileDropzone';
@@ -16,6 +16,7 @@ import type { Account, AccountValue, ClientWorkspace, Scenario, ImportValidation
 import type { ColumnMapping, ParsedRow } from '@/lib/parsers/csv-parser';
 import type { ClassificationResult } from '@/lib/classifiers';
 import { parseCSV } from '@/lib/parsers/csv-parser';
+import { xlsxToCsv, isExcelFile, isExcelMimeType } from '@/lib/parsers/xlsx-converter';
 import { classifyAll } from '@/lib/classifiers';
 import { validateImport } from '@/lib/parsers/import-validator';
 
@@ -457,7 +458,14 @@ export default function HomePage() {
   ) => {
     setUpload({ ...EMPTY_UPLOAD, file, isLoading: true, phase: 'idle' });
     try {
-      const text = await file.text();
+      // Support Excel files by converting to CSV first
+      let text: string;
+      if (isExcelFile(file.name) || isExcelMimeType(file.type)) {
+        const buffer = await file.arrayBuffer();
+        text = xlsxToCsv(buffer);
+      } else {
+        text = await file.text();
+      }
       const result = parseCSV(text);
       setUpload({
         file,
@@ -604,7 +612,7 @@ export default function HomePage() {
     <div className="min-h-screen" style={{ background: 'hsl(var(--background))' }}>
       {tourHook.isOpen && (
         <TourOverlay
-          steps={TOUR_STEPS}
+          steps={HOME_TOUR_STEPS}
           onComplete={tourHook.completeTour}
           onSkip={tourHook.skipTour}
           startAtStep={tourHook.startStep}
@@ -765,7 +773,7 @@ export default function HomePage() {
 
             <UploadStep
               title="P&L CSV"
-              subtitle="Upload a monthly P&L report. Supports exports from QuickBooks, Xero, and most accounting platforms."
+              subtitle="Upload a P&L report — CSV or Excel (.xlsx) both work. Exports from QuickBooks, Xero, and most accounting platforms are supported."
               state={pnlUpload}
               profileId={selectedProfileId}
               onFile={(f) => handleFile(f, setPnlUpload)}
