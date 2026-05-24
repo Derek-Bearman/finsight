@@ -29,9 +29,9 @@ const BS_ACCOUNT_TYPES: AccountType[] = ['asset', 'liability', 'equity'];
 const COST_BEHAVIORS: CostBehavior[] = ['variable', 'fixed', 'mixed', 'unclassified'];
 
 const CONFIDENCE_STYLES: Record<ConfidenceLevel, { bg: string; text: string; label: string }> = {
-  high: { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-800 dark:text-green-300', label: 'High' },
-  medium: { bg: 'bg-amber-50 dark:bg-amber-900/30', text: 'text-amber-900 dark:text-amber-300', label: 'Medium' },
-  low: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-800 dark:text-red-300', label: 'Low' },
+  high: { bg: 'bg-green-600', text: 'text-white', label: 'High' },
+  medium: { bg: 'bg-amber-500', text: 'text-white', label: 'Medium' },
+  low: { bg: 'bg-red-500', text: 'text-white', label: 'Low' },
 };
 
 const SOURCE_BADGE: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
@@ -105,14 +105,14 @@ export function ClassificationReview({
           {autoCount} accounts auto-classified
         </span>
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-            ● {highCount} high
+          <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-green-600 text-white">
+            {highCount} high
           </span>
-          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-            ● {mediumCount} medium
+          <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-amber-500 text-white">
+            {mediumCount} medium
           </span>
-          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">
-            ● {lowCount} low
+          <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-red-500 text-white">
+            {lowCount} low
           </span>
         </div>
         {manualCount > 0 && (

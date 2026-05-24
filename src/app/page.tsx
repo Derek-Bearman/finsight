@@ -467,6 +467,28 @@ export default function HomePage() {
         text = await file.text();
       }
       const result = parseCSV(text);
+
+      // Warn if no period columns were detected — the file is likely in a
+      // transposed or unsupported format.
+      if (result.columnMapping.periodColumns.length === 0) {
+        setUpload({
+          ...EMPTY_UPLOAD,
+          file,
+          isLoading: false,
+          phase: 'idle',
+          warnings: [{
+            type: 'negative_revenue',
+            severity: 'error',
+            message:
+              'No date columns detected in this file. FinSight expects a standard QuickBooks P&L export ' +
+              'where months (Jan 2024, Feb 2024…) are columns and accounts are rows. ' +
+              'Try exporting a “Profit and Loss by Month” report from QuickBooks, or check that your ' +
+              'file is not in a transposed (pivot) format.',
+          }],
+        });
+        return;
+      }
+
       setUpload({
         file,
         isLoading: false,

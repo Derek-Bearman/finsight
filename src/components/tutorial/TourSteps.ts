@@ -38,9 +38,8 @@ export const HOME_TOUR_STEPS: TourStep[] = [
   {
     id: 'upload-pnl',
     title: 'Upload your P&L',
-    body: "Export a CSV from QuickBooks or your accounting software and drop it here. FinSight handles parenthetical negatives, dollar signs, QBO formatting quirks, and multi-month exports automatically.",
-    target: '[data-testid="file-dropzone"]',
-    position: 'below',
+    body: "After clicking Continue, you'll reach the upload step. Export a CSV or Excel file from QuickBooks, Xero, or your accounting software and drop it in. FinSight auto-detects column headers, handles QBO formatting quirks, and works with single-month or multi-month exports.",
+    position: 'center',
   },
   {
     id: 'home-done',
