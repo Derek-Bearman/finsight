@@ -71,9 +71,15 @@ function checkBalanceSheetBalance(
     const difference = assets - liabAndEq;
     const absDiff = Math.abs(difference);
 
-    // Flag if |difference| > $1 or > 0.01% of total assets
+    // Flag only when the imbalance is BIG enough to matter — real-world BS
+    // exports (especially those built from typed totals rather than
+    // formula-derived ones) routinely have sub-$10 rounding artifacts that
+    // aren't actionable. Use the LARGER of $10 absolute or 0.01% of assets;
+    // an imbalance must exceed BOTH to fire.
     const pctThreshold = Math.abs(assets) * 0.0001;
-    if (absDiff > 1 || absDiff > pctThreshold) {
+    const dollarFloor = 10;
+    const threshold = Math.max(dollarFloor, pctThreshold);
+    if (absDiff > threshold) {
       warnings.push({
         type: 'balance_sheet_mismatch',
         severity: 'warning',

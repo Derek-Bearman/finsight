@@ -42,6 +42,14 @@ const AUTO_EXCLUDE_NAMES = new Set([
   'net operating income',
   'net other income',
   'net revenue',
+  // Balance Sheet check rows — modeler artifacts, always zero
+  'balance check',
+  'balance check (ta - tle)',
+  'balance check (ta-tle)',
+  'check (ta - tle)',
+  'audit check',
+  'tie-out',
+  'tie out',
 ]);
 
 // ── Wizard steps ────────────────────────────────────────────────────────────
