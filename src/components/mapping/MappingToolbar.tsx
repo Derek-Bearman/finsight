@@ -4,16 +4,39 @@ import React, { useState } from 'react';
 import { AuditLogSheet } from './AuditLogSheet';
 import type { AuditEntry } from '@/types';
 
+export type SourceFilter =
+  | 'all'
+  | 'manual'
+  | 'profile'
+  | 'account_number'
+  | 'auto'
+  | 'needs_review';
+
 export interface MappingToolbarProps {
   view: 'type' | 'behavior';
   onViewChange: (v: 'type' | 'behavior') => void;
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  /** Reset every account to fresh auto-classification (destroys manual overrides). */
   onReset: () => void;
+  /** Re-run auto-classification only on accounts that aren't manually classified. Safe. */
+  onRefreshAuto: () => void;
   totalAccounts: number;
   manualCount: number;
   auditEntries: AuditEntry[];
+  sourceFilter: SourceFilter;
+  onSourceFilterChange: (f: SourceFilter) => void;
+  sourceCounts: Record<Exclude<SourceFilter, 'all'>, number>;
 }
+
+const SOURCE_FILTER_LABELS: Record<SourceFilter, string> = {
+  all: 'All',
+  needs_review: 'Needs Review',
+  manual: 'Manual',
+  profile: 'Profile hint',
+  account_number: 'Account #',
+  auto: 'Auto',
+};
 
 export function MappingToolbar({
   view,
@@ -21,9 +44,13 @@ export function MappingToolbar({
   searchQuery,
   onSearchChange,
   onReset,
+  onRefreshAuto,
   totalAccounts,
   manualCount,
   auditEntries,
+  sourceFilter,
+  onSourceFilterChange,
+  sourceCounts,
 }: MappingToolbarProps) {
   const [auditOpen, setAuditOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -137,7 +164,22 @@ export function MappingToolbar({
             Audit log: {auditEntries.length}
           </button>
 
-          {/* Reset */}
+          {/* Refresh auto-classified — non-destructive */}
+          <button
+            type="button"
+            onClick={onRefreshAuto}
+            className="rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors"
+            style={{
+              borderColor: 'hsl(var(--border))',
+              color: 'hsl(var(--foreground))',
+              background: 'hsl(var(--background))',
+            }}
+            title="Re-run classification on auto-classified accounts only. Manual overrides are preserved."
+          >
+            Refresh auto-classified
+          </button>
+
+          {/* Reset (destructive — wipes manual overrides) */}
           {!confirmReset ? (
             <button
               type="button"
@@ -151,8 +193,9 @@ export function MappingToolbar({
                 cursor: manualCount === 0 ? 'not-allowed' : 'pointer',
                 opacity: manualCount === 0 ? 0.5 : 1,
               }}
+              title="Reset every account — including manual overrides — to fresh auto-classification."
             >
-              Reset to auto-classify
+              Reset all
             </button>
           ) : (
             <div
@@ -189,11 +232,34 @@ export function MappingToolbar({
         </div>
       </div>
 
-      {/* Stats row */}
-      <div className="flex items-center gap-4 px-1 mt-1">
-        <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
-          {totalAccounts} total accounts
+      {/* Source filter row */}
+      <div className="flex flex-wrap items-center gap-1.5 px-1 mt-2">
+        <span
+          className="text-xs font-medium mr-1"
+          style={{ color: 'hsl(var(--muted-foreground))' }}
+        >
+          Filter:
         </span>
+        {(['all', 'needs_review', 'manual', 'profile', 'account_number', 'auto'] as SourceFilter[]).map((f) => {
+          const isActive = sourceFilter === f;
+          const count = f === 'all' ? totalAccounts : sourceCounts[f];
+          return (
+            <button
+              key={f}
+              type="button"
+              onClick={() => onSourceFilterChange(f)}
+              data-testid={`source-filter-${f}`}
+              className="rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors"
+              style={{
+                borderColor: isActive ? 'hsl(var(--primary))' : 'hsl(var(--border))',
+                background: isActive ? 'hsl(var(--primary) / 0.1)' : 'hsl(var(--background))',
+                color: isActive ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))',
+              }}
+            >
+              {SOURCE_FILTER_LABELS[f]} ({count})
+            </button>
+          );
+        })}
       </div>
 
       {/* Audit log slide-over */}

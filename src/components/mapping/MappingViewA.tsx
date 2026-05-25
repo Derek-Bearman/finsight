@@ -17,12 +17,18 @@ import { getProfile } from '@/lib/profiles';
 import { DropColumn } from './DropColumn';
 import { AccountCard, accountNeedsReview } from './AccountCard';
 import { getLatestAmounts, columnTotal } from '@/lib/utils/accounts';
+import type { SourceFilter } from './MappingToolbar';
+import { matchesSourceFilter } from './sourceFilter';
 
 export interface MappingViewAProps {
   workspace: ClientWorkspace;
   onAccountsChange: (accounts: Account[]) => void;
   onAuditEntry: (entry: AuditEntry) => void;
   onRememberMapping: (entry: MappingMemoryEntry) => void;
+  /** Search query lifted to the toolbar */
+  searchQuery: string;
+  /** Source-of-classification filter lifted to the toolbar */
+  sourceFilter: SourceFilter;
 }
 
 interface ColumnDef {
@@ -40,12 +46,22 @@ const COLUMNS: ColumnDef[] = [
   { id: 'equity', label: 'Equity', accentColor: 'hsl(196 94% 48%)' },
 ];
 
-/** Pure function: check if dragging an account to newType conflicts with profile hints */
+/**
+ * Pure function: return a warning string if `newType` contradicts what the
+ * source-document section, profile hints, or account number range imply.
+ * Source-document section wins because it's literal evidence from the file.
+ */
 function getConflictWarning(
   account: Account,
   newType: AccountType,
   hints: ClassificationHint[]
 ): string | undefined {
+  // 1) Section context (the strongest signal — it's where the row literally sat in the file)
+  if (account.detectedSection && account.detectedSection !== newType) {
+    return `Source file placed this under the ${account.detectedSection.toUpperCase()} section`;
+  }
+
+  // 2) Profile hints
   const lower = account.name.toLowerCase();
   for (const hint of hints) {
     if (hint.accountType && hint.accountType !== newType) {
@@ -238,17 +254,26 @@ export function MappingViewA({
   onAccountsChange,
   onAuditEntry,
   onRememberMapping,
+  searchQuery,
+  sourceFilter,
 }: MappingViewAProps) {
   const [activeAccount, setActiveAccount] = useState<Account | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
   const profile = getProfile(workspace.industryProfileId);
 
-  // Count of accounts that need review (low/no confidence, not manually classified)
-  const needsReviewCount = useMemo(
-    () => workspace.accounts.filter(accountNeedsReview).length,
-    [workspace.accounts]
-  );
+  /**
+   * One predicate that combines the toolbar's Source filter + the (lifted)
+   * search query. Applied inside every column so the filter applies
+   * uniformly without duplicating logic in DropColumn.
+   */
+  const visibleInColumn = (account: Account): boolean => {
+    if (!matchesSourceFilter(account, sourceFilter)) return false;
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      account.name.toLowerCase().includes(q) ||
+      (account.number ?? '').toLowerCase().includes(q)
+    );
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
@@ -409,43 +434,8 @@ export function MappingViewA({
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      {/* Search + filter toolbar */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Filter accounts in this view..."
-          className="w-full max-w-sm rounded-lg border px-3 py-1.5 text-sm"
-          style={{
-            borderColor: 'hsl(var(--border))',
-            background: 'hsl(var(--background))',
-            color: 'hsl(var(--foreground))',
-            outline: 'none',
-          }}
-        />
-        {/* Needs Review filter button */}
-        <button
-          type="button"
-          onClick={() => setNeedsReviewOnly((v) => !v)}
-          data-testid="filter-needs-review"
-          className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors"
-          style={{
-            borderColor: needsReviewOnly ? 'hsl(38 92% 50%)' : 'hsl(var(--border))',
-            background: needsReviewOnly ? 'hsl(38 92% 50% / 0.12)' : 'hsl(var(--background))',
-            color: needsReviewOnly ? 'hsl(38 80% 35%)' : 'hsl(var(--muted-foreground))',
-          }}
-          title="Show only accounts with low or missing classification confidence"
-        >
-          <span
-            className="inline-block h-2 w-2 rounded-full"
-            style={{ background: 'hsl(38 92% 50%)' }}
-          />
-          Needs Review ({needsReviewCount})
-        </button>
-      </div>
-
-      {/* Column grid — horizontal scroll on desktop */}
+      {/* Column grid — horizontal scroll on desktop. Search & source-filter
+          state lives in the toolbar above; we just consume it here. */}
       <div
         className="flex gap-3 overflow-x-auto pb-4"
         style={{ alignItems: 'flex-start' }}
@@ -453,7 +443,7 @@ export function MappingViewA({
         {/* Regular account type columns — exclude accounts marked isExcluded from their type column */}
         {COLUMNS.map((col) => {
           const accounts = workspace.accounts.filter(
-            (a) => a.type === col.id && !a.isExcluded && (!needsReviewOnly || accountNeedsReview(a))
+            (a) => a.type === col.id && !a.isExcluded && visibleInColumn(a)
           );
           const total = columnTotal(accounts.map((a) => a.id), latestAmounts);
           return (
@@ -466,10 +456,9 @@ export function MappingViewA({
               latestAmounts={latestAmounts}
               total={total}
               conflictWarnings={conflictWarnings}
-              searchQuery={searchQuery}
-              onCardClick={(account) => {
-                // Clicking opens an inline type select — handled via a custom approach
-                // We'll just let the TypeSelect render inside its own handler
+              searchQuery=""
+              onCardClick={() => {
+                // Clicking opens an inline type select — handled by TypeSelect
               }}
             />
           );
@@ -477,13 +466,9 @@ export function MappingViewA({
 
         {/* Excluded column — for summary/subtotal rows that would double-count */}
         <ExcludedColumn
-          accounts={
-            workspace.accounts.filter(
-              (a) => !!a.isExcluded && (!needsReviewOnly || accountNeedsReview(a))
-            )
-          }
+          accounts={workspace.accounts.filter((a) => !!a.isExcluded && visibleInColumn(a))}
           latestAmounts={latestAmounts}
-          searchQuery={searchQuery}
+          searchQuery=""
           onUnexclude={handleUnexcludeAccount}
         />
       </div>

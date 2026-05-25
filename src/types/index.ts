@@ -56,6 +56,14 @@ export interface Account {
   classificationConfidence?: ConfidenceLevel;
   /** The hint text that triggered classification */
   classificationHintFired?: string;
+  /**
+   * The statement section this account was found under in the source file
+   * (ASSETS / LIABILITIES / EQUITY for a BS; Income / COGS / Expenses for
+   * a P&L). Captured by the parser at import time and persisted so the
+   * classifier can be re-run later AND the mapping UI can warn when the
+   * user's current `type` contradicts the source-document section.
+   */
+  detectedSection?: AccountType;
 }
 
 export interface AccountValue {

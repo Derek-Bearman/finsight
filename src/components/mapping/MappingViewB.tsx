@@ -21,12 +21,18 @@ import { DropColumn } from './DropColumn';
 import { AccountCard } from './AccountCard';
 import { MixedSplitSlider } from './MixedSplitSlider';
 import { getLatestAmounts, columnTotal } from '@/lib/utils/accounts';
+import type { SourceFilter } from './MappingToolbar';
+import { matchesSourceFilter } from './sourceFilter';
 
 export interface MappingViewBProps {
   workspace: ClientWorkspace;
   onAccountsChange: (accounts: Account[]) => void;
   onAuditEntry: (entry: AuditEntry) => void;
   onRememberMapping: (entry: MappingMemoryEntry) => void;
+  /** Search query lifted to the toolbar */
+  searchQuery: string;
+  /** Source-of-classification filter lifted to the toolbar */
+  sourceFilter: SourceFilter;
 }
 
 interface BehaviorColumnDef {
@@ -51,9 +57,10 @@ export function MappingViewB({
   onAccountsChange,
   onAuditEntry,
   onRememberMapping,
+  searchQuery,
+  sourceFilter,
 }: MappingViewBProps) {
   const [activeAccount, setActiveAccount] = useState<Account | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
@@ -68,7 +75,13 @@ export function MappingViewB({
   // Excluded accounts (isExcluded=true) are also omitted since they don't participate
   // in any calculations.
   const eligible = workspace.accounts.filter(
-    (a) => (a.type === 'cogs' || a.type === 'expense') && !a.isExcluded
+    (a) =>
+      (a.type === 'cogs' || a.type === 'expense') &&
+      !a.isExcluded &&
+      matchesSourceFilter(a, sourceFilter) &&
+      (!searchQuery ||
+        a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (a.number ?? '').toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   const columnAccounts = (behavior: CostBehavior) =>
@@ -174,24 +187,7 @@ export function MappingViewB({
         </span>
       </div>
 
-      {/* Search filter */}
-      <div className="mb-4">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Filter accounts..."
-          className="w-full max-w-sm rounded-lg border px-3 py-1.5 text-sm"
-          style={{
-            borderColor: 'hsl(var(--border))',
-            background: 'hsl(var(--background))',
-            color: 'hsl(var(--foreground))',
-            outline: 'none',
-          }}
-        />
-      </div>
-
-      {/* Columns */}
+      {/* Columns — search & source-filter are in the toolbar above */}
       <div className="flex gap-3 overflow-x-auto pb-4" style={{ alignItems: 'flex-start' }}>
         {BEHAVIOR_COLUMNS.map((col) => {
           const accounts = columnAccounts(col.id);
@@ -206,7 +202,7 @@ export function MappingViewB({
               latestAmounts={latestAmounts}
               total={total}
               conflictWarnings={new Map()}
-              searchQuery={searchQuery}
+              searchQuery=""
             />
           );
         })}

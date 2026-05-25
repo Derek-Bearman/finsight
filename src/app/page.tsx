@@ -443,6 +443,11 @@ function buildAccountsFromParseResult(
       type: 'expense', // will be overwritten by classifier
       isManuallyClassified: false,
     };
+    // Persist parser-detected section so the classifier can be re-run on
+    // existing workspaces AND the mapping UI can warn about contradictions.
+    if (row.section !== undefined) {
+      account.detectedSection = row.section as AccountType;
+    }
     accounts.push(account);
     values.push(...buildAccountValues(id, row));
 

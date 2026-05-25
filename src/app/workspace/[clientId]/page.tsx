@@ -21,7 +21,9 @@ import {
   MappingToolbar,
   MappingViewA,
   MappingViewB,
+  computeSourceCounts,
 } from '@/components/mapping';
+import type { SourceFilter } from '@/components/mapping';
 import {
   applyScenario as _applyScenario,
   computeScenarioImpact,
@@ -38,7 +40,7 @@ import {
 import type { Granularity } from '@/lib/calculations/period-aggregation';
 import { PnLReport } from '@/components/reports';
 import { formatCurrency, formatPercent, formatMetricValue } from '@/lib/utils/format';
-import type { Account, AccountValue, AuditEntry, MappingMemoryEntry, BenchmarkRange } from '@/types';
+import type { Account, AccountType, AccountValue, AuditEntry, MappingMemoryEntry, BenchmarkRange, StatementType } from '@/types';
 import {
   RevenueBreakevenChart,
   CostStructureChart,
@@ -157,6 +159,7 @@ function MappingTab({ clientId }: { clientId: string }) {
 
   const [view, setView] = useState<'type' | 'behavior'>('type');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [toast, setToast] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -185,10 +188,81 @@ function MappingTab({ clientId }: { clientId: string }) {
     [rememberMapping]
   );
 
+  /** See mirror in /workspace/[clientId]/mapping/page.tsx for the same logic */
+  const inferStatementType = useCallback((accounts: Account[]): StatementType | undefined => {
+    const pnlTypes: AccountType[] = ['revenue', 'cogs', 'expense'];
+    const bsTypes: AccountType[] = ['asset', 'liability', 'equity'];
+    let pnlCount = 0;
+    let bsCount = 0;
+    for (const a of accounts) {
+      if (pnlTypes.includes(a.type)) pnlCount++;
+      else if (bsTypes.includes(a.type)) bsCount++;
+    }
+    if (pnlCount > 0 && bsCount === 0) return 'pnl';
+    if (bsCount > 0 && pnlCount === 0) return 'balance_sheet';
+    return undefined;
+  }, []);
+
+  const handleRefreshAuto = useCallback(() => {
+    if (!workspace) return;
+    const profile = getProfile(workspace.industryProfileId);
+    const statementType = inferStatementType(workspace.accounts);
+    const inputs = workspace.accounts.map((a) => {
+      const ci: { id: string; name: string; number?: string; section?: AccountType } = { id: a.id, name: a.name };
+      if (a.number !== undefined) ci.number = a.number;
+      if (a.detectedSection !== undefined) ci.section = a.detectedSection;
+      return ci;
+    });
+    const results = classifyAll(inputs, profile, statementType);
+
+    let refreshed = 0;
+    const updatedAccounts = workspace.accounts.map((account) => {
+      if (account.isManuallyClassified) return account;
+      const result = results.get(account.id);
+      if (!result) return account;
+      const newAccount = applyClassification(account, result);
+      if (
+        newAccount.type !== account.type ||
+        newAccount.costBehavior !== account.costBehavior ||
+        newAccount.classificationConfidence !== account.classificationConfidence
+      ) {
+        refreshed++;
+      }
+      return newAccount;
+    });
+
+    if (refreshed === 0) {
+      showToast('All auto-classified accounts already up to date');
+      return;
+    }
+
+    const refreshEntry: AuditEntry = {
+      id: `audit-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      timestamp: new Date().toISOString(),
+      accountId: 'batch',
+      accountName: `${refreshed} auto-classified accounts`,
+      action: 'reset_to_auto',
+      previousValue: 'stale',
+      newValue: 'refreshed',
+      performedBy: 'user',
+    };
+
+    batchUpdateAccounts(clientId, updatedAccounts);
+    appendAuditEntry(clientId, refreshEntry);
+    showToast(`${refreshed} account${refreshed !== 1 ? 's' : ''} refreshed (manual overrides preserved)`);
+  }, [workspace, clientId, batchUpdateAccounts, appendAuditEntry, inferStatementType]);
+
   const handleReset = useCallback(() => {
     if (!workspace) return;
     const profile = getProfile(workspace.industryProfileId);
-    const results = classifyAll(workspace.accounts, profile);
+    const statementType = inferStatementType(workspace.accounts);
+    const inputs = workspace.accounts.map((a) => {
+      const ci: { id: string; name: string; number?: string; section?: AccountType } = { id: a.id, name: a.name };
+      if (a.number !== undefined) ci.number = a.number;
+      if (a.detectedSection !== undefined) ci.section = a.detectedSection;
+      return ci;
+    });
+    const results = classifyAll(inputs, profile, statementType);
     const updatedAccounts = workspace.accounts.map((account) => {
       if (!account.isManuallyClassified) return account;
       const result = results.get(account.id);
@@ -213,11 +287,12 @@ function MappingTab({ clientId }: { clientId: string }) {
     batchUpdateAccounts(clientId, updatedAccounts);
     appendAuditEntry(clientId, resetEntry);
     showToast(`${manualCount} account${manualCount !== 1 ? 's' : ''} reclassified`);
-  }, [workspace, clientId, batchUpdateAccounts, appendAuditEntry]);
+  }, [workspace, clientId, batchUpdateAccounts, appendAuditEntry, inferStatementType]);
 
   if (!workspace) return null;
 
   const manualCount = workspace.accounts.filter((a) => a.isManuallyClassified).length;
+  const sourceCounts = computeSourceCounts(workspace.accounts);
 
   return (
     <div className="flex flex-col gap-4 relative">
@@ -227,9 +302,13 @@ function MappingTab({ clientId }: { clientId: string }) {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onReset={handleReset}
+        onRefreshAuto={handleRefreshAuto}
         totalAccounts={workspace.accounts.length}
         manualCount={manualCount}
         auditEntries={workspace.auditLog}
+        sourceFilter={sourceFilter}
+        onSourceFilterChange={setSourceFilter}
+        sourceCounts={sourceCounts}
       />
 
       {view === 'type' ? (
@@ -238,6 +317,8 @@ function MappingTab({ clientId }: { clientId: string }) {
           onAccountsChange={handleAccountsChange}
           onAuditEntry={handleAuditEntry}
           onRememberMapping={handleRememberMapping}
+          searchQuery={searchQuery}
+          sourceFilter={sourceFilter}
         />
       ) : (
         <MappingViewB
@@ -245,6 +326,8 @@ function MappingTab({ clientId }: { clientId: string }) {
           onAccountsChange={handleAccountsChange}
           onAuditEntry={handleAuditEntry}
           onRememberMapping={handleRememberMapping}
+          searchQuery={searchQuery}
+          sourceFilter={sourceFilter}
         />
       )}
 

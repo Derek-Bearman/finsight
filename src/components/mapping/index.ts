@@ -5,3 +5,4 @@ export * from './MappingViewA';
 export * from './MappingViewB';
 export * from './MappingToolbar';
 export * from './AuditLogSheet';
+export * from './sourceFilter';
