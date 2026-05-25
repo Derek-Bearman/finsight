@@ -16,9 +16,17 @@ export interface DropColumnProps {
   total: number;
   conflictWarnings: Map<string, string>;
   searchQuery: string;
-  onCardClick?: (account: Account) => void;
+  /**
+   * Card click handler. Receives the event so callers can inspect
+   * modifier keys (shift, cmd/ctrl) for bulk-selection behavior.
+   */
+  onCardClick?: (account: Account, e: React.MouseEvent) => void;
   /** When true, cards that need review will show the amber Review badge. Default true. */
   showNeedsReview?: boolean;
+  /** Set of account ids currently bulk-selected. Empty = nothing selected. */
+  selectedIds?: Set<string>;
+  /** Id of the keyboard-focused account, if any. */
+  focusedId?: string | null;
 }
 
 export function DropColumn({
@@ -32,6 +40,8 @@ export function DropColumn({
   searchQuery,
   onCardClick,
   showNeedsReview = true,
+  selectedIds,
+  focusedId,
 }: DropColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
@@ -110,8 +120,10 @@ export function DropColumn({
               account={account}
               latestAmount={latestAmounts.get(account.id)}
               conflictWarning={conflictWarnings.get(account.id)}
-              onClick={() => onCardClick?.(account)}
+              onClick={(e) => onCardClick?.(account, e)}
               needsReview={showNeedsReview && accountNeedsReview(account)}
+              isSelected={selectedIds?.has(account.id)}
+              isFocused={focusedId === account.id}
             />
           ))
         )}

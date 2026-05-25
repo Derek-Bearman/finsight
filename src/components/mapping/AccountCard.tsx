@@ -11,7 +11,11 @@ export interface AccountCardProps {
   latestAmount?: number;
   isDragging?: boolean;
   conflictWarning?: string;
-  onClick?: () => void;
+  /**
+   * Click handler. Receives the click event so the caller can inspect
+   * modifier keys (shift for range select, cmd/ctrl for toggle).
+   */
+  onClick?: (e: React.MouseEvent) => void;
   /** When true, renders without the useDraggable hook (e.g. inside DragOverlay) */
   isOverlay?: boolean;
   /**
@@ -20,6 +24,10 @@ export interface AccountCardProps {
    * and has not yet been manually confirmed.
    */
   needsReview?: boolean;
+  /** When true, renders with a primary-color ring indicating bulk-selection. */
+  isSelected?: boolean;
+  /** When true, the keyboard focus indicator is shown on this card. */
+  isFocused?: boolean;
 }
 
 /**
@@ -60,22 +68,39 @@ function AccountCardInner({
   conflictWarning,
   onClick,
   needsReview,
+  isSelected,
+  isFocused,
   dragHandleProps,
 }: AccountCardProps & { dragHandleProps?: Record<string, unknown> }) {
   const [showTooltip, setShowTooltip] = useState(false);
 
+  // Visual treatment cascade: dragging > selected > focused > default
+  const borderColor = isDragging
+    ? 'hsl(var(--primary))'
+    : isSelected
+      ? 'hsl(var(--primary))'
+      : isFocused
+        ? 'hsl(217 91% 60%)'
+        : 'hsl(var(--border))';
+  const ringShadow = isDragging
+    ? '0 0 0 2px hsl(var(--primary) / 0.3), 0 4px 12px hsl(0 0% 0% / 0.1)'
+    : isSelected
+      ? '0 0 0 2px hsl(var(--primary) / 0.5)'
+      : isFocused
+        ? '0 0 0 2px hsl(217 91% 60% / 0.4)'
+        : undefined;
+
   return (
     <div
       data-testid={`account-card-${account.id}`}
+      data-selected={isSelected ? 'true' : undefined}
       onClick={onClick}
       className="rounded-lg border cursor-grab select-none transition-shadow"
       style={{
-        background: 'hsl(var(--card))',
-        borderColor: isDragging ? 'hsl(var(--primary))' : 'hsl(var(--border))',
+        background: isSelected ? 'hsl(var(--primary) / 0.06)' : 'hsl(var(--card))',
+        borderColor,
         opacity: isDragging ? 0.7 : 1,
-        boxShadow: isDragging
-          ? '0 0 0 2px hsl(var(--primary) / 0.3), 0 4px 12px hsl(0 0% 0% / 0.1)'
-          : undefined,
+        boxShadow: ringShadow,
         transform: isDragging ? 'scale(1.02)' : undefined,
         padding: '8px 10px',
         position: 'relative',

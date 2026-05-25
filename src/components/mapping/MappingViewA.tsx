@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   DndContext,
   DragEndEvent,
@@ -260,20 +260,46 @@ export function MappingViewA({
   const [activeAccount, setActiveAccount] = useState<Account | null>(null);
   const profile = getProfile(workspace.industryProfileId);
 
+  // ── Bulk-selection + keyboard-nav state ──────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [lastClickedId, setLastClickedId] = useState<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+
   /**
    * One predicate that combines the toolbar's Source filter + the (lifted)
    * search query. Applied inside every column so the filter applies
    * uniformly without duplicating logic in DropColumn.
    */
-  const visibleInColumn = (account: Account): boolean => {
-    if (!matchesSourceFilter(account, sourceFilter)) return false;
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      account.name.toLowerCase().includes(q) ||
-      (account.number ?? '').toLowerCase().includes(q)
-    );
-  };
+  const visibleInColumn = useCallback(
+    (account: Account): boolean => {
+      if (!matchesSourceFilter(account, sourceFilter)) return false;
+      if (!searchQuery) return true;
+      const q = searchQuery.toLowerCase();
+      return (
+        account.name.toLowerCase().includes(q) ||
+        (account.number ?? '').toLowerCase().includes(q)
+      );
+    },
+    [sourceFilter, searchQuery]
+  );
+
+  /**
+   * Ordered list of every visible account across all columns. Used for
+   * shift-click range selection AND cmd-A select-all.
+   */
+  const visibleAccountsOrdered = useMemo(() => {
+    const out: Account[] = [];
+    for (const col of COLUMNS) {
+      for (const a of workspace.accounts) {
+        if (a.type === col.id && !a.isExcluded && visibleInColumn(a)) out.push(a);
+      }
+    }
+    // Excluded last
+    for (const a of workspace.accounts) {
+      if (a.isExcluded && visibleInColumn(a)) out.push(a);
+    }
+    return out;
+  }, [workspace.accounts, visibleInColumn]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
@@ -319,6 +345,160 @@ export function MappingViewA({
     onAuditEntry(entry);
     onRememberMapping(memEntry);
   }
+
+  /**
+   * Bulk type change — applies newType to every account in `ids` whose
+   * current type differs, emits a SINGLE audit entry (not N entries), and
+   * writes one memory entry per moved account.
+   */
+  function handleBulkTypeChange(ids: string[], newType: AccountType) {
+    const idSet = new Set(ids);
+    const affected = workspace.accounts.filter(
+      (a) => idSet.has(a.id) && a.type !== newType
+    );
+    if (affected.length === 0) return;
+
+    const updatedAccounts = workspace.accounts.map((a) =>
+      idSet.has(a.id) && a.type !== newType
+        ? { ...a, type: newType, isManuallyClassified: true, classificationSource: 'manual' as const }
+        : a
+    );
+
+    const entry: AuditEntry = {
+      id: makeAuditId(),
+      timestamp: new Date().toISOString(),
+      accountId: 'batch',
+      accountName: `${affected.length} accounts (${affected
+        .slice(0, 3)
+        .map((a) => a.name)
+        .join(', ')}${affected.length > 3 ? '…' : ''})`,
+      action: 'classify_type',
+      previousValue: 'various',
+      newValue: newType,
+      performedBy: 'user',
+    };
+
+    onAccountsChange(updatedAccounts);
+    onAuditEntry(entry);
+    for (const a of affected) {
+      onRememberMapping({
+        accountNameNormalized: a.name.toLowerCase().trim(),
+        profileId: workspace.industryProfileId,
+        type: newType,
+        costBehavior: a.costBehavior,
+      });
+    }
+  }
+
+  /**
+   * Handle a card click with modifier-key behavior:
+   *   shift → range-extend selection from lastClickedId to this card
+   *   cmd/ctrl → toggle this card in/out of selection
+   *   plain click → replace selection with just this card
+   */
+  function handleCardClick(account: Account, e: React.MouseEvent) {
+    setFocusedId(account.id);
+
+    if (e.shiftKey && lastClickedId) {
+      const lastIdx = visibleAccountsOrdered.findIndex((a) => a.id === lastClickedId);
+      const curIdx = visibleAccountsOrdered.findIndex((a) => a.id === account.id);
+      if (lastIdx >= 0 && curIdx >= 0) {
+        const [start, end] = lastIdx <= curIdx ? [lastIdx, curIdx] : [curIdx, lastIdx];
+        const range = visibleAccountsOrdered.slice(start, end + 1).map((a) => a.id);
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of range) next.add(id);
+          return next;
+        });
+      }
+    } else if (e.metaKey || e.ctrlKey) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(account.id)) next.delete(account.id);
+        else next.add(account.id);
+        return next;
+      });
+    } else {
+      // Plain click: select just this one (replaces existing selection)
+      setSelectedIds(new Set([account.id]));
+    }
+    setLastClickedId(account.id);
+  }
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      // Ignore when typing in an input / select / textarea
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (target.isContentEditable) return;
+      }
+
+      if (e.key === 'Escape') {
+        if (selectedIds.size > 0) {
+          setSelectedIds(new Set());
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // Cmd/Ctrl-A → select all visible
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        setSelectedIds(new Set(visibleAccountsOrdered.map((a) => a.id)));
+        return;
+      }
+
+      // 1-6 → set type for selected (or just-focused) accounts
+      if (/^[1-6]$/.test(e.key)) {
+        const idx = parseInt(e.key, 10) - 1;
+        const target = COLUMNS[idx];
+        if (!target) return;
+        const ids = selectedIds.size > 0
+          ? Array.from(selectedIds)
+          : focusedId
+            ? [focusedId]
+            : [];
+        if (ids.length === 0) return;
+        handleBulkTypeChange(ids, target.id);
+        e.preventDefault();
+        return;
+      }
+
+      // 'e' → exclude selected (or focused) accounts
+      if (e.key === 'e' || e.key === 'E') {
+        const ids = selectedIds.size > 0
+          ? Array.from(selectedIds)
+          : focusedId
+            ? [focusedId]
+            : [];
+        if (ids.length === 0) return;
+        const idSet = new Set(ids);
+        const updatedAccounts = workspace.accounts.map((a) =>
+          idSet.has(a.id) && !a.isExcluded
+            ? { ...a, isExcluded: true, isManuallyClassified: true, classificationSource: 'manual' as const }
+            : a
+        );
+        onAccountsChange(updatedAccounts);
+        onAuditEntry({
+          id: makeAuditId(),
+          timestamp: new Date().toISOString(),
+          accountId: 'batch',
+          accountName: `${ids.length} account${ids.length !== 1 ? 's' : ''}`,
+          action: 'classify_type',
+          previousValue: 'visible',
+          newValue: 'excluded',
+          performedBy: 'user',
+        });
+        e.preventDefault();
+        return;
+      }
+    }
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedIds, focusedId, visibleAccountsOrdered, workspace.accounts, onAccountsChange, onAuditEntry]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleDragStart(event: DragStartEvent) {
     const { active } = event;
@@ -390,46 +570,92 @@ export function MappingViewA({
     if (!over) return;
 
     const overId = over.id as string;
-    const account = workspace.accounts.find((a) => a.id === active.id);
-    if (!account) return;
+    const draggedAccount = workspace.accounts.find((a) => a.id === active.id);
+    if (!draggedAccount) return;
+
+    // Determine the set of accounts this drag should affect.
+    // If the dragged card is in the current bulk-selection, move all selected.
+    // Otherwise, just move the dragged one (and the selection is irrelevant).
+    const isBulk = selectedIds.has(draggedAccount.id) && selectedIds.size > 1;
+    const targetIds = isBulk ? Array.from(selectedIds) : [draggedAccount.id];
 
     // Special handling: dragging to the Excluded column
     if (overId === '__excluded__') {
-      handleExcludeAccount(account);
-      return;
-    }
-
-    // Dragging an excluded account to a type column un-excludes it and changes its type
-    if (account.isExcluded) {
-      const newType = overId as AccountType;
-      const updatedAccount: Account = {
-        ...account,
-        type: newType,
-        isExcluded: false,
-        isManuallyClassified: true,
-        classificationSource: 'manual',
-      };
+      const idSet = new Set(targetIds);
+      const affected = workspace.accounts.filter((a) => idSet.has(a.id) && !a.isExcluded);
+      if (affected.length === 0) return;
       const updatedAccounts = workspace.accounts.map((a) =>
-        a.id === account.id ? updatedAccount : a
+        idSet.has(a.id) && !a.isExcluded
+          ? { ...a, isExcluded: true, isManuallyClassified: true, classificationSource: 'manual' as const }
+          : a
       );
-      const entry: AuditEntry = {
+      onAccountsChange(updatedAccounts);
+      onAuditEntry({
         id: makeAuditId(),
         timestamp: new Date().toISOString(),
-        accountId: account.id,
-        accountName: account.name,
+        accountId: isBulk ? 'batch' : draggedAccount.id,
+        accountName: isBulk
+          ? `${affected.length} account${affected.length !== 1 ? 's' : ''}`
+          : draggedAccount.name,
         action: 'classify_type',
-        previousValue: 'excluded',
-        newValue: newType,
+        previousValue: 'visible',
+        newValue: 'excluded',
         performedBy: 'user',
-      };
-      onAccountsChange(updatedAccounts);
-      onAuditEntry(entry);
+      });
       return;
     }
 
     const newType = overId as AccountType;
-    if (account.type === newType) return;
-    handleTypeChange(account, newType);
+
+    // Bulk un-exclude+retype path (when any selected accounts are excluded)
+    const idSet = new Set(targetIds);
+    const anyExcluded = workspace.accounts.some((a) => idSet.has(a.id) && a.isExcluded);
+
+    if (anyExcluded || isBulk) {
+      // Generalized bulk path: each account in targetIds gets type=newType
+      // AND isExcluded=false. Manual override is set. Single audit entry.
+      const affected = workspace.accounts.filter(
+        (a) => idSet.has(a.id) && (a.type !== newType || a.isExcluded)
+      );
+      if (affected.length === 0) return;
+      const updatedAccounts = workspace.accounts.map((a) =>
+        idSet.has(a.id)
+          ? {
+              ...a,
+              type: newType,
+              isExcluded: false,
+              isManuallyClassified: true,
+              classificationSource: 'manual' as const,
+            }
+          : a
+      );
+      onAccountsChange(updatedAccounts);
+      onAuditEntry({
+        id: makeAuditId(),
+        timestamp: new Date().toISOString(),
+        accountId: isBulk ? 'batch' : draggedAccount.id,
+        accountName: isBulk
+          ? `${affected.length} account${affected.length !== 1 ? 's' : ''}`
+          : draggedAccount.name,
+        action: 'classify_type',
+        previousValue: anyExcluded ? 'excluded' : 'various',
+        newValue: newType,
+        performedBy: 'user',
+      });
+      for (const a of affected) {
+        onRememberMapping({
+          accountNameNormalized: a.name.toLowerCase().trim(),
+          profileId: workspace.industryProfileId,
+          type: newType,
+          costBehavior: a.costBehavior,
+        });
+      }
+      return;
+    }
+
+    // Single-card non-excluded path → use the original (lighter) handler
+    if (draggedAccount.type === newType) return;
+    handleTypeChange(draggedAccount, newType);
   }
 
   return (
@@ -457,9 +683,9 @@ export function MappingViewA({
               total={total}
               conflictWarnings={conflictWarnings}
               searchQuery=""
-              onCardClick={() => {
-                // Clicking opens an inline type select — handled by TypeSelect
-              }}
+              onCardClick={handleCardClick}
+              selectedIds={selectedIds}
+              focusedId={focusedId}
             />
           );
         })}
@@ -472,6 +698,40 @@ export function MappingViewA({
           onUnexclude={handleUnexcludeAccount}
         />
       </div>
+
+      {/* Floating selection bar — appears when one or more cards are selected */}
+      {selectedIds.size > 0 && (
+        <div
+          data-testid="selection-bar"
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 rounded-full border shadow-lg px-4 py-2"
+          style={{
+            background: 'hsl(var(--card))',
+            borderColor: 'hsl(var(--primary) / 0.4)',
+            color: 'hsl(var(--foreground))',
+          }}
+        >
+          <span className="text-sm font-semibold">
+            {selectedIds.size} selected
+          </span>
+          <span
+            className="text-xs"
+            style={{ color: 'hsl(var(--muted-foreground))' }}
+          >
+            Drag any selected card to move all · press <kbd className="rounded border px-1 py-0.5 text-[10px]">1</kbd>–<kbd className="rounded border px-1 py-0.5 text-[10px]">6</kbd> to set type · <kbd className="rounded border px-1 py-0.5 text-[10px]">E</kbd> to exclude
+          </span>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="text-xs font-medium underline underline-offset-2"
+            style={{ color: 'hsl(var(--muted-foreground))' }}
+            aria-label="Clear selection"
+          >
+            Clear (Esc)
+          </button>
+        </div>
+      )}
 
       {/* Inline type-select accessibility panel */}
       <details className="mt-2">
@@ -501,16 +761,39 @@ export function MappingViewA({
         </div>
       </details>
 
-      {/* Drag overlay */}
+      {/* Drag overlay — shows a count badge when dragging multi-selection */}
       <DragOverlay>
         {activeAccount && (
-          <div style={{ transform: 'scale(1.04)', opacity: 0.95 }}>
+          <div
+            style={{ transform: 'scale(1.04)', opacity: 0.95, position: 'relative' }}
+          >
             <AccountCard
               account={activeAccount}
               latestAmount={latestAmounts.get(activeAccount.id)}
               isOverlay
               isDragging
+              isSelected={selectedIds.has(activeAccount.id)}
             />
+            {selectedIds.has(activeAccount.id) && selectedIds.size > 1 && (
+              <div
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  top: -8,
+                  right: -8,
+                  background: 'hsl(var(--primary))',
+                  color: 'hsl(var(--primary-foreground))',
+                  borderRadius: 9999,
+                  padding: '2px 8px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+                  border: '2px solid hsl(var(--background))',
+                }}
+              >
+                +{selectedIds.size - 1}
+              </div>
+            )}
           </div>
         )}
       </DragOverlay>
