@@ -19,6 +19,7 @@ import { parseCSV } from '@/lib/parsers/csv-parser';
 import { xlsxToCsvDetailed, isExcelFile, isExcelMimeType } from '@/lib/parsers/xlsx-converter';
 import { classifyAll } from '@/lib/classifiers';
 import { validateImport } from '@/lib/parsers/import-validator';
+import { parseWorkspaceJSON, resolveWorkspaceIdCollision } from '@/lib/utils/workspace-io';
 
 // ── Auto-exclude summary line names ─────────────────────────────────────────
 
@@ -483,6 +484,48 @@ export default function HomePage() {
 
   const [newWorkspaceId, setNewWorkspaceId] = useState('');
 
+  // ── Workspace JSON import (from another machine / backup) ───────────────────
+
+  const workspaceImportRef = React.useRef<HTMLInputElement>(null);
+  const [importMessage, setImportMessage] = useState<
+    | { kind: 'success'; text: string }
+    | { kind: 'error'; text: string }
+    | null
+  >(null);
+
+  const handleWorkspaceImport = async (file: File) => {
+    setImportMessage(null);
+    try {
+      const text = await file.text();
+      const result = parseWorkspaceJSON(text);
+      if (!result.ok) {
+        setImportMessage({ kind: 'error', text: result.error });
+        return;
+      }
+      const existingIds = new Set(workspaces.map((w) => w.id));
+      const { id: safeId, renamed } = resolveWorkspaceIdCollision(
+        result.workspace.id,
+        existingIds
+      );
+      const ws: ClientWorkspace = { ...result.workspace, id: safeId };
+      addWorkspace(ws);
+      setActiveWorkspace(safeId);
+      const warnSuffix =
+        result.warnings.length > 0 ? ` (${result.warnings.length} note${result.warnings.length === 1 ? '' : 's'})` : '';
+      setImportMessage({
+        kind: 'success',
+        text: renamed
+          ? `Imported "${ws.name}" with a new id (the original id was already in use)${warnSuffix}.`
+          : `Imported "${ws.name}"${warnSuffix}.`,
+      });
+      // Navigate after a short delay so the user sees the confirmation
+      setTimeout(() => router.push(`/workspace/${safeId}`), 600);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error reading file.';
+      setImportMessage({ kind: 'error', text: `Could not read file: ${msg}` });
+    }
+  };
+
   // ── File handling ──────────────────────────────────────────────────────────
 
   const handleFile = async (
@@ -825,6 +868,58 @@ export default function HomePage() {
             <Button onClick={handleProfileNext} data-testid="profile-next" className="self-end">
               Continue →
             </Button>
+
+            {/* Workspace JSON import — restore from a .finsight.json file */}
+            <div
+              className="rounded-xl border border-dashed px-4 py-3 flex flex-wrap items-center justify-between gap-3"
+              style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--muted) / 0.3)' }}
+            >
+              <div>
+                <p className="text-sm font-medium" style={{ color: 'hsl(var(--foreground))' }}>
+                  Have a workspace from another machine?
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                  Import a <code className="font-mono text-[11px]">.finsight.json</code> file you exported from another browser or backup.
+                </p>
+              </div>
+              <input
+                ref={workspaceImportRef}
+                type="file"
+                accept=".json,application/json"
+                className="sr-only"
+                data-testid="workspace-import-input"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleWorkspaceImport(file);
+                  // Reset so re-selecting the same file works
+                  if (e.target) e.target.value = '';
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => workspaceImportRef.current?.click()}
+                data-testid="import-workspace-btn"
+              >
+                ↑ Import workspace
+              </Button>
+            </div>
+
+            {importMessage && (
+              <div
+                role="status"
+                aria-live="polite"
+                data-testid="workspace-import-message"
+                className="rounded-lg border px-4 py-3 text-sm"
+                style={{
+                  borderColor: importMessage.kind === 'success' ? 'hsl(142 76% 36%)' : 'hsl(0 84% 60%)',
+                  background: importMessage.kind === 'success' ? 'hsl(142 76% 36% / 0.08)' : 'hsl(0 84% 60% / 0.08)',
+                  color: importMessage.kind === 'success' ? 'hsl(142 76% 28%)' : 'hsl(0 84% 32%)',
+                }}
+              >
+                {importMessage.text}
+              </div>
+            )}
 
             {/* Recent workspaces */}
             {workspaces.length > 0 && (

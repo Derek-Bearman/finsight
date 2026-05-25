@@ -24,6 +24,7 @@ import {
   computeSourceCounts,
 } from '@/components/mapping';
 import type { SourceFilter } from '@/components/mapping';
+import { downloadWorkspaceJSON } from '@/lib/utils/workspace-io';
 import {
   applyScenario as _applyScenario,
   computeScenarioImpact,
@@ -1492,6 +1493,16 @@ export default function WorkspacePage({ params }: PageProps) {
             >
               {workspace.scenarios.length} scenarios
             </div>
+            <button
+              type="button"
+              data-testid="export-workspace-btn"
+              onClick={() => downloadWorkspaceJSON(workspace)}
+              className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+              style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--foreground))' }}
+              title="Download this workspace as a .finsight.json file you can re-import on another machine"
+            >
+              ↓ Export
+            </button>
             <button
               type="button"
               data-testid="clear-data-btn"
