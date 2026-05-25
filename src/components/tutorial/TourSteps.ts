@@ -31,9 +31,8 @@ export const HOME_TOUR_STEPS: TourStep[] = [
   {
     id: 'industry-profile',
     title: 'Pick an industry profile',
-    body: "Profiles bundle classification rules, benchmarks, and operational metrics for each industry. Pick Trades Contractor for HVAC, plumbing, or electrical — the math adapts automatically.",
-    target: '[data-testid="profile-card-trades-contractor"]',
-    position: 'below',
+    body: "Profiles bundle classification rules, benchmarks, and operational metrics by industry. Pick whichever fits the client's business — Trades for HVAC/plumbing/electrical, SaaS for subscription products, Restaurant for food service, and so on. Generic SMB is the fallback. You can change profiles later in workspace settings.",
+    position: 'center',
   },
   {
     id: 'upload-pnl',

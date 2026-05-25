@@ -477,7 +477,7 @@ export default function HomePage() {
           isLoading: false,
           phase: 'idle',
           warnings: [{
-            type: 'negative_revenue',
+            type: 'no_period_columns',
             severity: 'error',
             message:
               'No date columns detected in this file. FinSight expects a standard QuickBooks P&L export ' +
@@ -489,6 +489,15 @@ export default function HomePage() {
         return;
       }
 
+      // Warn if rows parsed but every value is $0 — likely a template file
+      // or misaligned columns where values landed in fields that weren't
+      // detected as periods.
+      const totalAbsValue = result.rows.reduce((sum, row) => {
+        for (const v of Object.values(row.values)) sum += Math.abs(v);
+        return sum;
+      }, 0);
+      const isAllZero = result.rows.length > 0 && totalAbsValue === 0;
+
       setUpload({
         file,
         isLoading: false,
@@ -497,11 +506,32 @@ export default function HomePage() {
         rows: result.rows,
         accounts: [],
         values: [],
-        warnings: [],
+        warnings: isAllZero
+          ? [{
+              type: 'all_zero_values',
+              severity: 'warning',
+              message:
+                `Parsed ${result.rows.length} accounts from "${file.name}" but every value is $0. ` +
+                `Check the data preview — values may be in a column that wasn't detected as a period. ` +
+                `Use the Role dropdown to mark the correct column as "Period".`,
+            }]
+          : [],
         phase: 'mapping',
       });
     } catch {
-      setUpload({ ...EMPTY_UPLOAD, file, isLoading: false, phase: 'idle' });
+      setUpload({
+        ...EMPTY_UPLOAD,
+        file,
+        isLoading: false,
+        phase: 'idle',
+        warnings: [{
+          type: 'parse_error',
+          severity: 'error',
+          message:
+            `Could not read "${file.name}". The file may be corrupted or in an unsupported format. ` +
+            `Supported formats: .csv, .xlsx, .xls, .xlsm exported from QuickBooks, Xero, or similar.`,
+        }],
+      });
     }
   };
 

@@ -367,7 +367,10 @@ export interface ImportValidationWarning {
     | 'duplicate_account_number'
     | 'blank_account_name'
     | 'suspiciously_large_amount'
-    | 'negative_revenue';
+    | 'negative_revenue'
+    | 'no_period_columns'
+    | 'all_zero_values'
+    | 'parse_error';
   message: string;
   accountId?: string;
   severity: 'error' | 'warning' | 'info';
