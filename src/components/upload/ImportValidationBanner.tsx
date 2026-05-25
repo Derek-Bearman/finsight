@@ -10,16 +10,29 @@ interface ImportValidationBannerProps {
 
 type Severity = 'error' | 'warning' | 'info';
 
+// Solid bordered cards with near-black body text — the previous
+// pastel-on-pastel scheme made warnings unreadable at small text sizes.
 const SEVERITY_CONFIG: Record<
   Severity,
-  { bg: string; border: string; iconColor: string; titleColor: string; textColor: string; icon: React.ReactNode }
+  {
+    bg: string;
+    border: string;
+    headerBg: string;
+    headerText: string;
+    iconColor: string;
+    titleColor: string;
+    textColor: string;
+    icon: React.ReactNode;
+  }
 > = {
   error: {
-    bg: 'bg-red-50 dark:bg-red-950/20',
-    border: 'border-red-200 dark:border-red-900',
-    iconColor: 'text-red-500',
-    titleColor: 'text-red-800 dark:text-red-300',
-    textColor: 'text-red-700 dark:text-red-400',
+    bg: 'bg-white dark:bg-neutral-900',
+    border: 'border-red-600 dark:border-red-500',
+    headerBg: 'bg-red-600 dark:bg-red-500',
+    headerText: 'text-white',
+    iconColor: 'text-white',
+    titleColor: 'text-neutral-900 dark:text-neutral-100',
+    textColor: 'text-neutral-800 dark:text-neutral-200',
     icon: (
       <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
@@ -27,11 +40,13 @@ const SEVERITY_CONFIG: Record<
     ),
   },
   warning: {
-    bg: 'bg-amber-50 dark:bg-amber-950/20',
-    border: 'border-amber-200 dark:border-amber-900',
-    iconColor: 'text-amber-500',
-    titleColor: 'text-amber-800 dark:text-amber-300',
-    textColor: 'text-amber-700 dark:text-amber-400',
+    bg: 'bg-white dark:bg-neutral-900',
+    border: 'border-amber-500',
+    headerBg: 'bg-amber-500',
+    headerText: 'text-white',
+    iconColor: 'text-white',
+    titleColor: 'text-neutral-900 dark:text-neutral-100',
+    textColor: 'text-neutral-800 dark:text-neutral-200',
     icon: (
       <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
@@ -39,11 +54,13 @@ const SEVERITY_CONFIG: Record<
     ),
   },
   info: {
-    bg: 'bg-blue-50 dark:bg-blue-950/20',
-    border: 'border-blue-200 dark:border-blue-900',
-    iconColor: 'text-blue-500',
-    titleColor: 'text-blue-800 dark:text-blue-300',
-    textColor: 'text-blue-700 dark:text-blue-400',
+    bg: 'bg-white dark:bg-neutral-900',
+    border: 'border-blue-600 dark:border-blue-500',
+    headerBg: 'bg-blue-600 dark:bg-blue-500',
+    headerText: 'text-white',
+    iconColor: 'text-white',
+    titleColor: 'text-neutral-900 dark:text-neutral-100',
+    textColor: 'text-neutral-800 dark:text-neutral-200',
     icon: (
       <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
@@ -83,24 +100,24 @@ export function ImportValidationBanner({ warnings, onDismiss }: ImportValidation
 
   return (
     <div
-      className={`rounded-lg border ${cfg.bg} ${cfg.border}`}
+      className={`rounded-lg border-2 overflow-hidden ${cfg.bg} ${cfg.border}`}
       data-testid="import-validation-banner"
     >
-      {/* Header / collapsed view */}
+      {/* Solid-colored header bar — high-contrast white text on saturated background */}
       <div
-        className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer"
+        className={`flex items-center justify-between gap-3 px-4 py-2.5 cursor-pointer ${cfg.headerBg}`}
         onClick={() => setExpanded((v) => !v)}
         data-testid="banner-toggle"
       >
         <div className={`flex items-center gap-2 ${cfg.iconColor}`}>
           {cfg.icon}
-          <span className={`text-sm font-medium ${cfg.titleColor}`}>
+          <span className={`text-sm font-semibold ${cfg.headerText}`}>
             {summaryParts.join(', ')}
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <button
-            className={`text-xs font-medium underline-offset-2 hover:underline ${cfg.textColor}`}
+            className={`text-xs font-medium underline-offset-2 hover:underline ${cfg.headerText}`}
             onClick={(e) => {
               e.stopPropagation();
               setExpanded((v) => !v);
@@ -114,20 +131,20 @@ export function ImportValidationBanner({ warnings, onDismiss }: ImportValidation
               e.stopPropagation();
               handleDismiss();
             }}
-            className="ml-1 rounded hover:opacity-70 transition-opacity"
+            className="rounded hover:opacity-80 transition-opacity"
             aria-label="Dismiss"
             data-testid="banner-dismiss"
           >
-            <svg className={`h-4 w-4 ${cfg.iconColor}`} viewBox="0 0 20 20" fill="currentColor">
+            <svg className={`h-4 w-4 ${cfg.headerText}`} viewBox="0 0 20 20" fill="currentColor">
               <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
             </svg>
           </button>
         </div>
       </div>
 
-      {/* Expanded detail */}
+      {/* Expanded detail — white card body, near-black text, fully legible */}
       {expanded && (
-        <div className="border-t px-4 pb-4 pt-3 space-y-4" style={{ borderColor: 'inherit' }}>
+        <div className="px-4 pb-4 pt-3 space-y-4">
           {(['error', 'warning', 'info'] as Severity[]).map((sev) => {
             const items = grouped[sev];
             if (items.length === 0) return null;
@@ -139,9 +156,11 @@ export function ImportValidationBanner({ warnings, onDismiss }: ImportValidation
                 </p>
                 <ul className="space-y-1.5">
                   {items.map((w, i) => (
-                    <li key={i} className={`flex items-start gap-2 text-sm ${c.textColor}`}>
-                      <span className={`mt-0.5 shrink-0 ${c.iconColor}`}>{c.icon}</span>
-                      {w.message}
+                    <li key={i} className={`flex items-start gap-2 text-sm leading-relaxed ${c.textColor}`}>
+                      <span className={`mt-0.5 shrink-0 rounded-full p-0.5 ${c.headerBg}`}>
+                        <span className={c.iconColor}>{c.icon}</span>
+                      </span>
+                      <span>{w.message}</span>
                     </li>
                   ))}
                 </ul>
@@ -154,7 +173,7 @@ export function ImportValidationBanner({ warnings, onDismiss }: ImportValidation
             <div className="flex justify-end pt-1">
               <button
                 onClick={handleDismiss}
-                className={`text-xs font-medium underline underline-offset-2 ${cfg.textColor}`}
+                className="text-xs font-medium underline underline-offset-2 text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100"
                 data-testid="banner-proceed"
               >
                 Proceed Anyway

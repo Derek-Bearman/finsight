@@ -199,33 +199,41 @@ export function classifyAll(
       continue;
     }
 
-    // If raw type is valid for this statement, accept it
+    const sectionHint =
+      account.section && allowed.has(account.section) ? account.section : null;
+
+    // SECTION ALWAYS WINS for typed statement imports. Document structure
+    // (the ASSETS / LIABILITIES / EQUITY headers in a BS, the Income /
+    // COGS / Expenses headers in a P&L) is far more reliable than name
+    // keywords. Example: "Customer Deposits" keyword-matches 'deposits'→
+    // asset, but under a LIABILITIES section it's clearly a liability.
+    if (sectionHint && raw.accountType !== sectionHint) {
+      results.set(account.id, {
+        ...raw,
+        accountType: sectionHint,
+        // If the raw classifier had high confidence (account number match),
+        // demote to medium since section overrode it. Otherwise medium is
+        // the right level — section context is strong but not definitive.
+        confidence: raw.confidence === 'high' ? 'medium' : raw.confidence,
+        hintFired: `${raw.hintFired}; forced to ${sectionHint} by ${statementType === 'pnl' ? 'P&L' : 'Balance Sheet'} section context`,
+      });
+      continue;
+    }
+
+    // Section agreed (or no section), and raw type is valid → accept raw
     if (raw.accountType !== null && allowed.has(raw.accountType)) {
       results.set(account.id, raw);
       continue;
     }
 
-    // Type is invalid for this statement. Prefer the section hint if it's
-    // a valid type for this statement; otherwise use a sensible default
-    // (asset for BS, expense for P&L — the most common bucket).
-    const sectionHint =
-      account.section && allowed.has(account.section) ? account.section : null;
-
-    const fallback: AccountType = sectionHint
-      ? sectionHint
-      : statementType === 'balance_sheet'
-        ? 'asset'
-        : 'expense';
-
-    const note = sectionHint
-      ? `forced to ${sectionHint} by ${statementType === 'pnl' ? 'P&L' : 'Balance Sheet'} section context`
-      : `${statementType === 'pnl' ? 'P&L' : 'Balance Sheet'} import — defaulted to ${fallback} (no section detected; review and reclassify)`;
-
+    // Raw type invalid AND no section hint → safe default with low confidence
+    const fallback: AccountType =
+      statementType === 'balance_sheet' ? 'asset' : 'expense';
     results.set(account.id, {
       ...raw,
       accountType: fallback,
-      confidence: sectionHint ? 'medium' : 'low',
-      hintFired: `${raw.hintFired}; ${note}`,
+      confidence: 'low',
+      hintFired: `${raw.hintFired}; ${statementType === 'pnl' ? 'P&L' : 'Balance Sheet'} import — defaulted to ${fallback} (no section detected; review and reclassify)`,
     });
   }
   return results;
