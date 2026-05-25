@@ -1,10 +1,17 @@
 /**
  * Zustand workspace store with localStorage persistence.
  * Supabase persistence will be added in a later phase.
+ *
+ * Privacy mode: when enabled at runtime (via setPrivacyMode), writes are
+ * suppressed and any existing persisted data is wiped from localStorage.
+ * In-memory Zustand state continues to work — but nothing survives a tab
+ * close or page refresh. Useful for shared/public computers or one-off
+ * demos. The preference itself is intentionally NOT persisted: users opt
+ * in fresh per session.
  */
 
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
 import type {
   ClientWorkspace,
   Account,
@@ -14,6 +21,69 @@ import type {
   Scenario,
   OperationalDataPoint,
 } from '@/types';
+
+// ─────────────────────────────────────────────
+// Privacy mode + conditional storage adapter
+// ─────────────────────────────────────────────
+
+const PERSIST_KEY = 'finsight-workspaces';
+
+/**
+ * Module-level flag that the storage adapter checks on every write. When
+ * true, writes are dropped silently. Reads still work (so if you toggle
+ * privacy mode AFTER loading data, the data stays in memory until you
+ * close the tab).
+ */
+let privacyModeEnabled = false;
+
+/** Returns the current privacy-mode state. Cheap synchronous read. */
+export function isPrivacyMode(): boolean {
+  return privacyModeEnabled;
+}
+
+/**
+ * Enable / disable privacy mode at runtime.
+ * Enabling wipes the persisted store from localStorage immediately so the
+ * data trail is gone the moment the user opts in.
+ */
+export function setPrivacyMode(on: boolean): void {
+  privacyModeEnabled = on;
+  if (on && typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem(PERSIST_KEY);
+    } catch {
+      // Ignore — localStorage may be unavailable (e.g. Safari private mode)
+    }
+  }
+}
+
+const conditionalStorage: StateStorage = {
+  getItem: (name) => {
+    if (typeof window === 'undefined') return null;
+    try {
+      return localStorage.getItem(name);
+    } catch {
+      return null;
+    }
+  },
+  setItem: (name, value) => {
+    if (typeof window === 'undefined') return;
+    if (privacyModeEnabled) return; // privacy mode → swallow the write
+    try {
+      localStorage.setItem(name, value);
+    } catch {
+      // Ignore quota errors etc. — better to lose persistence than crash
+    }
+  },
+  removeItem: (name) => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.removeItem(name);
+    } catch {
+      // Ignore
+    }
+  },
+};
 
 interface WorkspaceState {
   workspaces: ClientWorkspace[];
@@ -250,8 +320,8 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
       },
     }),
     {
-      name: 'finsight-workspaces',
-      storage: createJSONStorage(() => localStorage),
+      name: PERSIST_KEY,
+      storage: createJSONStorage(() => conditionalStorage),
     }
   )
 );

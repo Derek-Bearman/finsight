@@ -1,7 +1,11 @@
 {
   // FinSight — Cloudflare Workers deployment via @opennextjs/cloudflare
+  // Custom worker.ts wraps the OpenNext-generated .open-next/worker.js
+  // to inject security headers (CSP, HSTS, X-Frame-Options, etc.) on
+  // every response. The wrapper is a thin pass-through; all Next.js
+  // behaviour comes from the underlying OpenNext worker.
   "name": "finsight",
-  "main": ".open-next/worker.js",
+  "main": "worker.ts",
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
 

@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { TourOverlay, useTour, HelpButton, HOME_TOUR_STEPS } from '@/components/tutorial';
 import { ALL_PROFILES, PROFILE_MAP } from '@/lib/profiles';
-import { useWorkspaceStore } from '@/store/workspace-store';
+import { useWorkspaceStore, isPrivacyMode, setPrivacyMode } from '@/store/workspace-store';
 import { FileDropzone } from '@/components/upload/FileDropzone';
 import { ColumnMappingPreview } from '@/components/upload/ColumnMappingPreview';
 import { ClassificationReview } from '@/components/upload/ClassificationReview';
@@ -484,6 +484,30 @@ export default function HomePage() {
 
   const [newWorkspaceId, setNewWorkspaceId] = useState('');
 
+  // ── Privacy mode (don't save to this browser) ──────────────────────────────
+  // Local mirror so the header button re-renders on toggle. The source of
+  // truth lives in the storage adapter (module flag); we just re-read it
+  // here and keep our React state in sync.
+  const [privacyOn, setPrivacyOn] = useState(false);
+  useEffect(() => {
+    setPrivacyOn(isPrivacyMode());
+  }, []);
+
+  const togglePrivacyMode = () => {
+    const turningOn = !privacyOn;
+    if (turningOn) {
+      const ok = window.confirm(
+        'Privacy mode wipes all workspaces from this browser immediately and stops new data from being saved here.\n\n' +
+        'Anything in memory stays usable for this session, but closing the tab or refreshing will lose everything.\n\n' +
+        'This is meant for shared / public computers and one-off demos.\n\n' +
+        'Continue?'
+      );
+      if (!ok) return;
+    }
+    setPrivacyMode(turningOn);
+    setPrivacyOn(turningOn);
+  };
+
   // ── Workspace JSON import (from another machine / backup) ───────────────────
 
   const workspaceImportRef = React.useRef<HTMLInputElement>(null);
@@ -786,6 +810,26 @@ export default function HomePage() {
           </span>
         </div>
         <div className="flex items-center gap-3">
+          {/* Privacy mode toggle — wipes localStorage and stops new writes. */}
+          <button
+            type="button"
+            onClick={togglePrivacyMode}
+            data-testid="privacy-mode-toggle"
+            title={
+              privacyOn
+                ? 'Privacy mode is ON — nothing is being saved to this browser. Click to turn off.'
+                : 'Click to enter privacy mode — wipes local data and stops new writes. Use on shared computers.'
+            }
+            className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
+            style={{
+              borderColor: privacyOn ? 'hsl(0 72% 51%)' : 'hsl(var(--border))',
+              background: privacyOn ? 'hsl(0 72% 51% / 0.1)' : 'hsl(var(--background))',
+              color: privacyOn ? 'hsl(0 72% 40%)' : 'hsl(var(--muted-foreground))',
+            }}
+          >
+            <span aria-hidden>{privacyOn ? '🔒' : '🔓'}</span>
+            <span>{privacyOn ? 'Privacy ON' : 'Privacy mode'}</span>
+          </button>
           <HelpButton onOpen={() => tourHook.openTour(0)} />
           {process.env.NODE_ENV === 'development' && (
             <Link
