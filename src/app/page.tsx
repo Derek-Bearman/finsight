@@ -16,7 +16,7 @@ import type { Account, AccountValue, ClientWorkspace, Scenario, ImportValidation
 import type { ColumnMapping, ParsedRow } from '@/lib/parsers/csv-parser';
 import type { ClassificationResult } from '@/lib/classifiers';
 import { parseCSV } from '@/lib/parsers/csv-parser';
-import { xlsxToCsv, isExcelFile, isExcelMimeType } from '@/lib/parsers/xlsx-converter';
+import { xlsxToCsvDetailed, isExcelFile, isExcelMimeType } from '@/lib/parsers/xlsx-converter';
 import { classifyAll } from '@/lib/classifiers';
 import { validateImport } from '@/lib/parsers/import-validator';
 
@@ -454,15 +454,29 @@ export default function HomePage() {
 
   const handleFile = async (
     file: File,
-    setUpload: React.Dispatch<React.SetStateAction<UploadState>>
+    setUpload: React.Dispatch<React.SetStateAction<UploadState>>,
+    statementType: 'pnl' | 'balance_sheet'
   ) => {
     setUpload({ ...EMPTY_UPLOAD, file, isLoading: true, phase: 'idle' });
     try {
-      // Support Excel files by converting to CSV first
+      // Support Excel files by converting to CSV first.
+      // Multi-sheet workbooks: pick the sheet matching this upload type.
       let text: string;
+      const xlsxNotices: ImportValidationWarning[] = [];
       if (isExcelFile(file.name) || isExcelMimeType(file.type)) {
         const buffer = await file.arrayBuffer();
-        text = xlsxToCsv(buffer);
+        const conversion = xlsxToCsvDetailed(buffer, statementType);
+        text = conversion.csv;
+        if (conversion.pickedNonFirst && conversion.sheetName) {
+          xlsxNotices.push({
+            type: 'xlsx_sheet_picked',
+            severity: 'info',
+            message:
+              `Workbook has ${conversion.allSheets.length} sheets ` +
+              `(${conversion.allSheets.join(', ')}). ` +
+              `Imported from the "${conversion.sheetName}" sheet — best match for ${statementType === 'pnl' ? 'P&L' : 'Balance Sheet'}.`,
+          });
+        }
       } else {
         text = await file.text();
       }
@@ -476,15 +490,18 @@ export default function HomePage() {
           file,
           isLoading: false,
           phase: 'idle',
-          warnings: [{
-            type: 'no_period_columns',
-            severity: 'error',
-            message:
-              'No date columns detected in this file. FinSight expects a standard QuickBooks P&L export ' +
-              'where months (Jan 2024, Feb 2024…) are columns and accounts are rows. ' +
-              'Try exporting a “Profit and Loss by Month” report from QuickBooks, or check that your ' +
-              'file is not in a transposed (pivot) format.',
-          }],
+          warnings: [
+            ...xlsxNotices,
+            {
+              type: 'no_period_columns',
+              severity: 'error',
+              message:
+                'No date columns detected in this file. FinSight expects a standard QuickBooks P&L export ' +
+                'where months (Jan 2024, Feb 2024…) are columns and accounts are rows. ' +
+                'Try exporting a “Profit and Loss by Month” report from QuickBooks, or check that your ' +
+                'file is not in a transposed (pivot) format.',
+            },
+          ],
         });
         return;
       }
@@ -506,16 +523,19 @@ export default function HomePage() {
         rows: result.rows,
         accounts: [],
         values: [],
-        warnings: isAllZero
-          ? [{
-              type: 'all_zero_values',
-              severity: 'warning',
-              message:
-                `Parsed ${result.rows.length} accounts from "${file.name}" but every value is $0. ` +
-                `Check the data preview — values may be in a column that wasn't detected as a period. ` +
-                `Use the Role dropdown to mark the correct column as "Period".`,
-            }]
-          : [],
+        warnings: [
+          ...xlsxNotices,
+          ...(isAllZero
+            ? [{
+                type: 'all_zero_values' as const,
+                severity: 'warning' as const,
+                message:
+                  `Parsed ${result.rows.length} accounts from "${file.name}" but every value is $0. ` +
+                  `Check the data preview — values may be in a column that wasn't detected as a period. ` +
+                  `Use the Role dropdown to mark the correct column as "Period".`,
+              }]
+            : []),
+        ],
         phase: 'mapping',
       });
     } catch {
@@ -828,7 +848,7 @@ export default function HomePage() {
               subtitle="Upload a P&L report — CSV or Excel (.xlsx) both work. Exports from QuickBooks, Xero, and most accounting platforms are supported."
               state={pnlUpload}
               profileId={selectedProfileId}
-              onFile={(f) => handleFile(f, setPnlUpload)}
+              onFile={(f) => handleFile(f, setPnlUpload, 'pnl')}
               onMappingConfirm={handlePnlMappingConfirm}
               onMappingCancel={() => setPnlUpload(EMPTY_UPLOAD)}
               onSkip={handlePnlNext}
@@ -872,7 +892,7 @@ export default function HomePage() {
               subtitle="Upload a balance sheet export. Assets, liabilities, and equity accounts will be detected automatically."
               state={bsUpload}
               profileId={selectedProfileId}
-              onFile={(f) => handleFile(f, setBsUpload)}
+              onFile={(f) => handleFile(f, setBsUpload, 'balance_sheet')}
               onMappingConfirm={handleBsMappingConfirm}
               onMappingCancel={() => setBsUpload(EMPTY_UPLOAD)}
               onSkip={handleBsNext}

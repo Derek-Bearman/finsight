@@ -370,7 +370,8 @@ export interface ImportValidationWarning {
     | 'negative_revenue'
     | 'no_period_columns'
     | 'all_zero_values'
-    | 'parse_error';
+    | 'parse_error'
+    | 'xlsx_sheet_picked';
   message: string;
   accountId?: string;
   severity: 'error' | 'warning' | 'info';
