@@ -29,8 +29,77 @@ export interface ParsedRow {
   indentLevel: number;
   /** Map of period key (e.g. "2024-01") → parsed amount. */
   values: Record<string, number>;
+  /**
+   * Statement section this row sits under, derived by tracking section
+   * header rows (ASSETS, LIABILITIES, EQUITY, Income, COGS, Expenses)
+   * as the parser walks the document. Used by the classifier to
+   * disambiguate keyword-matched accounts (e.g. "Customer Deposits"
+   * keyword-matches 'deposits'→asset but is a liability when it appears
+   * under a LIABILITIES section).
+   */
+  section?: 'asset' | 'liability' | 'equity' | 'revenue' | 'cogs' | 'expense';
   /** Allow indexing by arbitrary string keys (e.g. raw header names for preview tables). */
   [key: string]: unknown;
+}
+
+// ─────────────────────────────────────────────
+// Section tracking
+// ─────────────────────────────────────────────
+
+type Section = 'asset' | 'liability' | 'equity' | 'revenue' | 'cogs' | 'expense';
+
+/**
+ * Maps a (lowercased, trimmed) account name to the statement section
+ * it implies, when that name appears as a section header.
+ *
+ * Includes common QBO and accounting-model section headings.
+ */
+const SECTION_FROM_NAME: Record<string, Section> = {
+  // Balance sheet
+  'assets': 'asset',
+  'current assets': 'asset',
+  'fixed assets': 'asset',
+  'other assets': 'asset',
+  'other current assets': 'asset',
+  'bank accounts': 'asset',
+  'property, plant & equipment': 'asset',
+  'property plant & equipment': 'asset',
+  'property plant and equipment': 'asset',
+  'liabilities': 'liability',
+  'current liabilities': 'liability',
+  'long-term liabilities': 'liability',
+  'long term liabilities': 'liability',
+  'other current liabilities': 'liability',
+  'credit cards': 'liability',
+  'equity': 'equity',
+  'stockholders equity': 'equity',
+  "stockholders' equity": 'equity',
+  "stockholder's equity": 'equity',
+  "shareholders' equity": 'equity',
+  "shareholder's equity": 'equity',
+  'members equity': 'equity',
+  "member's equity": 'equity',
+  // P&L
+  'income': 'revenue',
+  'revenue': 'revenue',
+  'sales': 'revenue',
+  'other income': 'revenue',
+  'cost of goods sold': 'cogs',
+  'cogs': 'cogs',
+  'expenses': 'expense',
+  'expense': 'expense',
+  'operating expenses': 'expense',
+  'other expenses': 'expense',
+  'other expense': 'expense',
+};
+
+/**
+ * If `name` is a recognised section-header label, returns the section it
+ * implies. Otherwise returns null. Case- and whitespace-insensitive.
+ */
+function sectionFromName(name: string): Section | null {
+  const k = name.trim().toLowerCase();
+  return SECTION_FROM_NAME[k] ?? null;
 }
 
 // ─────────────────────────────────────────────
@@ -274,16 +343,31 @@ export function detectColumnMapping(headers: string[]): ColumnMapping {
  *   (rows that are category labels with no account-level data)
  */
 function isTotalsRow(name: string): boolean {
+  return classifyRowKind(name) !== 'data';
+}
+
+type RowKind = 'total' | 'section' | 'data';
+
+/**
+ * More precise version of isTotalsRow that distinguishes:
+ *   - 'total'   — subtotal/total/grand-total/net row, always skip
+ *   - 'section' — section header label (ASSETS, LIABILITIES, Income, etc.),
+ *                 skip ONLY when the row has no actual data values (because
+ *                 the same name can appear as both a section header and an
+ *                 individual account, e.g. "Other Assets" twice in a BS)
+ *   - 'data'    — keep
+ */
+function classifyRowKind(name: string): RowKind {
   const trimmed = name.trim();
   // Explicit total/subtotal/net patterns
-  if (/^(total|subtotal|net|grand\s+total)\b/i.test(trimmed)) return true;
+  if (/^(total|subtotal|net|grand\s+total)\b/i.test(trimmed)) return 'total';
   // Explicit QBO P&L summary row names that must always be excluded
   const EXPLICIT_TOTALS = [
     'total revenue', 'total income', 'total expenses', 'total expense',
     'total cost of goods sold', 'total cogs', 'total other income',
     'total other expenses', 'total other expense',
   ];
-  if (EXPLICIT_TOTALS.includes(trimmed.toLowerCase())) return true;
+  if (EXPLICIT_TOTALS.includes(trimmed.toLowerCase())) return 'total';
   // QBO section header labels — these are category groupings, not leaf accounts
   const SECTION_HEADERS = [
     'income', 'cost of goods sold', 'cogs', 'expenses', 'expense',
@@ -293,9 +377,14 @@ function isTotalsRow(name: string): boolean {
     'equity', 'bank accounts', 'other current assets',
     'other current liabilities', 'credit cards',
     'liabilities and equity',
+    'property, plant & equipment', 'property plant & equipment',
+    'property plant and equipment',
+    "stockholders' equity", "stockholder's equity",
+    'stockholders equity', "shareholders' equity", "shareholder's equity",
+    'members equity', "member's equity",
   ];
-  if (SECTION_HEADERS.includes(trimmed.toLowerCase())) return true;
-  return false;
+  if (SECTION_HEADERS.includes(trimmed.toLowerCase())) return 'section';
+  return 'data';
 }
 
 /**
@@ -507,6 +596,7 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
   }
 
   const rows: ParsedRow[] = [];
+  let currentSection: Section | null = null;
 
   for (const row of dataRows) {
     // Skip blank rows
@@ -518,8 +608,32 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
     // Skip blank account names
     if (trimmedName === '') continue;
 
-    // Skip totals/subtotal rows
-    if (isTotalsRow(trimmedName)) continue;
+    // Update section tracker BEFORE the filter — section headers (which are
+    // filtered out as data rows) still need to update state for downstream
+    // rows that ARE kept.
+    const detectedSection = sectionFromName(trimmedName);
+    if (detectedSection !== null) currentSection = detectedSection;
+
+    // Decide whether to skip this row.
+    //  - 'total' rows (Total Current Assets, Net Income, etc.) — always skip
+    //  - 'section' rows (ASSETS, LIABILITIES, "Other Assets") — skip ONLY when
+    //    they have no actual values; otherwise treat as a regular account.
+    //    This handles the common case where a financial model uses the same
+    //    name for both the section header and a leaf account (e.g. "Other
+    //    Assets" appears twice in some balance sheet templates).
+    const rowKind = classifyRowKind(trimmedName);
+    if (rowKind === 'total') continue;
+    if (rowKind === 'section') {
+      // Sum absolute values across detected period columns to decide if the
+      // row carries data.
+      let rowAbsSum = 0;
+      for (const { colIndex } of richPeriodCols) {
+        const raw = String(row[colIndex] ?? '').trim();
+        if (raw) rowAbsSum += Math.abs(parseAmount(raw));
+      }
+      if (rowAbsSum === 0) continue; // pure header — drop
+      // else: fall through and keep as an account
+    }
 
     const indentLevel = measureIndentLevel(rawName);
 
@@ -551,6 +665,9 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
     };
     if (accountNumber !== undefined) {
       parsedRow.accountNumber = accountNumber;
+    }
+    if (currentSection !== null) {
+      parsedRow.section = currentSection;
     }
 
     // Populate header-keyed cells for the preview table

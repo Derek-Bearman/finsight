@@ -2,8 +2,27 @@
  * Profile-aware classifier — layers IndustryProfile hints on top of the baseline result.
  */
 
-import type { IndustryProfile, ClassificationHint } from '@/types';
+import type { AccountType, IndustryProfile, ClassificationHint, StatementType } from '@/types';
 import { classifyBaseline, type ClassificationResult } from './baseline';
+
+// ─────────────────────────────────────────────
+// Statement-type constraint
+// ─────────────────────────────────────────────
+
+const PNL_TYPES: ReadonlySet<AccountType> = new Set(['revenue', 'cogs', 'expense']);
+const BS_TYPES: ReadonlySet<AccountType> = new Set(['asset', 'liability', 'equity']);
+
+/**
+ * For a given statement type, returns the set of valid account types.
+ * Returns null if no constraint (mixed import).
+ */
+function allowedTypesFor(
+  statementType: StatementType | undefined,
+): ReadonlySet<AccountType> | null {
+  if (statementType === 'pnl') return PNL_TYPES;
+  if (statementType === 'balance_sheet') return BS_TYPES;
+  return null;
+}
 
 // ─────────────────────────────────────────────
 // Confidence ordering helper
@@ -145,17 +164,69 @@ export function classifyWithProfile(
 /**
  * Classifies a batch of accounts using the given IndustryProfile.
  *
- * @param accounts - Array of account objects with id, name, and optional number.
- * @param profile  - The active IndustryProfile.
+ * When `statementType` is supplied, the result is constrained to types
+ * valid for that statement (revenue/cogs/expense for P&L,
+ * asset/liability/equity for Balance Sheet). If the underlying classifier
+ * picks an invalid type, the per-account `section` hint (from the parser)
+ * is used as the authoritative override. This prevents BS lines like
+ * "Customer Deposits" from being keyword-matched as 'deposits'→asset
+ * when they sit under a LIABILITIES section.
+ *
+ * @param accounts        - Array of account objects with id, name, and optional number/section.
+ * @param profile         - The active IndustryProfile.
+ * @param statementType   - Optional. If 'pnl' / 'balance_sheet', constrains output to that statement's types.
  * @returns A Map keyed by account id, with ClassificationResult values.
  */
 export function classifyAll(
-  accounts: Array<{ id: string; name: string; number?: string }>,
+  accounts: Array<{
+    id: string;
+    name: string;
+    number?: string;
+    section?: AccountType;
+  }>,
   profile: IndustryProfile,
+  statementType?: StatementType,
 ): Map<string, ClassificationResult> {
   const results = new Map<string, ClassificationResult>();
+  const allowed = allowedTypesFor(statementType);
+
   for (const account of accounts) {
-    results.set(account.id, classifyWithProfile(account.name, account.number, profile));
+    const raw = classifyWithProfile(account.name, account.number, profile);
+
+    // If statementType is unconstrained, return raw result as-is
+    if (allowed === null) {
+      results.set(account.id, raw);
+      continue;
+    }
+
+    // If raw type is valid for this statement, accept it
+    if (raw.accountType !== null && allowed.has(raw.accountType)) {
+      results.set(account.id, raw);
+      continue;
+    }
+
+    // Type is invalid for this statement. Prefer the section hint if it's
+    // a valid type for this statement; otherwise use a sensible default
+    // (asset for BS, expense for P&L — the most common bucket).
+    const sectionHint =
+      account.section && allowed.has(account.section) ? account.section : null;
+
+    const fallback: AccountType = sectionHint
+      ? sectionHint
+      : statementType === 'balance_sheet'
+        ? 'asset'
+        : 'expense';
+
+    const note = sectionHint
+      ? `forced to ${sectionHint} by ${statementType === 'pnl' ? 'P&L' : 'Balance Sheet'} section context`
+      : `${statementType === 'pnl' ? 'P&L' : 'Balance Sheet'} import — defaulted to ${fallback} (no section detected; review and reclassify)`;
+
+    results.set(account.id, {
+      ...raw,
+      accountType: fallback,
+      confidence: sectionHint ? 'medium' : 'low',
+      hintFired: `${raw.hintFired}; ${note}`,
+    });
   }
   return results;
 }

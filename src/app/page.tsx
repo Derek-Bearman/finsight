@@ -12,7 +12,7 @@ import { ClassificationReview } from '@/components/upload/ClassificationReview';
 import { ImportValidationBanner } from '@/components/upload/ImportValidationBanner';
 import { ManualEntryForm } from '@/components/upload/ManualEntryForm';
 import { Button } from '@/components/ui/button';
-import type { Account, AccountValue, ClientWorkspace, Scenario, ImportValidationWarning } from '@/types';
+import type { Account, AccountType, AccountValue, ClientWorkspace, Scenario, ImportValidationWarning } from '@/types';
 import type { ColumnMapping, ParsedRow } from '@/lib/parsers/csv-parser';
 import type { ClassificationResult } from '@/lib/classifiers';
 import { parseCSV } from '@/lib/parsers/csv-parser';
@@ -400,15 +400,30 @@ function buildAccountValues(accountId: string, row: ParsedRow): AccountValue[] {
   });
 }
 
+interface ClassifierInput {
+  id: string;
+  name: string;
+  number?: string;
+  /** Parser-detected section (asset/liability/equity/revenue/cogs/expense). */
+  section?: AccountType;
+}
+
 /**
  * Converts ParseResult rows + mapping into Account[] and AccountValue[].
+ * Also returns classifierInputs[] — the same accounts annotated with the
+ * `section` info from the parser, used by the section-aware classifier.
  */
 function buildAccountsFromParseResult(
   rows: ParsedRow[],
-  mapping: ColumnMapping
-): { accounts: Account[]; values: AccountValue[] } {
+  _mapping: ColumnMapping
+): {
+  accounts: Account[];
+  values: AccountValue[];
+  classifierInputs: ClassifierInput[];
+} {
   const accounts: Account[] = [];
   const values: AccountValue[] = [];
+  const classifierInputs: ClassifierInput[] = [];
 
   for (const row of rows) {
     if (!row.accountName) continue;
@@ -422,9 +437,14 @@ function buildAccountsFromParseResult(
     };
     accounts.push(account);
     values.push(...buildAccountValues(id, row));
+
+    const ci: ClassifierInput = { id, name: row.accountName };
+    if (row.accountNumber !== undefined) ci.number = row.accountNumber;
+    if (row.section !== undefined) ci.section = row.section as AccountType;
+    classifierInputs.push(ci);
   }
 
-  return { accounts, values };
+  return { accounts, values, classifierInputs };
 }
 
 // ── Main Page ────────────────────────────────────────────────────────────────
@@ -567,10 +587,13 @@ export default function HomePage() {
       if (!profile) return;
 
       // Build accounts and values from parsed rows
-      const { accounts: rawAccounts, values } = buildAccountsFromParseResult(rows, mapping);
+      const { accounts: rawAccounts, values, classifierInputs } = buildAccountsFromParseResult(rows, mapping);
 
-      // Classify accounts using the profile
-      const classifyResults = classifyAll(rawAccounts, profile);
+      // Classify accounts using the profile — pass statementType so the
+      // classifier constrains output to that statement's account types
+      // (revenue/cogs/expense for P&L, asset/liability/equity for BS) and
+      // uses parser-detected section context to override keyword matches.
+      const classifyResults = classifyAll(classifierInputs, profile, statementType);
 
       // Apply classification to accounts
       const classifiedAccounts: Account[] = rawAccounts.map((a) => {
