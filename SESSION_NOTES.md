@@ -1,7 +1,7 @@
 # FinSight — Session Notes
 
 **Last updated:** 2026-05-25
-**Live app:** https://finsight.bearman-derek.workers.dev (version `3007e0a0` — post Cowork bug sweep)
+**Live app:** https://finsight.bearman-derek.workers.dev (version `d0888e0a` — PDF export shipped)
 **GitHub:** https://github.com/Derek-Bearman/finsight
 **Deploy command:** `cd ~/Documents/finsight && git pull && npm run cf:deploy`
 
@@ -243,9 +243,13 @@ other workspaces on the receiving machine.
 Rough effort estimates assume one focused Claude session.
 
 ### Tier 1 — biggest demo / production impact
-- **PDF export of reports** (~1-2hrs) — in the original spec's
-  "Done Definition for the Demo" but doesn't exist yet. Use react-pdf
-  or print-CSS. Accountants present in PDF.
+- ~~**PDF export of reports**~~ — **shipped** in commit `6e66f24`. New
+  route at `/workspace/[clientId]/print` that renders a full client
+  report (cover, exec summary, P&L, ratios, projections, operational
+  metrics), auto-fires `window.print()` ~1.5s after hydration, and the
+  workspace header has a new "↓ PDF" button. Print CSS in
+  `globals.css` handles page-breaks + chrome-hiding. Recharts SVGs
+  print at vector quality — no react-pdf dep needed.
 - **Cash flow reconciliation** (~2-3hrs) — when P&L net income diverges
   from cash balance changes, flag it ("strong profit but receivables/
   inventory are choking the business"). Spec called this out as
