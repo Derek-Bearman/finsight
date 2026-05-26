@@ -24,8 +24,8 @@
   // wrangler secret instead — never put it in this file:
   //   echo "<service_role_key>" | wrangler secret put SUPABASE_SERVICE_ROLE_KEY
   "vars": {
-    "NEXT_PUBLIC_SUPABASE_URL": "https://YOUR_PROJECT_REF.supabase.co",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "REPLACE_WITH_ANON_KEY"
+    "NEXT_PUBLIC_SUPABASE_URL": "https://camphmqvrzqpgrhdjafo.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_wiFj4325ez0dD6O7ZYN6GA_igE_c9ov"
   },
 
   // ─── Environments ─────────────────────────────────────────────────────────

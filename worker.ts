@@ -38,7 +38,11 @@ const SECURITY_HEADERS: Record<string, string> = {
     "style-src 'self' 'unsafe-inline'", // Tailwind utility classes, inline style attrs
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self'",
+    // 'self' for our API routes + Supabase project domain for auth + DB.
+    // `wss://*.supabase.co` for Supabase Realtime websockets (used by
+    // future features; harmless to allow now). NEVER widen to `*` — the
+    // whole point of connect-src is to block exfiltration via attacker JS.
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

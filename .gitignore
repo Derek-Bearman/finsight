@@ -34,6 +34,8 @@ yarn-error.log*
 .env*
 # ...but DO commit the placeholder template so contributors know what to fill in
 !.env*.example
+# ...and the production NEXT_PUBLIC_* values (intentionally public — RLS protects)
+!.env.production
 
 # vercel
 .vercel

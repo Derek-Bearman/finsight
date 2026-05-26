@@ -27,7 +27,7 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
 }
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { supabase, response } = createSupabaseProxyClient(request);
 
   // Refresh session if expired. getUser() validates the JWT against
