@@ -1,7 +1,7 @@
 # FinSight — Session Notes
 
-**Last updated:** 2026-05-24
-**Live app:** https://finsight.bearman-derek.workers.dev (version `d444f9b9`)
+**Last updated:** 2026-05-25
+**Live app:** https://finsight.bearman-derek.workers.dev (version `3007e0a0` — post Cowork bug sweep)
 **GitHub:** https://github.com/Derek-Bearman/finsight
 **Deploy command:** `cd ~/Documents/finsight && git pull && npm run cf:deploy`
 
@@ -15,7 +15,7 @@
 
 All 8 phases of the original spec are built (data model, CSV import,
 mapping UI, calculations, projections, visualization, what-if scenarios,
-operational metrics). On top of that, this recent session shipped:
+operational metrics). On top of that, recent sessions shipped:
 
 - **Phase 3.5** — mapping UI iteration (bulk select, keyboard shortcuts,
   source filter chips, section-context conflict warnings, refresh-auto
@@ -25,6 +25,38 @@ operational metrics). On top of that, this recent session shipped:
   headers via a custom Worker wrapper, privacy-mode toggle)
 - **JSON workspace export/import** — portable `.finsight.json` files for
   backup, cross-browser migration, and colleague handoff
+- **Pre-demo Cowork bug sweep** (2026-05-25, commits `dd5acb9` + `1011b8d`)
+  — wizard P&L/BS steps explicitly labeled "(Optional)" with the
+  redundant "Skip for now" link removed; Done page copy now conditional
+  on account count; Clear Data swapped from `window.confirm` to a shadcn
+  Dialog ("Cancel" / "Clear data" with a destructive variant);
+  Recent Workspaces moved to TOP of home when present with a "+ New
+  Workspace" CTA and a bolded "Saved in this browser only · no cloud
+  sync" trust signal; granularity (Monthly/Quarterly/Annual) now shared
+  across Overview + Reports via lifted state at `WorkspacePage`
+  level; industry icons swapped from emoji to Lucide via a new
+  `src/components/ui/profile-icon.tsx` helper (HardHat / Briefcase /
+  Store / UtensilsCrossed / Cloud / Building2); Projections "default"
+  badge hides itself when its model is selected (kills the
+  double-blue); tutorial resets to step 1 on every "?" click and the
+  bubble counter now prepends a `tourLabel` ("Home tour" vs "Workspace
+  tour"); Privacy mode toggle ON state is now solid red fill + "PRIVACY
+  ON" label + a "LIVE" micro-badge; "3 scenarios" pill restyled as
+  non-interactive badge; Export disabled on empty with tooltip and
+  fires a success toast on click; What-If tab guards against zero-data
+  with an empty-state message; Projections horizon collapsed "12 Mo" +
+  "1 Yr" into a single "1 Yr" option; Step indicator label
+  "Classification" → "Classify"; empty-state copy across all 6 tabs
+  standardized to "No financial data yet — import a P&L or balance
+  sheet to see [feature]"; Operational header reads as natural
+  language instead of "0 metrics · 0 with data"; mapping toolbar
+  audit-log button restyled with proper button affordance + count
+  badge; source-filter chip tooltips added; reset-all-mapping disabled
+  tooltip clarified.
+
+Deliberately NOT addressed: the Beta badge stays (correctly sets
+pre-1.0 expectations), and the FileDropzone already has drag-active
+styling (Cowork didn't drag-test).
 
 ## How the deploy works
 
@@ -138,6 +170,53 @@ wraps its fetch handler to add 6 response headers on every request:
 build's tsc pass — `worker.ts` is a Workers entrypoint, not part of
 the Next app.
 
+### ProfileIcon helper (post-bug-sweep)
+
+`src/components/ui/profile-icon.tsx` exports a `<ProfileIcon profileId=…
+size=… />` component that maps profile id → Lucide icon. **The
+`IndustryProfile.icon` string field on each profile is now ignored by
+renderers** — it's kept for backward compat with persisted workspaces
+but no UI reads it. To swap or add an icon: edit the `ICON_MAP` in
+profile-icon.tsx, NOT the individual profile files. This keeps the
+data-only profile system clean.
+
+### Shared period state across Overview + Reports
+
+`granularity` state lives at the top-level `WorkspacePage` component
+(`sharedGranularity`) and is passed down to `<OverviewTab>` and
+`<ReportsTab>` as `granularity` + `onGranularityChange` props. Both
+tabs render their own period selector but write through the shared
+setter, so switching tabs preserves the user's choice. Default is
+`'monthly'`. Reports used to default to `'annual'` (deliberate
+income-statement choice) — that was sacrificed for cross-tab
+consistency because Cowork's testing showed users assumed it
+persisted. If a future session wants tab-specific defaults again,
+fork the state back to per-tab and add a top-level toggle.
+
+### Tour overlay reset effect
+
+`TourOverlay` has a `useEffect` that resets `currentIdx` to
+`startAtStep` whenever that prop changes — guards against the
+re-render case where the parent reopens the tour at a different step
+but React reuses the component instance and skips re-init of the
+initial state. Combined with `tourHook.openTour(0)` from both
+`HelpButton` triggers, "?" always restarts the tour at step 1.
+
+The `tourLabel` prop is shown in the step counter ("Home tour · Step 1
+of 5" vs "Workspace tour · Step 1 of 8") so users can tell the two
+tours apart.
+
+### Clear Data confirmation pattern
+
+`<Dialog>` from `@/components/ui/dialog` (shadcn / base-ui), opened by
+local state `showClearConfirm` in `WorkspacePage`. Two buttons —
+`variant="outline"` Cancel + `variant="destructive"` "Clear data" —
+plus the X close. Single-step confirm, not typed-DELETE: appropriate
+for browser-local data scope. On confirm, calls `clearWorkspaceData`
+(keeps scenarios, wipes accounts + values) and fires a
+`showHeaderToast` "Imported data cleared". Same toast helper also
+fires on successful Export.
+
 ### JSON workspace export format
 
 ```json
@@ -193,6 +272,15 @@ Rough effort estimates assume one focused Claude session.
   `Vendor_A`, etc. before saving.
 - **Access audit log** (~30min) — add `viewedAt` events to the audit
   log so user can spot anomalies.
+- **Workspace rename UI** (~45min) — Cowork bug report #22. No
+  discoverable way to rename a workspace once created. Likely a pencil
+  icon next to the workspace title in the header that opens an inline
+  edit. Store already supports the mutation.
+- **Slug-based workspace URLs** (~1.5hrs) — Cowork bug report #23.
+  Currently URL is `/workspace/ws-1779707018806` which is
+  unprofessional in a screenshare. Switch to client-name slug
+  (`/workspace/acme-plumbing-llc`) with an id-based fallback for
+  legacy bookmarks. Workspace store needs id↔slug index.
 
 ### Tier 3 — bigger swings
 - **Stage-and-commit mapping mode** — defer changes until user clicks
@@ -253,9 +341,11 @@ A clean way for a future Claude to resume:
 3. `git log --format='%H %s%n%n%b' -10` to see commit bodies with the
    architectural rationale.
 4. Check the live app version vs latest commit hash to confirm
-   nothing's drifted.
+   nothing's drifted. As of last update the live version was
+   `3007e0a0` and the latest commit was `1011b8d`.
 5. Ask the user what they want to tackle, or propose from the queued
-   list above.
+   list above. **Top of Tier 1 is still PDF export** — listed in the
+   original "Done Definition for the Demo" but never built.
 
 When in doubt about whether something already exists: search the
 codebase. The architecture is intentionally clean — pure calculation
