@@ -14,8 +14,22 @@
     "binding": "ASSETS"
   },
 
+  // ─── Public Supabase config ──────────────────────────────────────────────
+  // These two are PUBLIC — the anon key is meant to be exposed to browser
+  // clients. Row-Level Security policies on the database enforce per-firm
+  // scoping, so a leaked anon key cannot bypass tenancy.
+  //
+  // Derek: REPLACE these placeholders with values from your Supabase
+  // project dashboard (Settings → API). Set the SERVICE_ROLE_KEY as a
+  // wrangler secret instead — never put it in this file:
+  //   echo "<service_role_key>" | wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+  "vars": {
+    "NEXT_PUBLIC_SUPABASE_URL": "https://YOUR_PROJECT_REF.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "REPLACE_WITH_ANON_KEY"
+  },
+
   // ─── Environments ─────────────────────────────────────────────────────────
-  // Add D1/KV/R2 bindings here when you add a backend database (Phase Supabase).
+  // Add D1/KV/R2 bindings here when you add a backend database (Phase 2+).
   // Example (uncomment when ready):
   // "kv_namespaces": [
   //   { "binding": "CACHE", "id": "YOUR_KV_NAMESPACE_ID" }

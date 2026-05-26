@@ -836,6 +836,23 @@ export default function HomePage() {
             )}
           </button>
           <HelpButton onOpen={() => tourHook.openTour(0)} />
+          {/* Sign out — POST to /auth/signout so the proxy can clear the cookie
+              and bounce back to /login. POST (not GET) so a malicious <img>
+              tag can't trigger it. */}
+          <form action="/auth/signout" method="post" style={{ display: 'inline' }}>
+            <button
+              type="submit"
+              className="text-xs font-medium transition-colors rounded-md border px-2.5 py-1 hover:bg-muted"
+              style={{
+                borderColor: 'hsl(var(--border))',
+                color: 'hsl(var(--muted-foreground))',
+                background: 'hsl(var(--background))',
+              }}
+              title="Sign out of FinSight"
+            >
+              Sign out
+            </button>
+          </form>
           {process.env.NODE_ENV === 'development' && (
             <Link
               href="/dev"
