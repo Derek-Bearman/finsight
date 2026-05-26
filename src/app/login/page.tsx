@@ -1,44 +1,74 @@
 'use client';
 
 /**
- * Magic-link login page.
+ * OTP-code login page (replaces the original magic-link flow).
  *
- * Single-field form: user enters their email → Supabase emails them a
- * magic link → they click it → /auth/callback exchanges the code for a
- * session → proxy.ts sees the cookie and lets them through to /.
+ * Why OTP code instead of magic link:
+ *   - Outlook Safe Links and other corporate email gateways aggressively
+ *     flag URLs that point to random-string subdomains on young SaaS
+ *     platforms (e.g. `camphmqvrzqpgrhdjafo.supabase.co`). The link in a
+ *     magic-link email gets blocked or rewritten before the user can
+ *     click it.
+ *   - A plain 6-digit numeric code in the email body has no URL for
+ *     email security software to scan, so it sails through. Same security
+ *     model (one-time, time-limited, server-verified), much better
+ *     deliverability.
  *
- * No passwords in v1 — magic-link is the smoothest B2B accountant UX and
- * removes a whole class of credential-handling risk. We can layer
- * password or SSO later if customers ask.
+ * Flow:
+ *   1. Step "email": user enters email → signInWithOtp triggers Supabase
+ *      to email a 6-digit code.
+ *   2. Step "code": user reads the code from their inbox, types it in →
+ *      verifyOtp({ type: 'email' }) establishes the session.
+ *   3. Redirect to `next` path (or /).
+ *
+ * If the user clicks the magic LINK in the email instead of using the
+ * code, /auth/callback still handles it as a fallback. Both paths work;
+ * the UI just nudges users toward the code path.
+ *
+ * Email template note: Supabase's default email template includes BOTH
+ * the code and a link. To make this truly code-only (no link for email
+ * gateways to flag), the email template in the Supabase dashboard needs
+ * to be edited to omit `{{ .ConfirmationURL }}`. Until that's done, the
+ * code path still works — the link is just visible too.
  */
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 
-type Status = 'idle' | 'sending' | 'sent' | 'error';
+type Step = 'email' | 'code';
+type Status = 'idle' | 'sending' | 'verifying';
 
 function LoginForm() {
   const params = useSearchParams();
   const nextPath = params.get('next') || '/';
-  const [email, setEmail] = useState('');
+
+  const [step, setStep] = useState<Step>('email');
   const [status, setStatus] = useState<Status>('idle');
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Show a helpful message if the user just got bounced from /auth/callback
-  // due to an expired/invalid link.
+  const codeInputRef = useRef<HTMLInputElement>(null);
+
+  // Surface auth errors that came back from /auth/callback (e.g. expired
+  // magic link, wrong project) by populating the error banner on /login.
   const authError = params.get('error_description');
   useEffect(() => {
-    if (authError) {
-      setStatus('error');
-      setErrorMsg(authError);
-    }
+    if (authError) setErrorMsg(authError);
   }, [authError]);
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  // When we transition to the code step, autofocus the code input so the
+  // user can paste/type immediately without clicking.
+  useEffect(() => {
+    if (step === 'code') codeInputRef.current?.focus();
+  }, [step]);
+
+  // ── Step 1: send the email ────────────────────────────────────────────
+  async function handleSendCode(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!email || status === 'sending') return;
+    if (!email || status !== 'idle') return;
     setStatus('sending');
     setErrorMsg(null);
 
@@ -48,19 +78,54 @@ function LoginForm() {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        // Magic-link only — no password — but allow new-account creation
-        // since v1 has no separate signup flow.
+        // Allow account creation on first sign-in (no separate signup
+        // flow in v1).
         shouldCreateUser: true,
+        // Magic-link fallback URL — only used if the user clicks the
+        // link in the email instead of entering the code.
         emailRedirectTo: redirectTo,
       },
     });
 
     if (error) {
-      setStatus('error');
+      setStatus('idle');
       setErrorMsg(error.message);
       return;
     }
-    setStatus('sent');
+    setStatus('idle');
+    setStep('code');
+  }
+
+  // ── Step 2: verify the code ───────────────────────────────────────────
+  async function handleVerifyCode(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!code || status !== 'idle') return;
+    setStatus('verifying');
+    setErrorMsg(null);
+
+    const supabase = createSupabaseBrowserClient();
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token: code.trim(),
+      type: 'email',
+    });
+
+    if (error) {
+      setStatus('idle');
+      setErrorMsg(error.message);
+      return;
+    }
+
+    // Full page navigation — gives the middleware a chance to see the
+    // fresh session cookie before rendering the protected route.
+    window.location.assign(nextPath);
+  }
+
+  function handleStartOver() {
+    setStep('email');
+    setStatus('idle');
+    setCode('');
+    setErrorMsg(null);
   }
 
   return (
@@ -85,31 +150,14 @@ function LoginForm() {
             </span>
           </div>
           <p className="mt-1 text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            Sign in with your email — we&apos;ll send you a one-time link.
+            {step === 'email'
+              ? "Sign in with your email — we'll send you a 6-digit code."
+              : `We sent a code to ${email}. Enter it below to finish signing in.`}
           </p>
         </div>
 
-        {status === 'sent' ? (
-          <div className="text-sm" style={{ color: 'hsl(var(--foreground))' }}>
-            <p className="font-medium">Check your email.</p>
-            <p className="mt-1" style={{ color: 'hsl(var(--muted-foreground))' }}>
-              We sent a sign-in link to <strong>{email}</strong>. Click it from any
-              device to finish signing in.
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                setStatus('idle');
-                setEmail('');
-              }}
-              className="mt-4 text-xs underline underline-offset-2"
-              style={{ color: 'hsl(var(--muted-foreground))' }}
-            >
-              Use a different email
-            </button>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+        {step === 'email' ? (
+          <form onSubmit={handleSendCode} className="flex flex-col gap-3">
             <label
               htmlFor="email"
               className="text-xs font-medium"
@@ -140,8 +188,59 @@ function LoginForm() {
               </p>
             )}
             <Button type="submit" disabled={!email || status === 'sending'}>
-              {status === 'sending' ? 'Sending…' : 'Send magic link'}
+              {status === 'sending' ? 'Sending…' : 'Email me a code'}
             </Button>
+          </form>
+        ) : (
+          <form onSubmit={handleVerifyCode} className="flex flex-col gap-3">
+            <label
+              htmlFor="code"
+              className="text-xs font-medium"
+              style={{ color: 'hsl(var(--foreground))' }}
+            >
+              6-digit code
+            </label>
+            <input
+              ref={codeInputRef}
+              id="code"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="one-time-code"
+              required
+              maxLength={10}
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder="123456"
+              disabled={status === 'verifying'}
+              className="w-full rounded-lg border px-3 py-2 text-lg tracking-[0.4em] font-mono outline-none focus:ring-2"
+              style={{
+                borderColor: 'hsl(var(--border))',
+                background: 'hsl(var(--background))',
+                color: 'hsl(var(--foreground))',
+              }}
+            />
+            {errorMsg && (
+              <p className="text-xs" style={{ color: 'hsl(var(--destructive))' }}>
+                {errorMsg}
+              </p>
+            )}
+            <Button type="submit" disabled={code.length < 6 || status === 'verifying'}>
+              {status === 'verifying' ? 'Verifying…' : 'Sign in'}
+            </Button>
+            <div className="flex items-center justify-between mt-1">
+              <button
+                type="button"
+                onClick={handleStartOver}
+                className="text-xs underline underline-offset-2"
+                style={{ color: 'hsl(var(--muted-foreground))' }}
+              >
+                Use a different email
+              </button>
+              <p className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                Code expires in 60&nbsp;min
+              </p>
+            </div>
           </form>
         )}
 
