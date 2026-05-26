@@ -53,6 +53,16 @@ import type {
   RatioSparklineProps,
   WaterfallStep,
 } from '@/components/charts';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { ProfileIcon } from '@/components/ui/profile-icon';
 
 // ── Helper: years available in values ────────────────────────────────────────
 
@@ -446,7 +456,7 @@ function ProjectionsTab({ clientId }: { clientId: string }) {
           style={{ borderColor: 'hsl(var(--border))' }}
         >
           <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            At least 3 months of financial data is required to run projections.
+            No financial data yet — import a P&amp;L with at least 3 months of history to run projections.
           </p>
         </div>
       ) : (
@@ -504,9 +514,17 @@ function zScoreZoneLabel(z: number | null): string {
   return `${z.toFixed(2)} (Distress)`;
 }
 
-function ReportsTab({ clientId }: { clientId: string }) {
+function ReportsTab({
+  clientId,
+  granularity,
+  onGranularityChange,
+}: {
+  clientId: string;
+  granularity: Granularity;
+  onGranularityChange: (g: Granularity) => void;
+}) {
   const workspace = useWorkspaceStore(s => s.workspaces.find(w => w.id === clientId));
-  const [granularity, setGranularity] = useState<Granularity>('annual');
+  const setGranularity = onGranularityChange;
 
   const { aggregations, bsSeries, profSeries, healthSeries } = useMemo(() => {
     if (!workspace || workspace.accounts.length === 0) {
@@ -573,7 +591,7 @@ function ReportsTab({ clientId }: { clientId: string }) {
           style={{ borderColor: 'hsl(var(--border))' }}
         >
           <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            No financial data available. Import data to see reports.
+            No financial data yet — import a P&amp;L or balance sheet to see reports.
           </p>
         </div>
       ) : (
@@ -638,7 +656,15 @@ const DEBT_EQUITY_BENCHMARK: BenchmarkRange = { good: 1, warn: 2, bad: 4, direct
 const CONTRIBUTION_MARGIN_BENCHMARK: BenchmarkRange = { good: 0.4, warn: 0.2, bad: 0, direction: 'higher' };
 const ZSCORE_BENCHMARK: BenchmarkRange = { good: 2.6, warn: 1.1, bad: 0, direction: 'higher' };
 
-function OverviewTab({ clientId }: { clientId: string }) {
+function OverviewTab({
+  clientId,
+  granularity,
+  onGranularityChange,
+}: {
+  clientId: string;
+  granularity: Granularity;
+  onGranularityChange: (g: Granularity) => void;
+}) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
 
   const availableYears = useMemo(
@@ -648,7 +674,7 @@ function OverviewTab({ clientId }: { clientId: string }) {
 
   const defaultYear = availableYears[0] ?? null;
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
-  const [granularity, setGranularity] = useState<Granularity>('monthly');
+  const setGranularity = onGranularityChange;
 
   const effectiveYear = selectedYear ?? defaultYear;
 
@@ -898,7 +924,7 @@ function OverviewTab({ clientId }: { clientId: string }) {
           style={{ borderColor: 'hsl(var(--border))' }}
         >
           <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            No financial data imported. Upload a P&amp;L to see summary metrics.
+            No financial data yet — import a P&amp;L or balance sheet to see summary metrics.
           </p>
           <Link
             href="/"
@@ -1278,6 +1304,20 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
 function WhatIfTab({ clientId }: { clientId: string }) {
   const workspace = useWorkspaceStore(s => s.workspaces.find(w => w.id === clientId));
   if (!workspace) return null;
+  // Sliders without data produce no result and look broken. Show an empty
+  // state instead until accounts + values exist.
+  if (workspace.accounts.length === 0 || workspace.values.length === 0) {
+    return (
+      <div className="mx-auto max-w-3xl py-12 text-center">
+        <h2 className="text-lg font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
+          What-If scenarios need data
+        </h2>
+        <p className="mt-2 text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          Import a P&amp;L or balance sheet to model revenue/cost changes against your actuals. Sliders will activate once accounts are loaded.
+        </p>
+      </div>
+    );
+  }
   return <WhatIfTabContent clientId={clientId} />;
 }
 
@@ -1340,7 +1380,9 @@ function OperationalTabContent({ clientId }: { clientId: string }) {
           label="Period"
         />
         <p className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
-          {metricResults.length} metrics · {metricsWithData} with data · Profile: {profile.name}
+          {noFinancialData
+            ? `${profile.name} profile · operational metrics will appear once data is imported`
+            : `${metricsWithData} of ${metricResults.length} ${profile.name} metrics have data this period`}
         </p>
       </div>
 
@@ -1350,7 +1392,7 @@ function OperationalTabContent({ clientId }: { clientId: string }) {
           style={{ borderColor: 'hsl(var(--border))' }}
         >
           <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            Import financial data to see operational metrics.
+            No financial data yet — import a P&amp;L or balance sheet to see operational metrics.
           </p>
         </div>
       ) : (
@@ -1394,7 +1436,17 @@ export default function WorkspacePage({ params }: PageProps) {
   const setValuesOuter = useWorkspaceStore((s) => s.setValues);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [hydrated, setHydrated] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [headerToast, setHeaderToast] = useState<string | null>(null);
+  // Shared period granularity across Overview + Reports so switching tabs
+  // doesn't silently reset the period a user is reviewing.
+  const [sharedGranularity, setSharedGranularity] = useState<Granularity>('monthly');
   const tourHook = useTour();
+
+  const showHeaderToast = useCallback((msg: string) => {
+    setHeaderToast(msg);
+    setTimeout(() => setHeaderToast(null), 3000);
+  }, []);
 
   const clearWorkspaceData = useCallback((wsId: string) => {
     batchUpdateAccountsOuter(wsId, []);
@@ -1451,6 +1503,7 @@ export default function WorkspacePage({ params }: PageProps) {
           onComplete={tourHook.completeTour}
           onSkip={tourHook.skipTour}
           startAtStep={tourHook.startStep}
+          tourLabel="Workspace tour"
         />
       )}
       {/* Header */}
@@ -1470,9 +1523,9 @@ export default function WorkspacePage({ params }: PageProps) {
             </Link>
             <span style={{ color: 'hsl(var(--border))' }}>/</span>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-lg">{profile?.icon ?? '🏢'}</span>
-                <h1 className="text-base font-bold" style={{ color: 'hsl(var(--foreground))' }}>
+              <div className="flex items-center gap-2" style={{ color: 'hsl(var(--foreground))' }}>
+                <ProfileIcon profileId={profile?.id} size={20} />
+                <h1 className="text-base font-bold">
                   {workspace.name}
                 </h1>
               </div>
@@ -1483,34 +1536,40 @@ export default function WorkspacePage({ params }: PageProps) {
           </div>
 
           <div className="flex items-center gap-3">
-            <HelpButton onOpen={() => tourHook.openTour(6)} />
-            <div
-              className="rounded-lg border px-3 py-1.5 text-xs font-medium"
-              style={{
-                borderColor: 'hsl(var(--border))',
-                color: 'hsl(var(--muted-foreground))',
-              }}
+            <HelpButton onOpen={() => tourHook.openTour(0)} />
+            {/* Scenarios count — informational badge, intentionally non-button styling */}
+            <span
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs"
+              style={{ color: 'hsl(var(--muted-foreground))' }}
+              aria-label={`${workspace.scenarios.length} scenarios configured`}
             >
-              {workspace.scenarios.length} scenarios
-            </div>
+              <span style={{ color: 'hsl(var(--foreground))', fontWeight: 600 }}>
+                {workspace.scenarios.length}
+              </span>
+              <span>scenarios</span>
+            </span>
             <button
               type="button"
               data-testid="export-workspace-btn"
-              onClick={() => downloadWorkspaceJSON(workspace)}
-              className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+              disabled={workspace.accounts.length === 0}
+              onClick={() => {
+                downloadWorkspaceJSON(workspace);
+                showHeaderToast('Workspace exported as .finsight.json');
+              }}
+              className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--foreground))' }}
-              title="Download this workspace as a .finsight.json file you can re-import on another machine"
+              title={
+                workspace.accounts.length === 0
+                  ? 'Import accounts before exporting'
+                  : 'Download this workspace as a .finsight.json file you can re-import on another machine'
+              }
             >
               ↓ Export
             </button>
             <button
               type="button"
               data-testid="clear-data-btn"
-              onClick={() => {
-                if (window.confirm('Clear all imported data? Accounts and values will be removed. Scenarios are kept.')) {
-                  clearWorkspaceData(clientId);
-                }
-              }}
+              onClick={() => setShowClearConfirm(true)}
               className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-red-50"
               style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--destructive))' }}
             >
@@ -1519,6 +1578,52 @@ export default function WorkspacePage({ params }: PageProps) {
           </div>
         </div>
       </header>
+
+      {/* Clear Data confirmation */}
+      <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear all imported data?</DialogTitle>
+            <DialogDescription>
+              All accounts and values for <strong>{workspace.name}</strong> will be removed. Your
+              scenarios (Base, Best, Worst) are kept so you can re-import data later. This can&apos;t
+              be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowClearConfirm(false)} data-testid="clear-data-cancel">
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              data-testid="clear-data-confirm"
+              onClick={() => {
+                clearWorkspaceData(clientId);
+                setShowClearConfirm(false);
+                showHeaderToast('Imported data cleared');
+              }}
+            >
+              Clear data
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Header-scoped toast (Export, Clear) — sits above tab content */}
+      {headerToast && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-lg border px-5 py-3 shadow-lg text-sm font-medium"
+          style={{
+            background: 'hsl(var(--card))',
+            borderColor: 'hsl(142 76% 36% / 0.5)',
+            color: 'hsl(142 76% 28%)',
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          ✓ {headerToast}
+        </div>
+      )}
 
       {/* Tabs */}
       <div
@@ -1563,9 +1668,21 @@ export default function WorkspacePage({ params }: PageProps) {
       <main
         className={isMappingTab ? 'px-6 py-6' : 'mx-auto max-w-6xl px-6 py-8'}
       >
-        {activeTab === 'overview' && <OverviewTab clientId={clientId} />}
+        {activeTab === 'overview' && (
+          <OverviewTab
+            clientId={clientId}
+            granularity={sharedGranularity}
+            onGranularityChange={setSharedGranularity}
+          />
+        )}
         {activeTab === 'mapping' && <MappingTab clientId={clientId} />}
-        {activeTab === 'reports' && <ReportsTab clientId={clientId} />}
+        {activeTab === 'reports' && (
+          <ReportsTab
+            clientId={clientId}
+            granularity={sharedGranularity}
+            onGranularityChange={setSharedGranularity}
+          />
+        )}
         {activeTab === 'projections' && <ProjectionsTab clientId={clientId} />}
         {activeTab === 'whatif' && <WhatIfTab clientId={clientId} />}
         {activeTab === 'operational' && <OperationalTab clientId={clientId} />}

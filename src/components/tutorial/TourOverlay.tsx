@@ -18,13 +18,25 @@ interface TourOverlayProps {
   onComplete: () => void;
   onSkip: () => void;
   startAtStep?: number;
+  /**
+   * Short label identifying which tour this is (e.g. "Home tour",
+   * "Workspace tour"). Shown alongside the step counter so users can tell
+   * different tours apart when re-opening with "?".
+   */
+  tourLabel?: string;
 }
 
 const BUBBLE_W = 340;
 const BUBBLE_H_ESTIMATE = 220;
 
-export function TourOverlay({ steps, onComplete, onSkip, startAtStep = 0 }: TourOverlayProps) {
+export function TourOverlay({ steps, onComplete, onSkip, startAtStep = 0, tourLabel }: TourOverlayProps) {
   const [currentIdx, setCurrentIdx] = useState(startAtStep);
+  // Reset the tour to startAtStep whenever the parent re-opens it with a
+  // different start point — otherwise the previous in-progress index sticks
+  // around if React reuses the component instance.
+  useEffect(() => {
+    setCurrentIdx(startAtStep);
+  }, [startAtStep]);
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const [targetRadius, setTargetRadius] = useState(8);
   const [bubblePos, setBubblePos] = useState<BubblePosition>({ top: 0, left: 0, arrowSide: null });
@@ -246,7 +258,7 @@ export function TourOverlay({ steps, onComplete, onSkip, startAtStep = 0 }: Tour
             marginBottom: 8,
           }}
         >
-          Step {currentIdx + 1} of {steps.length}
+          {tourLabel ? `${tourLabel} · ` : ''}Step {currentIdx + 1} of {steps.length}
         </div>
 
         {/* Title */}

@@ -32,8 +32,7 @@ const MODELS: { id: ProjectionModel; label: string }[] = [
 ];
 
 const HORIZONS: { id: HorizonKey; label: string }[] = [
-  { id: '12m', label: '12 Mo' },
-  { id: '1y', label: '1 Yr' },
+  { id: '12m', label: '1 Yr' },
   { id: '3y', label: '3 Yr' },
   { id: '5y', label: '5 Yr' },
   { id: '10y', label: '10 Yr' },
@@ -125,12 +124,17 @@ export function ProjectionControls({
           renderLabel={(opt) => (
             <span className="flex items-center gap-1">
               {opt.label}
-              {opt.id === profileDefaultModel && (
+              {opt.id === profileDefaultModel && opt.id !== model && (
+                /* Only show "default" badge when the default model isn't already
+                   selected — otherwise it creates a second blue highlight that
+                   competes with the selected-pill background. Use a neutral
+                   outlined style so it doesn't read as "this is active". */
                 <span
-                  className="rounded px-1 py-0.5 text-xs leading-none"
+                  className="rounded border px-1 py-0.5 leading-none"
                   style={{
-                    background: 'hsl(var(--accent))',
-                    color: 'hsl(var(--accent-foreground))',
+                    borderColor: 'hsl(var(--border))',
+                    background: 'transparent',
+                    color: 'hsl(var(--muted-foreground))',
                     fontSize: '9px',
                   }}
                 >

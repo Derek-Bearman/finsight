@@ -12,6 +12,7 @@ import { ClassificationReview } from '@/components/upload/ClassificationReview';
 import { ImportValidationBanner } from '@/components/upload/ImportValidationBanner';
 import { ManualEntryForm } from '@/components/upload/ManualEntryForm';
 import { Button } from '@/components/ui/button';
+import { ProfileIcon } from '@/components/ui/profile-icon';
 import type { Account, AccountType, AccountValue, ClientWorkspace, Scenario, ImportValidationWarning } from '@/types';
 import type { ColumnMapping, ParsedRow } from '@/lib/parsers/csv-parser';
 import type { ClassificationResult } from '@/lib/classifiers';
@@ -62,7 +63,7 @@ const STEP_LABELS: Record<Step, string> = {
   profile: 'Profile',
   pnl: 'P&L Upload',
   balance_sheet: 'Balance Sheet',
-  classify: 'Classification',
+  classify: 'Classify',
   done: 'Done',
 };
 
@@ -185,7 +186,9 @@ function ProfileCard({
         background: selected ? 'hsl(var(--accent))' : 'hsl(var(--card))',
       }}
     >
-      <div className="text-2xl mb-2">{profile.icon ?? '🏢'}</div>
+      <div className="mb-2" style={{ color: 'hsl(var(--foreground))' }}>
+        <ProfileIcon profileId={profile.id} size={24} />
+      </div>
       <div className="font-semibold text-sm" style={{ color: 'hsl(var(--foreground))' }}>
         {profile.name}
       </div>
@@ -219,9 +222,9 @@ function WorkspaceCard({
         data-testid={`workspace-card-${workspace.id}`}
         className="text-left w-full p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl"
       >
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-lg">{profile?.icon ?? '🏢'}</span>
-          <span className="font-semibold text-sm" style={{ color: 'hsl(var(--foreground))' }}>
+        <div className="flex items-center gap-2 mb-1" style={{ color: 'hsl(var(--foreground))' }}>
+          <ProfileIcon profileId={profile?.id} size={18} />
+          <span className="font-semibold text-sm">
             {workspace.name}
           </span>
         </div>
@@ -257,7 +260,6 @@ interface UploadStepProps {
   onFile: (file: File) => void;
   onMappingConfirm: (mapping: ColumnMapping) => void;
   onMappingCancel: () => void;
-  onSkip: () => void;
   onShowManual: () => void;
   showManual: boolean;
   /** Called when user clicks "Continue" from the done state */
@@ -274,7 +276,6 @@ function UploadStep({
   onFile,
   onMappingConfirm,
   onMappingCancel,
-  onSkip,
   onShowManual,
   showManual,
   onContinue,
@@ -348,11 +349,11 @@ function UploadStep({
       <FileDropzone
         onFile={onFile}
         isLoading={state.isLoading}
-        label="Drop CSV file here or click to browse"
+        label="Drop CSV or Excel file here or click to browse"
         sublabel="Export from QuickBooks, Xero, or any accounting system"
       />
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-start">
         <button
           type="button"
           onClick={onShowManual}
@@ -361,15 +362,6 @@ function UploadStep({
           style={{ color: 'hsl(var(--muted-foreground))' }}
         >
           {showManual ? 'Hide manual entry' : 'Enter accounts manually instead'}
-        </button>
-        <button
-          type="button"
-          onClick={onSkip}
-          data-testid="skip-upload"
-          className="text-sm underline underline-offset-2"
-          style={{ color: 'hsl(var(--muted-foreground))' }}
-        >
-          Skip for now →
         </button>
       </div>
 
@@ -791,6 +783,7 @@ export default function HomePage() {
           onComplete={tourHook.completeTour}
           onSkip={tourHook.skipTour}
           startAtStep={tourHook.startStep}
+          tourLabel="Home tour"
         />
       )}
       {/* Header */}
@@ -815,6 +808,7 @@ export default function HomePage() {
             type="button"
             onClick={togglePrivacyMode}
             data-testid="privacy-mode-toggle"
+            aria-pressed={privacyOn}
             title={
               privacyOn
                 ? 'Privacy mode is ON — nothing is being saved to this browser. Click to turn off.'
@@ -823,12 +817,23 @@ export default function HomePage() {
             className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
             style={{
               borderColor: privacyOn ? 'hsl(0 72% 51%)' : 'hsl(var(--border))',
-              background: privacyOn ? 'hsl(0 72% 51% / 0.1)' : 'hsl(var(--background))',
-              color: privacyOn ? 'hsl(0 72% 40%)' : 'hsl(var(--muted-foreground))',
+              // ON state: solid red fill + white text so it's unmistakeable.
+              // OFF state: subtle, low-contrast so it doesn't compete for attention.
+              background: privacyOn ? 'hsl(0 72% 51%)' : 'hsl(var(--background))',
+              color: privacyOn ? '#fff' : 'hsl(var(--muted-foreground))',
             }}
           >
             <span aria-hidden>{privacyOn ? '🔒' : '🔓'}</span>
-            <span>{privacyOn ? 'Privacy ON' : 'Privacy mode'}</span>
+            <span>{privacyOn ? 'PRIVACY ON' : 'Privacy mode'}</span>
+            {privacyOn && (
+              <span
+                className="ml-1 rounded-sm px-1 py-0.5 text-[9px] font-bold leading-none"
+                style={{ background: 'rgba(255,255,255,0.25)', color: '#fff' }}
+                aria-hidden
+              >
+                LIVE
+              </span>
+            )}
           </button>
           <HelpButton onOpen={() => tourHook.openTour(0)} />
           {process.env.NODE_ENV === 'development' && (
@@ -852,9 +857,67 @@ export default function HomePage() {
         {/* ── STEP 1: Profile ── */}
         {step === 'profile' && (
           <div className="flex flex-col gap-8">
-            <div className="text-center">
-              <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'hsl(var(--foreground))' }}>
-                New Client Workspace
+            {/* Recent workspaces — shown FIRST when present so returning users
+                see their clients before the new-workspace form. */}
+            {workspaces.length > 0 && (
+              <div>
+                <div className="flex items-end justify-between mb-4">
+                  <div>
+                    <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'hsl(var(--foreground))' }}>
+                      Your Workspaces
+                    </h1>
+                    <p className="mt-1 text-sm flex items-center gap-1.5" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                      <span aria-hidden>🔒</span>
+                      <span className="font-medium" style={{ color: 'hsl(var(--foreground))' }}>
+                        Saved in this browser only
+                      </span>
+                      <span>· no cloud sync</span>
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const el = document.getElementById('new-workspace-wizard');
+                      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                    data-testid="new-workspace-jump"
+                  >
+                    + New Workspace
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {workspaces
+                    .slice(-6)
+                    .reverse()
+                    .map((ws) => (
+                      <WorkspaceCard
+                        key={ws.id}
+                        workspace={ws}
+                        onClick={() => router.push(`/workspace/${ws.id}`)}
+                        onDelete={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`Delete "${ws.name}"? This cannot be undone.`)) {
+                            deleteWorkspace(ws.id);
+                          }
+                        }}
+                      />
+                    ))}
+                </div>
+                <div className="my-8 border-t" style={{ borderColor: 'hsl(var(--border))' }} />
+              </div>
+            )}
+
+            <div className="text-center" id="new-workspace-wizard">
+              <h1
+                className={
+                  workspaces.length > 0
+                    ? 'text-lg font-semibold tracking-tight'
+                    : 'text-2xl font-bold tracking-tight'
+                }
+                style={{ color: 'hsl(var(--foreground))' }}
+              >
+                {workspaces.length > 0 ? 'Add another client' : 'New Client Workspace'}
               </h1>
               <p className="mt-1 text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
                 Choose an industry profile and enter the client name to get started.
@@ -965,40 +1028,6 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* Recent workspaces */}
-            {workspaces.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <p
-                    className="text-xs font-medium uppercase tracking-wide"
-                    style={{ color: 'hsl(var(--muted-foreground))' }}
-                  >
-                    Recent Workspaces
-                  </p>
-                  <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                    Saved in this browser only
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {workspaces
-                    .slice(-6)
-                    .reverse()
-                    .map((ws) => (
-                      <WorkspaceCard
-                        key={ws.id}
-                        workspace={ws}
-                        onClick={() => router.push(`/workspace/${ws.id}`)}
-                        onDelete={(e) => {
-                          e.stopPropagation();
-                          if (window.confirm(`Delete "${ws.name}"? This cannot be undone.`)) {
-                            deleteWorkspace(ws.id);
-                          }
-                        }}
-                      />
-                    ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -1007,10 +1036,10 @@ export default function HomePage() {
           <div className="flex flex-col gap-6">
             <div className="text-center">
               <h2 className="text-xl font-bold" style={{ color: 'hsl(var(--foreground))' }}>
-                Upload Profit &amp; Loss
+                Upload Profit &amp; Loss <span style={{ color: 'hsl(var(--muted-foreground))' }} className="font-normal text-base">(Optional)</span>
               </h2>
               <p className="text-sm mt-1" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                Import your P&amp;L CSV. The wizard will detect column headers automatically.
+                Import a P&amp;L (CSV or Excel) — the wizard auto-detects column headers. You can skip this and add data later by clicking Continue with no file.
               </p>
             </div>
 
@@ -1019,14 +1048,13 @@ export default function HomePage() {
             )}
 
             <UploadStep
-              title="P&L CSV"
+              title="P&L file"
               subtitle="Upload a P&L report — CSV or Excel (.xlsx) both work. Exports from QuickBooks, Xero, and most accounting platforms are supported."
               state={pnlUpload}
               profileId={selectedProfileId}
               onFile={(f) => handleFile(f, setPnlUpload, 'pnl')}
               onMappingConfirm={handlePnlMappingConfirm}
               onMappingCancel={() => setPnlUpload(EMPTY_UPLOAD)}
-              onSkip={handlePnlNext}
               onShowManual={() => setShowPnlManual((v) => !v)}
               showManual={showPnlManual}
               onContinue={handlePnlNext}
@@ -1051,10 +1079,10 @@ export default function HomePage() {
           <div className="flex flex-col gap-6">
             <div className="text-center">
               <h2 className="text-xl font-bold" style={{ color: 'hsl(var(--foreground))' }}>
-                Upload Balance Sheet
+                Upload Balance Sheet <span style={{ color: 'hsl(var(--muted-foreground))' }} className="font-normal text-base">(Optional)</span>
               </h2>
               <p className="text-sm mt-1" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                Optional. Enables ratio analysis and balance-sheet-level metrics.
+                Adding a balance sheet enables ratio analysis and BS-level metrics. Click Continue with no file to skip.
               </p>
             </div>
 
@@ -1063,14 +1091,13 @@ export default function HomePage() {
             )}
 
             <UploadStep
-              title="Balance Sheet CSV"
-              subtitle="Upload a balance sheet export. Assets, liabilities, and equity accounts will be detected automatically."
+              title="Balance Sheet file"
+              subtitle="Upload a balance sheet export (CSV or Excel). Assets, liabilities, and equity accounts will be detected automatically."
               state={bsUpload}
               profileId={selectedProfileId}
               onFile={(f) => handleFile(f, setBsUpload, 'balance_sheet')}
               onMappingConfirm={handleBsMappingConfirm}
               onMappingCancel={() => setBsUpload(EMPTY_UPLOAD)}
-              onSkip={handleBsNext}
               onShowManual={() => setShowBsManual((v) => !v)}
               showManual={showBsManual}
               onContinue={handleBsNext}
@@ -1186,7 +1213,9 @@ export default function HomePage() {
             </div>
 
             <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
-              Mapping complete. Your workspace is ready for analysis.
+              {mergedAccounts.length > 0
+                ? 'Mapping complete. Your workspace is ready for analysis.'
+                : 'Workspace created without data — import a P&L or balance sheet anytime to start analyzing.'}
             </p>
 
             <Button

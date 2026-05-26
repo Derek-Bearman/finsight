@@ -38,6 +38,15 @@ const SOURCE_FILTER_LABELS: Record<SourceFilter, string> = {
   auto: 'Auto',
 };
 
+const SOURCE_FILTER_TOOLTIPS: Record<SourceFilter, string> = {
+  all: 'Show all accounts.',
+  needs_review: 'Accounts the classifier flagged as low-confidence — review these first.',
+  manual: 'Accounts you reclassified manually.',
+  profile: 'Accounts classified by an industry-profile keyword hint (e.g. "subcontractor" for Trades).',
+  account_number: 'Accounts classified by their account-number range.',
+  auto: 'Accounts classified by the generic keyword/section rules.',
+};
+
 export function MappingToolbar({
   view,
   onViewChange,
@@ -154,14 +163,25 @@ export function MappingToolbar({
           <button
             type="button"
             onClick={() => setAuditOpen(true)}
-            className="rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
             style={{
               borderColor: 'hsl(var(--border))',
               color: 'hsl(var(--foreground))',
               background: 'hsl(var(--background))',
             }}
+            title="Open the audit log — every classification change is recorded with timestamp, source, and previous value."
           >
-            Audit log: {auditEntries.length}
+            <span>View audit log</span>
+            <span
+              className="rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none"
+              style={{
+                background: 'hsl(var(--muted))',
+                color: 'hsl(var(--muted-foreground))',
+              }}
+              aria-label={`${auditEntries.length} entries`}
+            >
+              {auditEntries.length}
+            </span>
           </button>
 
           {/* Refresh auto-classified — non-destructive */}
@@ -193,7 +213,11 @@ export function MappingToolbar({
                 cursor: manualCount === 0 ? 'not-allowed' : 'pointer',
                 opacity: manualCount === 0 ? 0.5 : 1,
               }}
-              title="Reset every account — including manual overrides — to fresh auto-classification."
+              title={
+                manualCount === 0
+                  ? 'Nothing to reset — no manual overrides yet.'
+                  : 'Reset every account — including manual overrides — to fresh auto-classification.'
+              }
             >
               Reset all
             </button>
@@ -249,6 +273,7 @@ export function MappingToolbar({
               type="button"
               onClick={() => onSourceFilterChange(f)}
               data-testid={`source-filter-${f}`}
+              title={SOURCE_FILTER_TOOLTIPS[f]}
               className="rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors"
               style={{
                 borderColor: isActive ? 'hsl(var(--primary))' : 'hsl(var(--border))',
