@@ -1550,6 +1550,20 @@ export default function WorkspacePage({ params }: PageProps) {
             </span>
             <button
               type="button"
+              data-testid="export-pdf-btn"
+              onClick={() => {
+                // Opens a new tab on the dedicated print route; that page
+                // auto-fires window.print() after Recharts settles.
+                window.open(`/workspace/${clientId}/print`, '_blank', 'noopener');
+              }}
+              className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+              style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--foreground))' }}
+              title="Open a print-ready client report — use the browser's Save as PDF in the print dialog."
+            >
+              ↓ PDF
+            </button>
+            <button
+              type="button"
               data-testid="export-workspace-btn"
               disabled={workspace.accounts.length === 0}
               onClick={() => {
@@ -1564,7 +1578,7 @@ export default function WorkspacePage({ params }: PageProps) {
                   : 'Download this workspace as a .finsight.json file you can re-import on another machine'
               }
             >
-              ↓ Export
+              ↓ JSON
             </button>
             <button
               type="button"

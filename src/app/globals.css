@@ -141,3 +141,56 @@ body {
   .rounded-\[var\(--radius-md\)\]  { border-radius: var(--radius-md); }
   .rounded-\[var\(--radius-lg\)\]  { border-radius: var(--radius-lg); }
 }
+
+/* ── Print styles ────────────────────────────────────────────────────────────
+ *
+ * Used by the dedicated /workspace/[clientId]/print route. The route renders
+ * the full client report in one long scroll; the browser's print dialog
+ * (Cmd/Ctrl-P → Save as PDF) handles pagination and PDF generation.
+ *
+ * Authoring rules:
+ * - Anything that should NOT appear in the printed PDF gets `.no-print`
+ * - Anything that should ONLY appear in print gets `.print-only`
+ * - Page breaks use `.page-break-before` on section roots
+ * - Charts (Recharts SVG) render at vector quality — no rasterization needed
+ */
+
+@media screen {
+  .print-only {
+    display: none !important;
+  }
+}
+
+@media print {
+  @page {
+    size: letter;
+    margin: 0.55in;
+  }
+
+  html,
+  body {
+    background: white !important;
+    color: black !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .page-break-before {
+    break-before: page;
+  }
+
+  .avoid-break {
+    break-inside: avoid;
+  }
+
+  /* Force chart containers to a print-friendly fixed size so Recharts'
+     ResponsiveContainer renders deterministically. */
+  .print-chart {
+    width: 100% !important;
+    max-height: 3.5in;
+  }
+}
