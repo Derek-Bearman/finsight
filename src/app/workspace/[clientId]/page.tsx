@@ -1585,9 +1585,9 @@ export default function WorkspacePage({ params }: PageProps) {
           <DialogHeader>
             <DialogTitle>Clear all imported data?</DialogTitle>
             <DialogDescription>
-              All accounts and values for <strong>{workspace.name}</strong> will be removed. Your
-              scenarios (Base, Best, Worst) are kept so you can re-import data later. This can&apos;t
-              be undone.
+              All accounts and values for <strong>{workspace.name}</strong>
+              {' '}will be removed. Your scenarios (Base, Best, Worst) are kept so you can re-import
+              data later. This can&apos;t be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
