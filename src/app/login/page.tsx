@@ -151,7 +151,7 @@ function LoginForm() {
           </div>
           <p className="mt-1 text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
             {step === 'email'
-              ? "Sign in with your email — we'll send you a 6-digit code."
+              ? "Sign in with your email — we'll send you a one-time code."
               : `We sent a code to ${email}. Enter it below to finish signing in.`}
           </p>
         </div>
@@ -198,7 +198,7 @@ function LoginForm() {
               className="text-xs font-medium"
               style={{ color: 'hsl(var(--foreground))' }}
             >
-              6-digit code
+              Verification code
             </label>
             <input
               ref={codeInputRef}
@@ -208,12 +208,15 @@ function LoginForm() {
               pattern="[0-9]*"
               autoComplete="one-time-code"
               required
-              maxLength={10}
+              // Length-agnostic: Supabase's OTP length is a server-side
+              // setting (we've seen it emit 8 digits). Don't hard-code 6 —
+              // accept whatever arrives, filter to digits, cap generously.
+              maxLength={12}
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, ''))}
-              placeholder="123456"
+              placeholder="Enter the code from your email"
               disabled={status === 'verifying'}
-              className="w-full rounded-lg border px-3 py-2 text-lg tracking-[0.4em] font-mono outline-none focus:ring-2"
+              className="w-full rounded-lg border px-3 py-2 text-lg tracking-[0.3em] font-mono outline-none focus:ring-2"
               style={{
                 borderColor: 'hsl(var(--border))',
                 background: 'hsl(var(--background))',
@@ -225,7 +228,7 @@ function LoginForm() {
                 {errorMsg}
               </p>
             )}
-            <Button type="submit" disabled={code.length < 6 || status === 'verifying'}>
+            <Button type="submit" disabled={code.length < 4 || status === 'verifying'}>
               {status === 'verifying' ? 'Verifying…' : 'Sign in'}
             </Button>
             <div className="flex items-center justify-between mt-1">
