@@ -1,9 +1,16 @@
 # FinSight — Session Notes
 
 **Last updated:** 2026-05-25
-**Live app:** https://finsight.bearman-derek.workers.dev (version `d0888e0a` — PDF export shipped)
+**Live app:** https://finsight.bearman-derek.workers.dev (version `6ff8fdf3` — Phase 1 auth shipped)
 **GitHub:** https://github.com/Derek-Bearman/finsight
 **Deploy command:** `cd ~/Documents/finsight && git pull && npm run cf:deploy`
+
+> **SaaS conversion in progress.** As of 2026-05-25 FinSight is mid-pivot
+> from a localStorage-only single-browser tool to a multi-firm SaaS on
+> Supabase. Phase 1 (auth shell) is DONE and live. Phases 2-5 (firm
+> tables, workspace CRUD + RLS, snapshots, invites, billing) are NOT
+> built yet — workspaces still persist to browser localStorage. See
+> "SaaS conversion plan" section below.
 
 > Future-Claude pickup doc. Read this first when resuming work on FinSight.
 > If something here contradicts the actual codebase, trust the codebase
@@ -57,6 +64,153 @@ operational metrics). On top of that, recent sessions shipped:
 Deliberately NOT addressed: the Beta badge stays (correctly sets
 pre-1.0 expectations), and the FileDropzone already has drag-active
 styling (Cowork didn't drag-test).
+
+- **PDF export** (commit `6e66f24`) — `/workspace/[clientId]/print`
+  route renders a full client report (cover, exec summary, P&L, ratios,
+  12mo projection, operational metrics), auto-fires `window.print()`
+  ~1.5s after hydration. "↓ PDF" button in the workspace header. Print
+  CSS in globals.css. Recharts SVGs print at vector quality, no
+  react-pdf dependency. Sections skip gracefully on missing data.
+
+- **Phase 1 — Supabase auth shell** (commits `e6e19ed` → `6206371` →
+  `cf1de87` → `d2e5edd`) — the app is now gated behind a login.
+  Passwordless OTP-code sign-in (user enters email → 6-to-8-digit code
+  arrives → types it → session). Verified end-to-end against a real
+  Outlook inbox: code email delivered, sign-in succeeded, dashboard
+  loaded, sign-out returned to /login. **No firm/multi-tenancy yet** —
+  this is purely "who are you?". Workspaces still live in localStorage.
+  Full detail in the "SaaS conversion plan" + "Auth architecture"
+  sections below.
+
+---
+
+## SaaS conversion plan (the big arc)
+
+Decision (2026-05-25): FinSight is going from localStorage-only to a
+multi-firm SaaS. Derek chose **Standard SaaS** (data in our DB,
+encrypted at rest by the provider, no customer-managed keys) over the
+client-side-encryption option. Positioning shifts from "data never
+leaves the browser" to "your firm's data, scoped to your firm,
+encrypted at rest, audit-logged, never used to train AI or sold."
+
+Stack chosen (constraint: free tier, Derek already has Supabase +
+Cloudflare, wants to learn fundamentals):
+- **Supabase end-to-end** — Auth + Postgres + (later) Storage. Single
+  vendor. Free tier covers v1. RLS enforces tenancy at the DB layer.
+- Hosting stays **Cloudflare Workers** via @opennextjs/cloudflare.
+- NOT using Clerk (would've abstracted away the multi-tenancy learning
+  + adds a vendor). NOT using D1 (Supabase Postgres chosen instead for
+  RLS + single-vendor simplicity).
+
+Phases:
+- **Phase 1 — auth shell** ✅ DONE (this session). Login gate, OTP
+  sign-in, sign-out, session middleware. No firm, no DB tables yet.
+- **Phase 2 — firm tables + workspace CRUD + RLS** ⬜ NOT STARTED.
+  `firms`, `users` (firm_id FK + role), `workspaces` (firm_id FK).
+  Pool-model tenancy: every row has firm_id, RLS policies scope all
+  reads/writes. Workspaces sync localStorage ⇄ Postgres. On first
+  login, prompt to import existing localStorage workspaces (Derek's
+  choice: prompt, not auto-import, not ignore).
+- **Phase 3 — snapshots** ⬜. Point-in-time saved reports per workspace
+  (store workspace JSON + re-render PDF on demand from the print route).
+  This is the "log in from anywhere and review historical reports" use
+  case.
+- **Phase 4 — firm invites + roles** ⬜. Owner invites teammates; shared
+  client list.
+- **Phase 5 — billing** ⬜. Stripe, per-firm plans. Only when revenue
+  justifies.
+
+Decisions locked for v1: NO "local-only workspace" escape hatch (drop
+it; add later if a customer asks). Import-on-first-login = prompt with
+per-workspace checkboxes.
+
+---
+
+## Auth architecture (Phase 1, as shipped)
+
+**Provider:** Supabase Auth, passwordless email OTP. Project ref
+`camphmqvrzqpgrhdjafo`. Org "Derek-Bearman's Org", free tier.
+
+**Files:**
+- `src/lib/supabase/client.ts` — browser client (anon/publishable key).
+- `src/lib/supabase/server.ts` — server client for Server Components /
+  Actions / Route Handlers. Uses Next 16's **async** `cookies()`.
+- `src/lib/supabase/proxy-client.ts` — variant for middleware.ts; uses
+  request/response cookie adapters instead of `next/headers`.
+- `middleware.ts` (project root) — refreshes session on every matched
+  request, redirects unauthenticated users to `/login?next=…`, bounces
+  authenticated users off `/login`. PUBLIC_PATHS = /login, /auth/*.
+- `src/app/login/page.tsx` — two-step OTP form (email → code).
+- `src/app/auth/callback/route.ts` — magic-link fallback (exchangeCode).
+- `src/app/auth/signout/route.ts` — POST-only signout.
+- "Sign out" button in the home header (POST form, never GET).
+
+**Login flow:** `signInWithOtp({ email })` emails a code → user types it
+→ `verifyOtp({ email, token, type: 'email' })` sets the session cookie →
+`window.location.assign(next)` so middleware sees the fresh cookie.
+
+**Why OTP code, not magic link:** Outlook Safe Links (and corporate
+email gateways) flag/block URLs pointing at the random-string Supabase
+subdomain (`camphmqvrzqpgrhdjafo.supabase.co`). A numeric code in the
+email body has no URL to scan. The magic-link path (`/auth/callback`)
+still works as a fallback if a user clicks the link instead.
+
+### Gotchas burned into the build (DO NOT regress)
+
+1. **It's `middleware.ts`, not `proxy.ts`.** Next 16 renamed Middleware
+   → Proxy at the user-facing level, but @opennextjs/cloudflare 1.19.x
+   still tracks the legacy `server/middleware.js` filename when bundling
+   the standalone output. Using `proxy.ts` → build fails with "File
+   server/middleware.js does not exist". So the file is `middleware.ts`
+   and exports `middleware()`. Revisit when OpenNext catches up.
+
+2. **NEXT_PUBLIC_* must be in `.env.production`, NOT just wrangler.jsonc
+   vars.** Next inlines NEXT_PUBLIC_* into the CLIENT bundle at
+   `next build` time. wrangler.jsonc `vars` only exist at Worker
+   RUNTIME. Symptom if missing: browser console "Missing
+   NEXT_PUBLIC_SUPABASE_URL". `.env.production` is committed (values are
+   public-safe; RLS protects) via a .gitignore exception. The same two
+   values live in BOTH .env.production (build) and wrangler.jsonc vars
+   (runtime) — keep them in sync.
+
+3. **CSP `connect-src` must allowlist Supabase.** worker.ts ships a
+   strict CSP. The original `connect-src 'self'` blocked all browser→
+   Supabase fetches (symptom: "Failed to fetch", no network request
+   leaves the page). Now `connect-src 'self' https://*.supabase.co
+   wss://*.supabase.co`. NEVER widen to `*`.
+
+4. **OTP length is server-side and is currently 8 digits, not 6.**
+   Supabase emits 8-digit codes for this project. The login input is
+   length-agnostic on purpose (label "Verification code", accepts ≥4
+   digits, maxLength 12) — do NOT hard-code 6. Length is configurable
+   under Supabase → Auth → Email provider settings if 6 is ever wanted.
+
+### Supabase dashboard config that lives OUTSIDE the repo
+
+These are set in the Supabase dashboard, not in git — if the project is
+ever recreated, re-do them:
+- **Auth → URL Configuration:** Site URL = the Workers URL; Redirect
+  URLs include `/auth/callback` (prod) + `http://localhost:3000/auth/callback`.
+- **Auth → Emails → template:** the "Magic Link" template body was
+  replaced with a code-only template (`{{ .Token }}`, no
+  `{{ .ConfirmationURL }}`) so no link ships in the email. (Subject line
+  may still say "sign-in link" — harmless, can be updated to "code".)
+- **wrangler secret:** `SUPABASE_SERVICE_ROLE_KEY` set via
+  `wrangler secret put` (NOT in wrangler.jsonc). Not used in Phase 1 but
+  ready for Phase 2 admin ops (firm provisioning, invites).
+
+### Pending auth follow-ups (not blocking 3-person testing)
+
+- **Custom SMTP via Resend** — built-in Supabase email is capped ~3-4/hr
+  shared + middling deliverability. Resend free tier = 3k/mo from your
+  own domain. Requires the domain first. Do before wider testing.
+- **Custom domain** — still on `*.workers.dev`. Buying ~$15 domain this
+  week (finsight.app / getfinsight.com / etc.). Wire to Worker via
+  Cloudflare custom domain after purchase.
+- **Supabase Pro custom auth domain** (tier 4, $25/mo) — only if going
+  back to magic links or enterprise procurement demands it. Premature.
+
+---
 
 ## How the deploy works
 
@@ -157,9 +311,11 @@ Closing the tab loses everything (which is the point).
 wraps its fetch handler to add 6 response headers on every request:
 
 - `Content-Security-Policy` — `default-src 'self'` with `'unsafe-inline'`
-  for scripts/styles (Next hydration + Tailwind), `connect-src 'self'`
-  blocks exfiltration if XSS slips in, `frame-ancestors 'none'` blocks
-  clickjacking
+  for scripts/styles (Next hydration + Tailwind). `connect-src` is
+  `'self' https://*.supabase.co wss://*.supabase.co` (widened from
+  `'self'` in Phase 1 so the browser can reach Supabase Auth — see Auth
+  architecture gotcha #3; never widen to `*`). `frame-ancestors 'none'`
+  blocks clickjacking
 - `X-Frame-Options: DENY`
 - `X-Content-Type-Options: nosniff`
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains`
@@ -241,6 +397,17 @@ other workspaces on the receiving machine.
 ## What's queued (next-action menu)
 
 Rough effort estimates assume one focused Claude session.
+
+> **As of 2026-05-25 the #1 priority is Phase 2 of the SaaS conversion**
+> (firm tables + workspace CRUD + RLS), NOT the Tier 1 analysis features
+> below. The analysis layer is feature-complete enough for testing;
+> Micah + Vince are test-driving it. What unblocks the product now is
+> persistence + multi-tenancy. Pick up Phase 2 unless Derek redirects
+> based on tester feedback. See "SaaS conversion plan" near the top.
+>
+> Before Phase 2 coding, the cheap infra follow-ups (Resend SMTP +
+> custom domain) should land so testing doesn't trip the email rate
+> limit — see "Pending auth follow-ups".
 
 ### Tier 1 — biggest demo / production impact
 - ~~**PDF export of reports**~~ — **shipped** in commit `6e66f24`. New
@@ -346,10 +513,14 @@ A clean way for a future Claude to resume:
    architectural rationale.
 4. Check the live app version vs latest commit hash to confirm
    nothing's drifted. As of last update the live version was
-   `3007e0a0` and the latest commit was `1011b8d`.
+   `6ff8fdf3` and the latest commit was `d2e5edd`.
 5. Ask the user what they want to tackle, or propose from the queued
-   list above. **Top of Tier 1 is still PDF export** — listed in the
-   original "Done Definition for the Demo" but never built.
+   list above. **Default next priority is Phase 2 of the SaaS
+   conversion** (firm tables + workspace CRUD + RLS) — see "SaaS
+   conversion plan" near the top. The Tier 1 analysis features (cash
+   flow recon, period comparison) are deprioritized below persistence /
+   multi-tenancy. Check whether Micah + Vince's testing feedback has
+   landed first — it may reshape priorities.
 
 When in doubt about whether something already exists: search the
 codebase. The architecture is intentionally clean — pure calculation
