@@ -11,6 +11,15 @@
 > tables, workspace CRUD + RLS, snapshots, invites, billing) are NOT
 > built yet — workspaces still persist to browser localStorage. See
 > "SaaS conversion plan" section below.
+>
+> **2026-07-03 — full execution plan written: `FINSIGHT_SAAS_HANDOFF.md`.**
+> Locks the product decisions ($97/mo per firm, 7-day card-upfront trial,
+> firm signup + team invites/roles, limited-access super-admin) and the target
+> schema/RLS/Stripe/super-admin architecture, phasing, gotchas, and 7 open
+> decisions. Read that doc before starting Phases 2–5. Also: the Supabase
+> project auto-paused on the free tier (that was a "Failed to fetch" login
+> outage) and was restored to ACTIVE_HEALTHY — but it **re-pauses after ~7 idle
+> days**; decide Pro vs keep-alive.
 
 > Future-Claude pickup doc. Read this first when resuming work on FinSight.
 > If something here contradicts the actual codebase, trust the codebase
