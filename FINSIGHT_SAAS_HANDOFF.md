@@ -121,7 +121,7 @@ before inviting real firms — built-in email is rate-limited (~3–4/hr) and Ou
 | **5**  | Super-admin metadata console + audit-log surfacing. |
 | *Cross-cutting, early* | Custom SMTP + domain; decide Supabase Pro vs keep-alive to stop auto-pause. |
 
-## E. Decisions — resolved 2026-07-03 except #1
+## E. Decisions — ALL resolved 2026-07-03
 
 2. ✅ **Onboarding fork:** unknown email → **offer both** "Start a firm (free trial)"
    AND "I was invited / ask my admin." Invited teammates come in via their invite link;
@@ -136,10 +136,14 @@ before inviting real firms — built-in email is rate-limited (~3–4/hr) and Ou
 7. ✅ **Auto-pause:** free keep-alive ping — **`finsight-keepalive` Worker deployed**
    (see §0).
 
-**Still open:**
-1. ⬜ **FinSight domain** for email / Stripe / branding (still on `*.workers.dev` +
-   `finsight.arktosmarketing.com`). Needed before custom SMTP + Stripe. Derek to buy;
-   tell the next session when it exists.
+**Resolved 2026-07-03:**
+1. ✅ **FinSight domain = `finsight.arktosmarketing.com`** (the subdomain already staged in
+   `wrangler.jsonc`; no purchase). Unblocks the email + Stripe prerequisites. Before real
+   external users, wire (Phase 4 / SMTP prep): (a) verify `arktosmarketing.com` in Resend +
+   add SPF/DKIM in the Cloudflare zone, from-address e.g. `finsight@arktosmarketing.com`,
+   into Supabase Auth → SMTP; (b) Supabase Auth Site URL / redirect allowlist →
+   `https://finsight.arktosmarketing.com` + `/auth/callback`; (c) Stripe success/cancel +
+   branding on that origin. None of this blocks Phase 2b.
 
 ## F. Gotchas (do not regress)
 
