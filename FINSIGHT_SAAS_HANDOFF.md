@@ -114,7 +114,7 @@ before inviting real firms — built-in email is rate-limited (~3–4/hr) and Ou
 
 | Phase | Work |
 |---|---|
-| **2a** | Schema + RLS + helpers + `SUPER_ADMIN_EMAILS` (migration). Prove isolation with SQL, no UI. |
+| **2a** | ✅ **DONE** (branch `phase-2a-tenancy`, 2026-07-03) — see §G. Schema + RLS + helpers + `SUPER_ADMIN_EMAILS`; isolation SQL-proven. |
 | **2b** | Move workspaces localStorage → Postgres + first-login import prompt. **Biggest lift.** |
 | **3**  | Membership resolver + onboarding fork UI + invitations (admin invite UI + accept-on-login). |
 | **4**  | Stripe billing (Checkout + trial + webhooks + lifecycle locks + Billing Portal). |
@@ -153,6 +153,70 @@ before inviting real firms — built-in email is rate-limited (~3–4/hr) and Ou
 - **Supabase Auth Site URL / redirect allowlist** must include the login origin.
 - **Deploy:** `cd ~/Documents/finsight && git pull && npm run cf:deploy`.
 - Anon key is the new `sb_publishable_` format; service role is a `wrangler secret`.
+
+## G. Phase 2a — as built (2026-07-03, branch `phase-2a-tenancy`)
+
+**Migrations (both applied to `camphmqvrzqpgrhdjafo`, empty `public` schema → purely
+additive; repo files are the idempotent source of truth):**
+1. `supabase/migrations/20260703155527_phase2a_multitenant_schema.sql` — schema + RLS.
+2. `supabase/migrations/20260703162211_phase2a_rls_hardening.sql` — the fixes an
+   adversarial multi-agent RLS review drove (see "Hardening" below).
+
+**Built:** tables `firms`, `memberships`, `invitations`, `workspaces` (`data jsonb` =
+financial PII; `name` + `industry_profile` denormalized so lists/admin never read the
+blob; `source_local_id` for idempotent Phase-2b import), `audit_log` (append-only). Enums
+`membership_role` (owner/admin/member), `membership_status` (active/invited/revoked).
+`plan_status` is a text+CHECK superset of Stripe's statuses so a webhook never fails to
+persist. SECURITY DEFINER helpers `auth_firm_ids()` + `auth_has_firm_role()` (search_path
+`''`, owner-rights read of memberships → no recursive RLS). RLS on all 5 tables; anon has
+zero grants; **defense in depth** — firms is SELECT-only and audit_log is append-only at
+BOTH the privilege and RLS layers (Supabase default-grants all DML to `authenticated`, so
+the migration revokes-then-regrants the intended surface). Billing columns on `firms` are
+service-role-write-only. Snapshots table deferred (not in the 2a scope list).
+
+**Isolation proof:** 33/33 SQL impersonation checks passed (2 firms, 5 users across every
+membership shape). Verified: cross-firm SELECT of every table → 0 rows; cross-firm
+INSERT/UPDATE → blocked (42501); member can't read audit_log or create invites (role gate);
+no-membership user sees nothing; invitee sees only their own pending invite by email;
+positive controls succeed. All test data cleaned up (the 3 real tester users were untouched
+— cleanup filtered on `@finsight.test`). Advisors: anon EXECUTE on the helpers revoked;
+remaining warns are expected (authenticated-EXECUTE, required for RLS) or N/A (leaked-
+password protection — app is passwordless OTP).
+
+**Hardening (adversarial review, migration #2):** a 4-lens multi-agent review + independent
+verification (25 raised → 18 confirmed → **4 Phase-2a blockers**, all fixed & re-proven with
+16/16 SQL checks incl. a dual-firm actor):
+1. `invitations_select` trusted the raw JWT `email` claim (unverified, config-dependent) →
+   dropped the email branch; SELECT now owner/admin-only. Invitee self-view moves to a
+   Phase-3 SECURITY DEFINER RPC keyed on the plaintext token.
+2/4. `memberships` had live `authenticated` PostgREST writes (self-promote to owner, revoke
+   the real owner, graft arbitrary users = intra-firm takeover) → **revoked authenticated
+   INSERT/UPDATE/DELETE**; all membership writes are service_role / RPC now.
+3. `workspaces_update` didn't pin `firm_id`, so a dual-firm member could relocate a
+   workspace + its `data` PII across the tenant boundary → **BEFORE UPDATE trigger** pins
+   `firm_id` (+ `created_by`); RLS WITH CHECK can't reference OLD.
+   Plus: revoked authenticated writes on `invitations` + `audit_log` (both server-mediated
+   by design); DB-side invitation email normalization.
+
+**Net authenticated surface:** firms = SELECT; memberships = SELECT; invitations = SELECT
+(owner/admin); **workspaces = full CRUD (firm_id/created_by immutable)**; audit_log = SELECT
+(owner/admin). Everything else is service_role / Phase-3 RPC.
+
+**Super-admin wiring:** `src/lib/auth/super-admin.ts` (server-only guard, `isSuperAdmin()`,
+fails closed). Reads `SUPER_ADMIN_EMAILS` at runtime via `process.env`; set it via
+`wrangler secret put SUPER_ADMIN_EMAILS` (NOT wrangler.jsonc) + `.env.local`. Not yet set
+(no value guessed/committed).
+
+**Deferred to Phase 3/4 (documented by the review, NOT blockers — no cross-tenant leak):**
+the accept-invite RPC must cap the granted role to the inviter's and enforce a "≥1 owner"
+invariant; the team-management RPCs own "no self-promote / no last-owner-removal"; the
+metadata-only super-admin needs a *structural* PII boundary (a `data`-omitting view or a
+non-BYPASSRLS `finsight_metadata` role — comment + service_role is not enforcement); billing
+writes should funnel through one `apply_stripe_status` RPC so a buggy server action can't
+grant free access; firm+owner bootstrap should be one SECURITY DEFINER `create_firm_with_owner()`.
+`workspaces` delete is allowed for all active members ("member = work in clients"); flip to
+owner/admin if preferred. `FORCE ROW LEVEL SECURITY` considered and declined (postgres +
+service_role are BYPASSRLS, so it adds no real protection and risks the definer-helper path).
 
 ---
 
