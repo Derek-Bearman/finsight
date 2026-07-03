@@ -222,6 +222,70 @@ grant free access; firm+owner bootstrap should be one SECURITY DEFINER `create_f
 owner/admin if preferred. `FORCE ROW LEVEL SECURITY` considered and declined (postgres +
 service_role are BYPASSRLS, so it adds no real protection and risks the definer-helper path).
 
+## H. Phases 2b–5 — autonomous build (2026-07-03, branch `phase-2a-tenancy`)
+
+Built end-to-end WITHOUT deploying or touching live external services. Everything is on the
+branch, committed per phase, and either SQL/unit-tested (DB + logic) or `next build`-verified
+(app + UI). NOT pushed, NOT deployed.
+
+**All migrations (idempotent, applied to `camphmqvrzqpgrhdjafo`, committed):**
+1. `20260703155527_phase2a_multitenant_schema.sql` — schema + RLS
+2. `20260703162211_phase2a_rls_hardening.sql` — the 4 review blockers
+3. `20260703172427_phase3_server_rpcs.sql` — server-mediated write RPCs
+4. `20260703173132_phase5_metadata_boundary.sql` — `workspaces_metadata` view (PII-safe)
+5. `20260703173412_phase4_billing.sql` — `grace_ends_at` + `apply_stripe_status`
+6. `20260703174143_phase3b_list_members.sql` — `list_firm_members` roster
+
+**DB layer (fully SQL-tested via impersonation, all fixtures cleaned up):**
+- RPCs — `create_firm_with_owner` (service-role only, idempotent on customer id),
+  `create_invitation` (role-capped), `accept_invitation` (confirmed-email + token verified),
+  `revoke_invitation`, `set_membership_role` / `remove_membership` (no self-promote, owner-tier
+  owner-only, ≥1-owner), `list_firm_members`, `apply_stripe_status` (billing funnel, grace
+  anchor). **29/29 RPC checks + 9/9 billing checks + 6/6 metadata checks + 2/2 roster checks.**
+- The metadata-admin PII boundary is now structural: `workspaces_metadata` (security_invoker,
+  no `data` column) is what the super-admin queries.
+
+**App layer (typed against generated `database.types.ts`, `tsc` clean, `next build` green):**
+- `lib/data/context.ts` (membership resolver → unauthenticated / onboarding / active + billing
+  access), `workspaces.ts` (Phase-2b CRUD + idempotent import), `team.ts` / `provisioning.ts` /
+  `onboarding.ts` (action wrappers), `admin/super-admin-data.ts` (isSuperAdmin-gated, view-only).
+- `lib/billing/access.ts` (pure state machine, **16/16** unit checks via tsx), `stripe.ts`
+  (hosted Checkout + Portal, Workers-safe async webhook verify), `actions.ts`.
+- `app/api/stripe/webhook` (public, signature-verified, funnels to `apply_stripe_status`),
+  `middleware.ts` allowlists it.
+- Supabase clients typed with `<Database>`; server-only `service.ts`.
+
+**UI routes (`next build` green + curl smoke-test: app boots, middleware redirects, webhook
+public):** `/onboarding` (two-door fork), `/invite/[token]` (accept), `/team` (roster + invite +
+roles), `/billing` (status + Portal), `/admin` (firm metadata). `BillingBanner` component ready
+to mount. NOTE: these are build-verified, not click-tested (no auth+firm session available here).
+
+### What only Derek can do (human-only punch-list — none of this is done)
+1. **Stripe** — create the account; a $97/mo recurring **Price**; a webhook endpoint at
+   `https://finsight.arktosmarketing.com/api/stripe/webhook` subscribed to
+   `checkout.session.completed`, `customer.subscription.created|updated|deleted`,
+   `invoice.payment_failed`. Then set wrangler secrets: `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID`,
+   `STRIPE_WEBHOOK_SECRET`. (Code reads these at runtime; nothing works until they exist.)
+2. **Resend SMTP** — verify `arktosmarketing.com` (or `finsight.` subdomain) + SPF/DKIM in the
+   Cloudflare zone; wire SMTP into Supabase Auth → Email (from e.g. `finsight@arktosmarketing.com`).
+3. **Supabase Auth → URL config** — add `https://finsight.arktosmarketing.com` (Site URL) +
+   `/auth/callback` to the redirect allowlist.
+4. **wrangler secrets** — `SUPER_ADMIN_EMAILS` (Derek's email) + the 3 Stripe secrets above.
+   `SUPABASE_SERVICE_ROLE_KEY` was already set in Phase 1.
+5. **Deploy** — `npm install` (adds `stripe`), commit the staged `wrangler.jsonc` domain change,
+   `npm run cf:deploy`. Keep `FINSIGHT_ALLOW_DIRECT_SIGNUP` UNSET in prod (dev-only bypass).
+
+### Still needs a real session (deferred — couldn't be built safely headless)
+- Wire the existing localStorage `/` app to Postgres: make the Zustand store read/write via
+  `lib/data/workspaces.ts`, add the **first-login per-workspace import prompt** UI, mount
+  `BillingBanner` in the app header, and gate the app by `access.level` (read-only / locked).
+  The data layer + import fn + banner all exist; the integration into the 850-line `page.tsx`
+  needs click-testing.
+- Full E2E of every flow (signup→checkout→webhook→firm, invite→accept, billing lifecycle,
+  super-admin) once Stripe + SMTP exist. Dev harness: `.env.local` (gitignored) holds the public
+  keys + `FINSIGHT_ALLOW_DIRECT_SIGNUP=true` so onboarding works without Stripe; `.claude/launch.json`
+  has a `finsight-dev` config.
+
 ---
 
 *Build on a branch. Isolation-test RLS before UI. Verify Stripe webhooks before trusting
