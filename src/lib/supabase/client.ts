@@ -13,6 +13,7 @@
  */
 
 import { createBrowserClient } from '@supabase/ssr';
+import type { Database } from './database.types';
 
 export function createSupabaseBrowserClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -23,5 +24,5 @@ export function createSupabaseBrowserClient() {
         'Set them in wrangler.jsonc vars (and .env.local for dev).'
     );
   }
-  return createBrowserClient(url, anonKey);
+  return createBrowserClient<Database>(url, anonKey);
 }

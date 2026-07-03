@@ -21,7 +21,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createSupabaseProxyClient } from '@/lib/supabase/proxy-client';
 
 // Public routes — anyone can hit these whether logged in or not.
-const PUBLIC_PATHS = ['/login', '/auth/callback', '/auth/signout'];
+// The Stripe webhook MUST be public: Stripe posts to it with no session, so it
+// can't be redirected to /login (signature verification is its auth).
+const PUBLIC_PATHS = ['/login', '/auth/callback', '/auth/signout', '/api/stripe/webhook'];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));
