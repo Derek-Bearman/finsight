@@ -15,9 +15,12 @@ on a branch, checkpoint each phase, never iterate on the live path.
   "Failed to fetch" on `/login` — the browser couldn't reach a sleeping backend.
   **Restored to `ACTIVE_HEALTHY`** (project ref `camphmqvrzqpgrhdjafo`). Login works
   again in every session.
-- **Time-sensitive:** the free tier **re-pauses after ~7 idle days** and will break
-  login again. Decide **Supabase Pro ($25/mo)** vs a **keep-alive ping** (a scheduled
-  request every few days) before relying on it. See open decision #7.
+- **Auto-pause SOLVED (keep-alive deployed).** A tiny Cloudflare cron Worker
+  **`finsight-keepalive`** (`~/finsight-keepalive`, daily `0 6 * * *`) pings
+  `GET /auth/v1/settings` with the publishable key (clean 200) so the project never
+  idles out. $0, independent of any Claude session. Manual test:
+  `curl https://finsight-keepalive.bearman-derek.workers.dev/`. Revisit if moving to
+  Supabase Pro later.
 
 ## A. Feasibility verdict
 
@@ -118,19 +121,25 @@ before inviting real firms — built-in email is rate-limited (~3–4/hr) and Ou
 | **5**  | Super-admin metadata console + audit-log surfacing. |
 | *Cross-cutting, early* | Custom SMTP + domain; decide Supabase Pro vs keep-alive to stop auto-pause. |
 
-## E. Open decisions — get these from Derek before the relevant phase
+## E. Decisions — resolved 2026-07-03 except #1
 
-1. **FinSight domain** for email / Stripe / branding (still on `*.workers.dev` +
-   `finsight.arktosmarketing.com`).
-2. **Onboarding fork:** does a brand-new email always get "Start a firm," or is it
-   invite-only with a fallback? *(Recommend: offer both — don't dead-end a new customer.)*
-3. **Roles matrix:** owner = billing + everything; admin = invite/manage users + clients;
-   member = work in clients, no billing/invites. Confirm or adjust.
-4. **Trial-end / failed-payment:** hard lock vs ~3-day read-only grace.
-5. **Super-admin depth:** metadata-only now, impersonation added later?
-6. **Confirm dropping the local-only path in v1.**
-7. **Supabase auto-pause fix:** Pro ($25/mo) vs a keep-alive ping. *(Time-sensitive —
-   re-pauses in ~7 idle days and kills login.)*
+2. ✅ **Onboarding fork:** unknown email → **offer both** "Start a firm (free trial)"
+   AND "I was invited / ask my admin." Invited teammates come in via their invite link;
+   don't dead-end a new customer.
+3. ✅ **Roles matrix (default confirmed):** owner = billing + everything; admin =
+   invite/manage users + clients; member = work in clients, no billing/invites.
+4. ✅ **Trial-end / failed-payment:** **~3-day read-only grace** (banner → read-only →
+   hard lock), not an immediate cut.
+5. ✅ **Super-admin depth:** metadata-only now; audit-logged impersonation only added
+   later if support truly needs it.
+6. ✅ **Drop the local-only path in v1:** confirmed.
+7. ✅ **Auto-pause:** free keep-alive ping — **`finsight-keepalive` Worker deployed**
+   (see §0).
+
+**Still open:**
+1. ⬜ **FinSight domain** for email / Stripe / branding (still on `*.workers.dev` +
+   `finsight.arktosmarketing.com`). Needed before custom SMTP + Stripe. Derek to buy;
+   tell the next session when it exists.
 
 ## F. Gotchas (do not regress)
 
