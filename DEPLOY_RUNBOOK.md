@@ -80,10 +80,11 @@ npm run cf:deploy
 - Invite a teammate from `/team` → open the link → `/invite/<token>` → accept → they join.
 - `/billing` shows status + Manage-billing (owner). `/admin` (from SUPER_ADMIN_EMAILS) lists firms.
 
-## Still TODO in code (needs a live session — see FINSIGHT_SAAS_HANDOFF.md §H)
+## Code status (2026-07-05): localStorage → Postgres wiring DONE + click-verified
 
-The new firm routes exist but the **existing localStorage `/` app is not yet wired to Postgres**.
-Before real users rely on cloud persistence, a session must: hydrate the Zustand store from
-`lib/data/workspaces.ts`, write-through mutations, add the first-login import prompt, mount
-`BillingBanner`, and gate the app by `access.level`. Until then the app still persists to the
-browser. Everything else (auth, firms, invites, roles, billing lifecycle, super-admin) is built.
+The `/` app is now firm-aware and cloud-persisted (see FINSIGHT_SAAS_HANDOFF.md §I). Verified
+end to end against a real Supabase session: create/persist/hard-refresh, write-through, the
+first-login import prompt (idempotent), delete, invite→accept→shared clients, and the
+full→read-only→locked billing gate. `next build` green; committed on `phase-2a-tenancy`; **not
+deployed**. What remains before real users is the external-dependency setup in steps 1–4 above
+(Stripe, Resend, Supabase Auth URLs, secrets + deploy) — the in-app code is complete.

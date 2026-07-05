@@ -279,16 +279,56 @@ are set. Wrangler is authenticated. **Copy-paste steps: `DEPLOY_RUNBOOK.md`.**
 5. **Deploy** — `npm install` (adds `stripe`), commit the staged `wrangler.jsonc` domain change,
    `npm run cf:deploy`. Keep `FINSIGHT_ALLOW_DIRECT_SIGNUP` UNSET in prod (dev-only bypass).
 
-### Still needs a real session (deferred — couldn't be built safely headless)
-- Wire the existing localStorage `/` app to Postgres: make the Zustand store read/write via
-  `lib/data/workspaces.ts`, add the **first-login per-workspace import prompt** UI, mount
-  `BillingBanner` in the app header, and gate the app by `access.level` (read-only / locked).
-  The data layer + import fn + banner all exist; the integration into the 850-line `page.tsx`
-  needs click-testing.
-- Full E2E of every flow (signup→checkout→webhook→firm, invite→accept, billing lifecycle,
-  super-admin) once Stripe + SMTP exist. Dev harness: `.env.local` (gitignored) holds the public
-  keys + `FINSIGHT_ALLOW_DIRECT_SIGNUP=true` so onboarding works without Stripe; `.claude/launch.json`
-  has a `finsight-dev` config.
+### Phase 2b integration — DONE + click-verified (2026-07-05)
+
+The localStorage `/` app is now wired to Postgres and click-tested end to end against a
+real authenticated Supabase session. See §I below for what was built and how it was proven.
+
+### Still needs a real session (remaining after 2b)
+- Full E2E of the *external-dependency* flows (signup→**Stripe checkout**→webhook→firm,
+  trial-code / invite **emails** via Resend) once Stripe + SMTP exist. The in-app halves
+  (firm resolve/route, workspace CRUD, invite→accept, billing lifecycle gating, super-admin
+  data layer) are verified; only the third-party legs are unexercised.
+- Dev harness: `.env.local` (gitignored) holds the public keys + `FINSIGHT_ALLOW_DIRECT_SIGNUP=true`.
+  Note it does **not** hold `SUPABASE_SERVICE_ROLE_KEY` or `SUPER_ADMIN_EMAILS`, so the two
+  server-role paths — dev-direct onboarding (`startFirmDirect`) and the `/admin` console — throw
+  in `npm run dev` until you add them. Add both to `.env.local` to click-test those locally.
+  `~/.claude/launch.json` has a `finsight-dev` config (port 3011) for the preview tooling.
+
+## I. Phase 2b — as built + verified (2026-07-05, branch `phase-2a-tenancy`)
+
+**Commit:** `Phase 2b: wire localStorage app to Postgres (firm-aware store + cloud sync)`.
+`next build` green. Not deployed.
+
+**Design:** the Zustand store stays the single in-memory source of truth; it was made
+*cloud-aware* rather than rewriting the two large page files.
+- `lib/data/workspace-actions.ts` (`'use server'`) — the client's only bridge to the RLS data
+  layer: `loadFirmApp` (context + workspaces + access + isSuperAdmin), `saveNewWorkspace` /
+  `saveWorkspace` / `removeWorkspace`, `runImport`. Writes fail closed unless `access.level==='full'`.
+- `components/app/FirmAppGate.tsx` — mounted in `layout.tsx`; on `/` and `/workspace/*` it
+  resolves the firm once, routes unauth→/login and onboarding→/onboarding, hydrates the store
+  from Postgres, starts write-through, blocks the app when billing is `locked`, and provides
+  `firm/access/role/isSuperAdmin` via `firm-context.tsx`. Other routes render untouched.
+- store (`enterCloudMode`/`hydrateFromCloud` + `cloudMode` flag): cloud mode **disables
+  localStorage writes** so firm PII never mirrors to the browser; the pre-cloud
+  `finsight-workspaces` key is preserved for the one-time import prompt.
+- `lib/data/cloud-sync.ts` — subscribes to the store and **debounce-persists** any workspace
+  whose `updatedAt` moved, so every existing mutation flows to Postgres unchanged; create/delete
+  are explicit at the call sites (`noteCreated`/`noteDeleted`).
+- `components/app/ImportPrompt.tsx` — first-login per-workspace checkbox import (idempotent on
+  `source_local_id`); `AppNav.tsx` — Team/Billing/(Admin) links in both page headers; both page
+  headers mount `<BillingBanner>` and gate writes by access level; home trust copy now reads
+  "Synced to <firm> · available on every device".
+
+**Verified (preview browser + Supabase table checks, firm "Arktos Bookkeeping"):**
+create workspace → row in Postgres with a DB uuid → survives hard refresh AND a full
+localStorage wipe (proves data is server-side; `finsight-workspaces` stays null in cloud mode);
+write-through (a mutation advanced `updated_at` + the data blob); import prompt imports **once,
+not twice** (idempotent + per-firm dismissed flag); cloud-backed delete removes the row;
+invite from `/team` → accept via `/invite/<token>` as a second user → teammate sees the same
+client (membership owner+member both active); billing gate full→read-only(banner)→locked(app
+blocked) by flipping `plan_status`. Team/Billing nav present; Admin correctly hidden (no
+`SUPER_ADMIN_EMAILS` in dev).
 
 ---
 
