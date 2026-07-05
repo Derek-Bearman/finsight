@@ -260,6 +260,10 @@ public):** `/onboarding` (two-door fork), `/invite/[token]` (accept), `/team` (r
 roles), `/billing` (status + Portal), `/admin` (firm metadata). `BillingBanner` component ready
 to mount. NOTE: these are build-verified, not click-tested (no auth+firm session available here).
 
+**Deploy readiness:** `npm run cf:deploy:dry` passes — the full OpenNext + wrangler Workers
+bundle builds with the Stripe SDK (11 MB / 2.3 MB gzip), so the deploy will work once secrets
+are set. Wrangler is authenticated. **Copy-paste steps: `DEPLOY_RUNBOOK.md`.**
+
 ### What only Derek can do (human-only punch-list — none of this is done)
 1. **Stripe** — create the account; a $97/mo recurring **Price**; a webhook endpoint at
    `https://finsight.arktosmarketing.com/api/stripe/webhook` subscribed to
