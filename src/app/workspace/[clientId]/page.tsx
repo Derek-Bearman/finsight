@@ -63,6 +63,9 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ProfileIcon } from '@/components/ui/profile-icon';
+import { useFirmContext } from '@/components/app/firm-context';
+import { AppNav } from '@/components/app/AppNav';
+import { BillingBanner } from '@/components/billing/BillingBanner';
 
 // ── Helper: years available in values ────────────────────────────────────────
 
@@ -1434,6 +1437,10 @@ export default function WorkspacePage({ params }: PageProps) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
   const batchUpdateAccountsOuter = useWorkspaceStore((s) => s.batchUpdateAccounts);
   const setValuesOuter = useWorkspaceStore((s) => s.setValues);
+  const cloudMode = useWorkspaceStore((s) => s.cloudMode);
+  const cloudHydrated = useWorkspaceStore((s) => s.cloudHydrated);
+  const firm = useFirmContext();
+  const readOnly = firm?.readOnly ?? false;
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [hydrated, setHydrated] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -1462,8 +1469,13 @@ export default function WorkspacePage({ params }: PageProps) {
     return unsub;
   }, []);
 
-  // Show loading skeleton until Zustand localStorage hydration completes
-  if (!hydrated) {
+  // Wait for the store to be ready. In cloud (firm) mode the app gate hydrates
+  // the store from Postgres; fall back to the localStorage-persist signal for
+  // any non-cloud path.
+  const ready = cloudMode ? cloudHydrated : hydrated;
+
+  // Show loading skeleton until hydration completes
+  if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'hsl(var(--background))' }}>
         <div className="h-8 w-8 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: 'hsl(var(--primary))' }} />
@@ -1536,6 +1548,7 @@ export default function WorkspacePage({ params }: PageProps) {
           </div>
 
           <div className="flex items-center gap-3">
+            <AppNav />
             <HelpButton onOpen={() => tourHook.openTour(0)} />
             {/* Scenarios count — informational badge, intentionally non-button styling */}
             <span
@@ -1583,15 +1596,26 @@ export default function WorkspacePage({ params }: PageProps) {
             <button
               type="button"
               data-testid="clear-data-btn"
+              disabled={readOnly}
               onClick={() => setShowClearConfirm(true)}
-              className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-red-50"
+              className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
               style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--destructive))' }}
+              title={readOnly ? 'Read-only while billing is resolved' : undefined}
             >
               Clear Data
             </button>
           </div>
         </div>
       </header>
+
+      {firm?.access.banner && (
+        <div className="mx-auto max-w-6xl px-6 pt-4">
+          <BillingBanner
+            decision={firm.access}
+            onManageBilling={() => window.location.assign('/billing')}
+          />
+        </div>
+      )}
 
       {/* Clear Data confirmation */}
       <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>

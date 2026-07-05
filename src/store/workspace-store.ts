@@ -21,6 +21,7 @@ import type {
   Scenario,
   OperationalDataPoint,
 } from '@/types';
+import type { AccessLevel } from '@/lib/billing/access';
 
 // ─────────────────────────────────────────────
 // Privacy mode + conditional storage adapter
@@ -36,9 +37,24 @@ const PERSIST_KEY = 'finsight-workspaces';
  */
 let privacyModeEnabled = false;
 
+/**
+ * Module-level flag set once the app enters cloud (firm) mode. When true the
+ * storage adapter drops writes to localStorage — the firm's workspaces live in
+ * Postgres and must NOT be mirrored into the browser (that's the whole point of
+ * the SaaS move + the privacy positioning). Reads still work, so the one-time
+ * first-login import prompt can still see any pre-cloud `finsight-workspaces`
+ * data until the user imports or dismisses it.
+ */
+let cloudModeEnabled = false;
+
 /** Returns the current privacy-mode state. Cheap synchronous read. */
 export function isPrivacyMode(): boolean {
   return privacyModeEnabled;
+}
+
+/** True once the app is firm-aware (cloud persistence active). */
+export function isCloudMode(): boolean {
+  return cloudModeEnabled;
 }
 
 /**
@@ -69,6 +85,7 @@ const conditionalStorage: StateStorage = {
   setItem: (name, value) => {
     if (typeof window === 'undefined') return;
     if (privacyModeEnabled) return; // privacy mode → swallow the write
+    if (cloudModeEnabled) return; // cloud mode → Postgres is the source of truth
     try {
       localStorage.setItem(name, value);
     } catch {
@@ -90,9 +107,24 @@ interface WorkspaceState {
   activeWorkspaceId: string | null;
   mappingMemory: MappingMemoryEntry[];
   activeScenarioId: string | null;
+
+  // ── Cloud (firm) mode ──────────────────────────────────────────────────────
+  /** True once the app has resolved an active firm and is persisting to Postgres. */
+  cloudMode: boolean;
+  /** True once the firm's workspaces have been loaded from Postgres. Both app
+   *  pages gate their first render on this so they never flash empty/404. */
+  cloudHydrated: boolean;
+  /** Active firm + user for write-through, and the billing access level. */
+  firmId: string | null;
+  currentUserId: string | null;
+  accessLevel: AccessLevel;
 }
 
 interface WorkspaceActions {
+  // Cloud mode
+  enterCloudMode: (opts: { firmId: string; userId: string; accessLevel: AccessLevel }) => void;
+  hydrateFromCloud: (workspaces: ClientWorkspace[]) => void;
+
   // Workspace CRUD
   addWorkspace: (workspace: ClientWorkspace) => void;
   updateWorkspace: (id: string, patch: Partial<ClientWorkspace>) => void;
@@ -141,6 +173,26 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
       activeWorkspaceId: null,
       mappingMemory: [],
       activeScenarioId: null,
+
+      cloudMode: false,
+      cloudHydrated: false,
+      firmId: null,
+      currentUserId: null,
+      accessLevel: 'full',
+
+      // ── Cloud mode ─────────────────────────────────────────────────────────
+      enterCloudMode: ({ firmId, userId, accessLevel }) => {
+        // Flip the module flag FIRST so the persist middleware's write for this
+        // very state change is dropped — the pre-cloud localStorage data stays
+        // intact for the one-time import prompt to read.
+        cloudModeEnabled = true;
+        set({ cloudMode: true, firmId, currentUserId: userId, accessLevel });
+      },
+
+      // Replace the (possibly stale localStorage-hydrated) workspace list with
+      // the firm's authoritative rows from Postgres.
+      hydrateFromCloud: (workspaces) =>
+        set({ workspaces, cloudHydrated: true }),
 
       // ── Workspace CRUD ─────────────────────────────────────────────────────
       addWorkspace: (workspace) =>

@@ -20,7 +20,12 @@ import { parseCSV } from '@/lib/parsers/csv-parser';
 import { xlsxToCsvDetailed, isExcelFile, isExcelMimeType } from '@/lib/parsers/xlsx-converter';
 import { classifyAll } from '@/lib/classifiers';
 import { validateImport } from '@/lib/parsers/import-validator';
-import { parseWorkspaceJSON, resolveWorkspaceIdCollision } from '@/lib/utils/workspace-io';
+import { parseWorkspaceJSON } from '@/lib/utils/workspace-io';
+import { useFirmContext } from '@/components/app/firm-context';
+import { AppNav } from '@/components/app/AppNav';
+import { BillingBanner } from '@/components/billing/BillingBanner';
+import { saveNewWorkspace, removeWorkspace } from '@/lib/data/workspace-actions';
+import { noteCreated, noteDeleted } from '@/lib/data/cloud-sync';
 
 // ── Auto-exclude summary line names ─────────────────────────────────────────
 
@@ -458,7 +463,12 @@ function buildAccountsFromParseResult(
 export default function HomePage() {
   const router = useRouter();
   const { workspaces, addWorkspace, setActiveWorkspace, deleteWorkspace } = useWorkspaceStore();
+  const firm = useFirmContext();
+  const readOnly = firm?.readOnly ?? false;
   const tourHook = useTour();
+
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const [step, setStep] = useState<Step>('profile');
   const [selectedProfileId, setSelectedProfileId] = useState(ALL_PROFILES[0]?.id ?? 'generic-smb');
@@ -511,6 +521,10 @@ export default function HomePage() {
 
   const handleWorkspaceImport = async (file: File) => {
     setImportMessage(null);
+    if (readOnly) {
+      setImportMessage({ kind: 'error', text: 'Your workspace is read-only right now — resolve billing to import.' });
+      return;
+    }
     try {
       const text = await file.text();
       const result = parseWorkspaceJSON(text);
@@ -518,28 +532,42 @@ export default function HomePage() {
         setImportMessage({ kind: 'error', text: result.error });
         return;
       }
-      const existingIds = new Set(workspaces.map((w) => w.id));
-      const { id: safeId, renamed } = resolveWorkspaceIdCollision(
-        result.workspace.id,
-        existingIds
-      );
-      const ws: ClientWorkspace = { ...result.workspace, id: safeId };
-      addWorkspace(ws);
-      setActiveWorkspace(safeId);
+      // Persist to Postgres; the DB assigns the authoritative uuid, so no local
+      // id-collision handling is needed anymore.
+      const res = await saveNewWorkspace(result.workspace);
+      if (!res.ok) {
+        setImportMessage({ kind: 'error', text: res.error });
+        return;
+      }
+      const stored = res.data;
+      addWorkspace(stored);
+      noteCreated(stored);
+      setActiveWorkspace(stored.id);
       const warnSuffix =
         result.warnings.length > 0 ? ` (${result.warnings.length} note${result.warnings.length === 1 ? '' : 's'})` : '';
-      setImportMessage({
-        kind: 'success',
-        text: renamed
-          ? `Imported "${ws.name}" with a new id (the original id was already in use)${warnSuffix}.`
-          : `Imported "${ws.name}"${warnSuffix}.`,
-      });
+      setImportMessage({ kind: 'success', text: `Imported "${stored.name}"${warnSuffix}.` });
       // Navigate after a short delay so the user sees the confirmation
-      setTimeout(() => router.push(`/workspace/${safeId}`), 600);
+      setTimeout(() => router.push(`/workspace/${stored.id}`), 600);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error reading file.';
       setImportMessage({ kind: 'error', text: `Could not read file: ${msg}` });
     }
+  };
+
+  // ── Cloud-backed workspace delete ───────────────────────────────────────────
+  const handleDeleteWorkspace = async (ws: ClientWorkspace) => {
+    if (readOnly) {
+      window.alert('Your workspace is read-only right now — resolve billing to delete.');
+      return;
+    }
+    if (!window.confirm(`Delete "${ws.name}"? This cannot be undone.`)) return;
+    const res = await removeWorkspace(ws.id);
+    if (!res.ok) {
+      window.alert(res.error);
+      return;
+    }
+    noteDeleted(ws.id);
+    deleteWorkspace(ws.id);
   };
 
   // ── File handling ──────────────────────────────────────────────────────────
@@ -750,7 +778,13 @@ export default function HomePage() {
     goToStep('classify');
   };
 
-  const handleClassifyConfirm = (finalAccounts: Account[]) => {
+  const handleClassifyConfirm = async (finalAccounts: Account[]) => {
+    if (creating) return; // guard against double-submit
+    setCreateError(null);
+    if (readOnly) {
+      setCreateError('Your workspace is read-only right now — resolve billing to create clients.');
+      return;
+    }
     const wsId = `ws-${Date.now()}`;
     const now = new Date().toISOString();
     const workspace: ClientWorkspace = {
@@ -767,9 +801,18 @@ export default function HomePage() {
       createdAt: now,
       updatedAt: now,
     };
-    addWorkspace(workspace);
-    setActiveWorkspace(wsId);
-    setNewWorkspaceId(wsId);
+    setCreating(true);
+    const res = await saveNewWorkspace(workspace);
+    setCreating(false);
+    if (!res.ok) {
+      setCreateError(res.error);
+      return;
+    }
+    const stored = res.data; // DB-assigned uuid id
+    addWorkspace(stored);
+    noteCreated(stored);
+    setActiveWorkspace(stored.id);
+    setNewWorkspaceId(stored.id);
     goToStep('done');
   };
 
@@ -803,6 +846,7 @@ export default function HomePage() {
           </span>
         </div>
         <div className="flex items-center gap-3">
+          <AppNav />
           {/* Privacy mode toggle — wipes localStorage and stops new writes. */}
           <button
             type="button"
@@ -866,6 +910,11 @@ export default function HomePage() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-10">
+        {firm?.access.banner && (
+          <div className="mb-6">
+            <BillingBanner decision={firm.access} onManageBilling={() => router.push('/billing')} />
+          </div>
+        )}
         {/* Step indicator */}
         <div className="mb-10 flex justify-center">
           <StepIndicator current={step} />
@@ -884,11 +933,11 @@ export default function HomePage() {
                       Your Workspaces
                     </h1>
                     <p className="mt-1 text-sm flex items-center gap-1.5" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                      <span aria-hidden>🔒</span>
+                      <span aria-hidden>☁️</span>
                       <span className="font-medium" style={{ color: 'hsl(var(--foreground))' }}>
-                        Saved in this browser only
+                        {firm ? `Synced to ${firm.firmName}` : 'Synced to your firm'}
                       </span>
-                      <span>· no cloud sync</span>
+                      <span>· available on every device</span>
                     </p>
                   </div>
                   <Button
@@ -914,9 +963,7 @@ export default function HomePage() {
                         onClick={() => router.push(`/workspace/${ws.id}`)}
                         onDelete={(e) => {
                           e.stopPropagation();
-                          if (window.confirm(`Delete "${ws.name}"? This cannot be undone.`)) {
-                            deleteWorkspace(ws.id);
-                          }
+                          void handleDeleteWorkspace(ws);
                         }}
                       />
                     ))}
@@ -1150,17 +1197,26 @@ export default function HomePage() {
                If only P&L was uploaded → restrict to P&L types.
                If only BS was uploaded → restrict to BS types.
                If both → show all (undefined). */}
+            {createError && (
+              <div
+                role="alert"
+                className="rounded-lg border px-4 py-3 text-sm"
+                style={{ borderColor: 'hsl(0 84% 60%)', background: 'hsl(0 84% 60% / 0.08)', color: 'hsl(0 84% 32%)' }}
+              >
+                {createError}
+              </div>
+            )}
             {mergedAccounts.length === 0 ? (
               <div className="text-center py-8">
                 <p style={{ color: 'hsl(var(--muted-foreground))' }} className="text-sm">
                   No accounts imported. You can create an empty workspace and add data later.
                 </p>
                 <div className="flex gap-3 justify-center mt-4">
-                  <Button variant="outline" onClick={() => goToStep('pnl')}>
+                  <Button variant="outline" onClick={() => goToStep('pnl')} disabled={creating}>
                     Go back and upload
                   </Button>
-                  <Button onClick={() => handleClassifyConfirm([])}>
-                    Create empty workspace
+                  <Button onClick={() => handleClassifyConfirm([])} disabled={creating}>
+                    {creating ? 'Creating…' : 'Create empty workspace'}
                   </Button>
                 </div>
               </div>
