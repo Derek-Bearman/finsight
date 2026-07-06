@@ -9,6 +9,12 @@
   "compatibility_date": "2025-01-01",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Keep the workers.dev URL live alongside the custom domain during the
+  // transition: FinSight's OTP sign-in needs the new domain added to the
+  // Supabase Auth redirect allowlist first. Flip to false (or remove) once
+  // Supabase URL Configuration is updated, for a clean branded-only finish.
+  "workers_dev": true,
+
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
@@ -40,5 +46,14 @@
 
   "observability": {
     "enabled": true
-  }
+  },
+
+  // Custom domain: on `wrangler deploy`, provisions the TLS cert + a proxied
+  // DNS record in the arktosmarketing.com zone and binds this Worker to it.
+  // FinSight reads its own origin at runtime, so no env change is needed —
+  // but the Supabase Auth URL config (Site URL + /auth/callback redirect)
+  // must be pointed at finsight.arktosmarketing.com in the Supabase dashboard.
+  "routes": [
+    { "pattern": "finsight.arktosmarketing.com", "custom_domain": true }
+  ]
 }
