@@ -185,7 +185,7 @@ function ProfileCard({
       type="button"
       onClick={onSelect}
       data-testid={`profile-card-${profile.id}`}
-      className="text-left rounded-xl border-2 p-4 transition-colors hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="text-left rounded-xl border-2 p-4 transition-colors cursor-pointer hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       style={{
         borderColor: selected ? 'hsl(var(--primary))' : 'hsl(var(--border))',
         background: selected ? 'hsl(var(--accent))' : 'hsl(var(--card))',
@@ -225,7 +225,7 @@ function WorkspaceCard({
         type="button"
         onClick={onClick}
         data-testid={`workspace-card-${workspace.id}`}
-        className="text-left w-full p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl"
+        className="text-left w-full p-4 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl"
       >
         <div className="flex items-center gap-2 mb-1" style={{ color: 'hsl(var(--foreground))' }}>
           <ProfileIcon profileId={profile?.id} size={18} />
@@ -465,7 +465,7 @@ export default function HomePage() {
   const { workspaces, addWorkspace, setActiveWorkspace, deleteWorkspace } = useWorkspaceStore();
   const firm = useFirmContext();
   const readOnly = firm?.readOnly ?? false;
-  const tourHook = useTour();
+  const tourHook = useTour({ autoOpen: false });
 
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);

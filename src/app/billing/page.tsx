@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { resolveUserContext } from '@/lib/data/context';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,7 +20,15 @@ export default async function BillingPage() {
   const { firm, role, access } = ctx;
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-10">
+    <>
+      <header className="border-b px-6 py-4" style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}>
+        <div className="mx-auto max-w-6xl">
+          <Link href="/" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" data-testid="back-to-home">
+            ← Home
+          </Link>
+        </div>
+      </header>
+      <main className="mx-auto max-w-2xl px-4 py-10">
       <h1 className="mb-6 text-xl font-semibold">Billing</h1>
       <Card>
         <CardHeader>
@@ -43,7 +52,8 @@ export default async function BillingPage() {
           </div>
         </CardContent>
       </Card>
-    </main>
+      </main>
+    </>
   );
 }
 

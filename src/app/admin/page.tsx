@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { isSuperAdmin } from '@/lib/auth/super-admin';
@@ -22,7 +23,15 @@ export default async function AdminPage() {
   const firms = await listAllFirms();
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-10">
+    <>
+      <header className="border-b px-6 py-4" style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}>
+        <div className="mx-auto max-w-6xl">
+          <Link href="/" className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" data-testid="back-to-home">
+            ← Home
+          </Link>
+        </div>
+      </header>
+      <main className="mx-auto max-w-5xl px-4 py-10">
       <div className="mb-6">
         <h1 className="text-xl font-semibold">Super-admin — Firms</h1>
         <p className="text-sm text-muted-foreground">
@@ -67,6 +76,7 @@ export default async function AdminPage() {
           </tbody>
         </table>
       </div>
-    </main>
+      </main>
+    </>
   );
 }

@@ -471,6 +471,9 @@ function ProjectionsTab({ clientId }: { clientId: string }) {
             Revenue Projection
           </h3>
           <ProjectionChart data={revenueChartData} metric="revenue" height={300} />
+          <p className="mt-2 text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            Solid line = actuals · dashed = projection · shaded band = 80% confidence range. Forecast uses the {model} model — switch models above to compare.
+          </p>
         </div>
       )}
     </div>
@@ -1217,6 +1220,9 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
         <h3 className="text-sm font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
           Quick Adjustments — {activeScenario?.name ?? 'No scenario'}
         </h3>
+        <p className="text-xs -mt-2" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          Drag a slider to model a % change against this client&apos;s actuals. The dollar impact updates below. (Pick a non-baseline scenario to enable.)
+        </p>
         {/* Revenue slider */}
         <div className="flex items-center gap-3">
           <span className="text-sm w-28 flex-shrink-0" style={{ color: 'hsl(var(--foreground))' }}>Revenue</span>
@@ -1261,9 +1267,12 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
           className="rounded-xl border p-4 flex flex-col gap-2"
           style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
         >
-          <h3 className="text-sm font-semibold mb-1" style={{ color: 'hsl(var(--foreground))' }}>
+          <h3 className="text-sm font-semibold mb-0.5" style={{ color: 'hsl(var(--foreground))' }}>
             Impact vs Base Case
           </h3>
+          <p className="text-xs mb-1" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            Projected annual figures under this scenario vs the client&apos;s actual baseline. Green = improvement.
+          </p>
           {[{
             label: 'Revenue',
             base: impact.baseRevenue,
