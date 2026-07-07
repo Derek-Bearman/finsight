@@ -13,9 +13,11 @@ import {
   MetricGrid,
   DataEntryForm,
   CustomMetricBuilder,
+  FunnelChart,
 } from '@/components/operational';
+import type { DataEntrySave } from '@/components/operational';
 import { ReadOnlyGuard } from '@/components/app/ReadOnlyGuard';
-import type { ClientWorkspace, Period, OperationalDataPoint, CustomMetricDef } from '@/types';
+import type { ClientWorkspace, Period, CustomMetricDef } from '@/types';
 
 // ── Inner content — all hooks here ─────────────────────────────────────────
 
@@ -26,6 +28,7 @@ interface OperationalContentProps {
 
 function OperationalContent({ clientId, workspace }: OperationalContentProps) {
   const upsertOperationalDataPoint = useWorkspaceStore((s) => s.upsertOperationalDataPoint);
+  const upsertOperationalInputs = useWorkspaceStore((s) => s.upsertOperationalInputs);
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
 
   const profile = getProfile(workspace.industryProfileId);
@@ -69,11 +72,13 @@ function OperationalContent({ clientId, workspace }: OperationalContentProps) {
       profile.operationalMetrics,
       workspace.operationalData,
       financialSummary,
-      selectedPeriod
+      selectedPeriod,
+      workspace.operationalInputs
     );
   }, [
     profile.operationalMetrics,
     workspace.operationalData,
+    workspace.operationalInputs,
     financialSummary,
     selectedPeriod,
   ]);
@@ -84,13 +89,15 @@ function OperationalContent({ clientId, workspace }: OperationalContentProps) {
 
   // ── Handlers ─────────────────────────────────────────────────────────────
   const handleSaveData = useCallback(
-    (points: OperationalDataPoint[]) => {
+    ({ pool, points }: DataEntrySave) => {
+      upsertOperationalInputs(clientId, pool);
+      // Legacy fan-out keeps per-metric consumers + older workspaces coherent.
       for (const point of points) {
         upsertOperationalDataPoint(clientId, point);
       }
       setShowDataEntry(false);
     },
-    [clientId, upsertOperationalDataPoint]
+    [clientId, upsertOperationalDataPoint, upsertOperationalInputs]
   );
 
   const handleAddCustomMetric = useCallback(
@@ -254,9 +261,19 @@ function OperationalContent({ clientId, workspace }: OperationalContentProps) {
           <DataEntryForm
             metricDefs={profile.operationalMetrics}
             existingData={workspace.operationalData}
+            existingPools={workspace.operationalInputs}
             period={selectedPeriod}
             onSave={handleSaveData}
             onCancel={() => setShowDataEntry(false)}
+          />
+        )}
+
+        {/* Marketing funnel visualization (renders once funnel data exists) */}
+        {!noFinancialData && selectedPeriod && (
+          <FunnelChart
+            pools={workspace.operationalInputs ?? []}
+            period={selectedPeriod}
+            marketingSpendFromPnL={financialSummary.marketingSpend}
           />
         )}
 

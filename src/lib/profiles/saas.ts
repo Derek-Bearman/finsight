@@ -1,4 +1,5 @@
 import type { IndustryProfile } from '@/types';
+import { MARKETING_FUNNEL_METRICS } from '@/lib/operational/funnel';
 
 export const saasProfile: IndustryProfile = {
   id: 'saas',
@@ -231,6 +232,7 @@ export const saasProfile: IndustryProfile = {
       format: 'ratio',
       benchmark: { good: 0.75, warn: 0.50, bad: 0.25, direction: 'higher' },
     },
+    ...MARKETING_FUNNEL_METRICS,
   ],
 
   benchmarks: [

@@ -16,7 +16,7 @@ import { periodLabel, periodSortKey } from '@/lib/utils/period';
 import { computePnL, toFinancialSummary } from '@/lib/calculations/pnl';
 import { getUniquePeriods } from '@/lib/calculations/period-aggregation';
 import { computeMetricsForPeriod } from '@/lib/operational';
-import { PeriodSelector, MetricGrid } from '@/components/operational';
+import { PeriodSelector, MetricGrid, FunnelChart } from '@/components/operational';
 import {
   MappingToolbar,
   MappingViewA,
@@ -1375,9 +1375,10 @@ function OperationalTabContent({ clientId }: { clientId: string }) {
       profile.operationalMetrics,
       workspace.operationalData,
       financialSummary,
-      selectedPeriod
+      selectedPeriod,
+      workspace.operationalInputs
     );
-  }, [profile?.id, workspace?.operationalData, financialSummary, selectedPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [profile?.id, workspace?.operationalData, workspace?.operationalInputs, financialSummary, selectedPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const metricsWithData = metricResults.filter((r) => r.value !== null).length;
 
@@ -1412,12 +1413,21 @@ function OperationalTabContent({ clientId }: { clientId: string }) {
           </p>
         </div>
       ) : (
-        <MetricGrid
-          results={metricResults}
-          customMetrics={workspace.customMetrics}
-          operationalData={workspace.operationalData}
-          period={selectedPeriod}
-        />
+        <>
+          {selectedPeriod && (
+            <FunnelChart
+              pools={workspace.operationalInputs ?? []}
+              period={selectedPeriod}
+              marketingSpendFromPnL={financialSummary.marketingSpend}
+            />
+          )}
+          <MetricGrid
+            results={metricResults}
+            customMetrics={workspace.customMetrics}
+            operationalData={workspace.operationalData}
+            period={selectedPeriod}
+          />
+        </>
       )}
 
       <div className="flex justify-end">

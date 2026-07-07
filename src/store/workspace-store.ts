@@ -20,6 +20,7 @@ import type {
   AuditEntry,
   Scenario,
   OperationalDataPoint,
+  OperationalInputPool,
 } from '@/types';
 import type { AccessLevel } from '@/lib/billing/access';
 
@@ -164,6 +165,8 @@ interface WorkspaceActions {
   // Operational data
   setOperationalData: (workspaceId: string, data: OperationalDataPoint[]) => void;
   upsertOperationalDataPoint: (workspaceId: string, point: OperationalDataPoint) => void;
+  /** Merge shared operational inputs for a period (shared-input pool). */
+  upsertOperationalInputs: (workspaceId: string, pool: OperationalInputPool) => void;
 
   // Audit log
   appendAuditEntry: (workspaceId: string, entry: AuditEntry) => void;
@@ -346,6 +349,23 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
                 ? w.operationalData.map((d, i) => (i === idx ? point : d))
                 : [...w.operationalData, point];
             return { ...w, operationalData: newData, updatedAt: new Date().toISOString() };
+          }),
+        })),
+
+      upsertOperationalInputs: (workspaceId, pool) =>
+        set((s) => ({
+          workspaces: s.workspaces.map((w) => {
+            if (w.id !== workspaceId) return w;
+            const pools = w.operationalInputs ?? [];
+            const idx = pools.findIndex(
+              (p) => p.period.year === pool.period.year && p.period.month === pool.period.month
+            );
+            const merged: OperationalInputPool =
+              idx >= 0
+                ? { period: pool.period, sharedInputs: { ...pools[idx]!.sharedInputs, ...pool.sharedInputs } }
+                : pool;
+            const newPools = idx >= 0 ? pools.map((p, i) => (i === idx ? merged : p)) : [...pools, pool];
+            return { ...w, operationalInputs: newPools, updatedAt: new Date().toISOString() };
           }),
         })),
 

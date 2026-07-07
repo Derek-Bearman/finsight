@@ -1,4 +1,5 @@
 import type { IndustryProfile, FinancialSummary } from '@/types';
+import { MARKETING_FUNNEL_METRICS } from '@/lib/operational/funnel';
 
 export const genericSmbProfile: IndustryProfile = {
   id: 'generic-smb',
@@ -9,23 +10,10 @@ export const genericSmbProfile: IndustryProfile = {
 
   classificationHints: [],
 
+  // cost_per_lead and conversion_rate moved to the universal Marketing Funnel
+  // group (funnel_cost_per_lead / funnel_lead_to_sale) — same math, shared
+  // inputs entered once per period.
   operationalMetrics: [
-    {
-      id: 'cost_per_lead',
-      label: 'Cost Per Lead',
-      description: 'Total marketing spend divided by total leads generated.',
-      category: 'Marketing',
-      inputFields: [
-        { id: 'total_leads', label: 'Total Leads', unit: 'leads' },
-      ],
-      formula: 'Marketing Spend ÷ Total Leads',
-      calculate: (inputs, financials) => {
-        if (!inputs['total_leads'] || inputs['total_leads'] === 0) return null;
-        return financials.marketingSpend / inputs['total_leads'];
-      },
-      format: 'currency',
-      benchmark: { good: 25, warn: 75, bad: 150, direction: 'lower' },
-    },
     {
       id: 'marketing_pct_revenue',
       label: 'Marketing % of Revenue',
@@ -55,23 +43,7 @@ export const genericSmbProfile: IndustryProfile = {
       },
       format: 'currency',
     },
-    {
-      id: 'conversion_rate',
-      label: 'Lead Conversion Rate',
-      description: 'Percentage of leads that become paying customers.',
-      category: 'Sales',
-      inputFields: [
-        { id: 'total_leads', label: 'Total Leads', unit: 'leads' },
-        { id: 'new_customers', label: 'New Customers', unit: 'customers' },
-      ],
-      formula: 'New Customers ÷ Total Leads',
-      calculate: (inputs) => {
-        if (!inputs['total_leads'] || inputs['total_leads'] === 0) return null;
-        return (inputs['new_customers'] ?? 0) / inputs['total_leads'];
-      },
-      format: 'percent',
-      benchmark: { good: 0.20, warn: 0.10, bad: 0.05, direction: 'higher' },
-    },
+    ...MARKETING_FUNNEL_METRICS,
   ],
 
   benchmarks: [

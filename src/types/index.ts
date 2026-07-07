@@ -103,6 +103,19 @@ export interface OperationalDataPoint {
   inputs: Record<string, number>;
 }
 
+/**
+ * Shared operational inputs for one period, entered ONCE and consumed by
+ * every metric whose inputFields reference the same field id (e.g.
+ * 'total_leads' feeds cost-per-lead AND every funnel conversion rate).
+ * Metric calculators receive these merged over any legacy per-metric
+ * OperationalDataPoint inputs (pool wins).
+ */
+export interface OperationalInputPool {
+  period: Period;
+  /** key = shared input field id, value = the raw number entered */
+  sharedInputs: Record<string, number>;
+}
+
 // ─────────────────────────────────────────────
 // Mapping Memory (cross-client classification memory)
 // ─────────────────────────────────────────────
@@ -150,6 +163,9 @@ export interface ClientWorkspace {
   fiscalYearStart: number; // 1–12, month the fiscal year starts
   scenarios: Scenario[];
   operationalData: OperationalDataPoint[];
+  /** Shared-input pools (one per period). Optional: pre-refactor workspaces
+   *  only have per-metric operationalData; calculators fall back to it. */
+  operationalInputs?: OperationalInputPool[];
   customMetrics: CustomMetricDef[];
   auditLog: AuditEntry[];
   createdAt: string;

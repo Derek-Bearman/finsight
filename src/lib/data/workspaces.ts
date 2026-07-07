@@ -28,6 +28,7 @@ function rowToWorkspace(row: WorkspaceRow): ClientWorkspace {
     values: [],
     scenarios: [],
     operationalData: [],
+    operationalInputs: [],
     customMetrics: [],
     auditLog: [],
     fiscalYearStart: 1,

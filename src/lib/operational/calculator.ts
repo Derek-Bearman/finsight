@@ -1,6 +1,7 @@
 import type {
   OperationalMetricDef,
   OperationalDataPoint,
+  OperationalInputPool,
   FinancialSummary,
   Period,
   MetricFormat,
@@ -49,6 +50,35 @@ function findDataPoint(
   );
 }
 
+export function findInputPool(
+  pools: OperationalInputPool[] | undefined,
+  period: Period
+): OperationalInputPool | undefined {
+  return pools?.find(
+    (p) => p.period.year === period.year && p.period.month === period.month
+  );
+}
+
+/**
+ * Resolve a metric's inputs for a period: shared-input pool values win over
+ * legacy per-metric data-point values (pre-refactor workspaces keep working;
+ * anything newly entered flows through the pool).
+ */
+export function resolveMetricInputs(
+  def: OperationalMetricDef,
+  dataPoint: OperationalDataPoint | undefined,
+  pool: OperationalInputPool | undefined
+): Record<string, number> {
+  const merged: Record<string, number> = { ...(dataPoint?.inputs ?? {}) };
+  if (pool) {
+    for (const field of def.inputFields) {
+      const v = pool.sharedInputs[field.id];
+      if (v !== undefined) merged[field.id] = v;
+    }
+  }
+  return merged;
+}
+
 // ─────────────────────────────────────────────
 // getBenchmarkStatus
 // ─────────────────────────────────────────────
@@ -95,33 +125,38 @@ export function computeMetricsForPeriod(
   metricDefs: OperationalMetricDef[],
   operationalData: OperationalDataPoint[],
   financialSummary: FinancialSummary,
-  period: Period
+  period: Period,
+  inputPools?: OperationalInputPool[]
 ): MetricResult[] {
+  const pool = findInputPool(inputPools, period);
+
   return metricDefs.map((def): MetricResult => {
     const dataPoint = findDataPoint(operationalData, def.id, period);
+    const inputs = resolveMetricInputs(def, dataPoint, pool);
+    const hasAnyInput = Object.keys(inputs).length > 0;
 
     let value: number | null = null;
 
-    if (dataPoint !== undefined) {
-      // Check that all required fields have values
-      const requiredFields = def.inputFields.filter((f) => !f.optional);
-      const allRequiredFilled = requiredFields.every(
-        (f) => dataPoint.inputs[f.id] !== undefined && dataPoint.inputs[f.id] !== 0
-      );
-
-      if (allRequiredFilled || def.inputFields.length === 0) {
-        try {
-          value = def.calculate(dataPoint.inputs, financialSummary);
-        } catch {
-          value = null;
-        }
-      }
-    } else if (def.inputFields.length === 0) {
+    if (def.inputFields.length === 0) {
       // No inputs needed — calculate from financials only
       try {
         value = def.calculate({}, financialSummary);
       } catch {
         value = null;
+      }
+    } else if (hasAnyInput) {
+      // Check that all required fields have values
+      const requiredFields = def.inputFields.filter((f) => !f.optional);
+      const allRequiredFilled = requiredFields.every(
+        (f) => inputs[f.id] !== undefined && inputs[f.id] !== 0
+      );
+
+      if (allRequiredFilled) {
+        try {
+          value = def.calculate(inputs, financialSummary);
+        } catch {
+          value = null;
+        }
       }
     }
 

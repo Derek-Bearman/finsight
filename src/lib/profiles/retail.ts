@@ -1,4 +1,5 @@
 import type { IndustryProfile } from '@/types';
+import { MARKETING_FUNNEL_METRICS } from '@/lib/operational/funnel';
 
 export const retailProfile: IndustryProfile = {
   id: 'retail',
@@ -163,6 +164,7 @@ export const retailProfile: IndustryProfile = {
       format: 'currency',
       benchmark: { good: 400, warn: 200, bad: 100, direction: 'higher' },
     },
+    ...MARKETING_FUNNEL_METRICS,
   ],
 
   benchmarks: [

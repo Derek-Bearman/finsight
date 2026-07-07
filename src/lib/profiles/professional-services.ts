@@ -1,4 +1,5 @@
 import type { IndustryProfile } from '@/types';
+import { MARKETING_FUNNEL_METRICS } from '@/lib/operational/funnel';
 
 export const professionalServicesProfile: IndustryProfile = {
   id: 'professional-services',
@@ -153,6 +154,7 @@ export const professionalServicesProfile: IndustryProfile = {
       format: 'currency',
       benchmark: { good: 500, warn: 1500, bad: 3000, direction: 'lower' },
     },
+    ...MARKETING_FUNNEL_METRICS,
   ],
 
   benchmarks: [
