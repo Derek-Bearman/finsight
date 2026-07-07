@@ -34,12 +34,11 @@ const rand = mulberry32(42);
 const jitter = (base: number, pct: number) => base * (1 + (rand() * 2 - 1) * pct);
 const round = (n: number) => Math.round(n);
 
-// ── Periods: Jul 2025 – Jun 2026 ─────────────────────────────────────────────
+// ── Periods: Jan 2024 – Jun 2026 (30 months) ─────────────────────────────────
 const PERIODS: Period[] = [];
-for (let i = 0; i < 12; i++) {
-  const month = ((6 + i) % 12) + 1; // 7..12,1..6
-  const year = month >= 7 ? 2025 : 2026;
-  PERIODS.push({ year, month });
+for (let y = 2024; y <= 2026; y++) {
+  const lastMonth = y === 2026 ? 6 : 12;
+  for (let m = 1; m <= lastMonth; m++) PERIODS.push({ year: y, month: m });
 }
 
 // Seasonality for a pizza franchise (strong fall/winter, softer summer).

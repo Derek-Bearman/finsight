@@ -1,12 +1,10 @@
 'use client';
 
-import { useState } from 'react';
 import type { MetricResult } from '@/lib/operational/calculator';
 import { formatMetricValue } from '@/lib/utils/format';
 
 export interface MetricCardProps {
   result: MetricResult;
-  showFormula?: boolean;
 }
 
 const BENCHMARK_LABELS: Record<string, string> = {
@@ -17,13 +15,10 @@ const BENCHMARK_LABELS: Record<string, string> = {
   none: '',
 };
 
-export function MetricCard({ result, showFormula = false }: MetricCardProps) {
-  const [hovered, setHovered] = useState(false);
-
+export function MetricCard({ result }: MetricCardProps) {
   const hasValue = result.value !== null;
   const displayValue = hasValue ? formatMetricValue(result.value, result.format) : '—';
   const valueColor = hasValue ? result.benchmarkColor : 'hsl(var(--muted-foreground))';
-  const showFormulaText = showFormula || hovered;
 
   return (
     <div
@@ -34,8 +29,6 @@ export function MetricCard({ result, showFormula = false }: MetricCardProps) {
       }}
       data-testid={`metric-card-${result.metricId}`}
       title={result.description}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
       {/* Category label */}
       {result.category && (
@@ -106,15 +99,13 @@ export function MetricCard({ result, showFormula = false }: MetricCardProps) {
         </p>
       )}
 
-      {/* Formula */}
-      {showFormulaText && (
-        <p
-          className="text-xs italic mt-1"
-          style={{ color: 'hsl(var(--muted-foreground))' }}
-        >
-          {result.formula}
-        </p>
-      )}
+      {/* Formula — always visible so the metric is self-explaining */}
+      <p
+        className="text-xs italic mt-auto pt-1"
+        style={{ color: 'hsl(var(--muted-foreground))' }}
+      >
+        {result.formula}
+      </p>
     </div>
   );
 }

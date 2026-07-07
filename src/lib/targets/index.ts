@@ -140,11 +140,21 @@ export function formatTargetThreshold(t: KpiTarget, format: MetricFormat): strin
   return `${symbol} ${formatMetricValue(t.value, format)}`;
 }
 
+/** The default benchmark's headline threshold, restated as "≥ 40.0%" so the
+ *  default reads like a target the user can override. */
+export function defaultBenchmarkThreshold(def: RatioDef): string {
+  const symbol = def.defaultBenchmark.direction === 'higher' ? '≥' : '≤';
+  return `${symbol} ${formatMetricValue(def.defaultBenchmark.good, def.format)}`;
+}
+
 export interface ResolvedRatioBenchmark {
   benchmark: BenchmarkRange;
   provenance: TargetProvenance;
   /** e.g. "Target ≥ 30.0%" when a target exists, else null. */
   targetText: string | null;
+  /** Threshold text for whichever benchmark is active (target OR default) —
+   *  always present, so cards can show a number even on the FinSight default. */
+  thresholdText: string;
   target: KpiTarget | null;
 }
 
@@ -156,14 +166,22 @@ export function resolveRatioBenchmark(
   const def = RATIO_DEF_MAP[key]!;
   const target = targets?.ratios?.[key];
   if (target) {
+    const t = `Target ${formatTargetThreshold(target, def.format)}`;
     return {
       benchmark: targetToBenchmark(target),
       provenance: target.source,
-      targetText: `Target ${formatTargetThreshold(target, def.format)}`,
+      targetText: t,
+      thresholdText: t,
       target,
     };
   }
-  return { benchmark: def.defaultBenchmark, provenance: 'default', targetText: null, target: null };
+  return {
+    benchmark: def.defaultBenchmark,
+    provenance: 'default',
+    targetText: null,
+    thresholdText: defaultBenchmarkThreshold(def),
+    target: null,
+  };
 }
 
 /** Is a value on the right side of a target? */

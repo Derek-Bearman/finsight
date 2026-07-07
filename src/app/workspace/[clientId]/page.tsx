@@ -9,7 +9,7 @@ import { classifyAll, applyClassification } from '@/lib/classifiers';
 import { projectWorkspace } from '@/lib/projections/workspace-projections';
 import type { WorkspaceProjectionOptions } from '@/lib/projections/workspace-projections';
 import type { ProjectionModel } from '@/types';
-import { ProjectionChart, ProjectionControls } from '@/components/projections';
+import { ProjectionChart, ProjectionControls, ForecastSummary } from '@/components/projections';
 import type { HorizonKey } from '@/components/projections/ProjectionControls';
 import type { ProjectionChartDataPoint } from '@/components/projections/ProjectionChart';
 import { periodLabel, periodSortKey } from '@/lib/utils/period';
@@ -25,6 +25,7 @@ import {
 } from '@/components/mapping';
 import type { SourceFilter } from '@/components/mapping';
 import { downloadWorkspaceJSON } from '@/lib/utils/workspace-io';
+import { getKeyAccounts } from '@/lib/utils/accounts';
 import {
   applyScenario as _applyScenario,
   computeScenarioImpact,
@@ -467,18 +468,28 @@ function ProjectionsTab({ clientId }: { clientId: string }) {
           </p>
         </div>
       ) : (
-        <div
-          className="rounded-xl border p-4"
-          style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
-        >
-          <h3 className="text-sm font-semibold mb-4" style={{ color: 'hsl(var(--foreground))' }}>
-            Revenue Projection
-          </h3>
-          <ProjectionChart data={revenueChartData} metric="revenue" height={300} />
-          <p className="mt-2 text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            Solid line = actuals · dashed = projection · shaded band = 80% confidence range. Forecast uses the {model} model — switch models above to compare.
-          </p>
-        </div>
+        <>
+          {projectionResult && workspace && (
+            <ForecastSummary
+              result={projectionResult}
+              accounts={workspace.accounts}
+              values={workspace.values}
+              modelLabel={model}
+            />
+          )}
+          <div
+            className="rounded-xl border p-4"
+            style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
+          >
+            <h3 className="text-sm font-semibold mb-4" style={{ color: 'hsl(var(--foreground))' }}>
+              Revenue Projection
+            </h3>
+            <ProjectionChart data={revenueChartData} metric="revenue" height={300} />
+            <p className="mt-2 text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+              Solid line = actuals · dashed = projection · shaded band = 80% confidence range. Forecast uses the {model} model — switch models above to compare.
+            </p>
+          </div>
+        </>
       )}
     </div>
   );
@@ -544,9 +555,10 @@ function reportRatioCard(
     label: def.label,
     value: value != null ? formatMetricValue(value, def.format) : '—',
     color: value != null ? status.color : undefined,
+    // Always show the active threshold; the default reads like a settable target.
     sub: resolved.targetText
       ? `${resolved.targetText} · ${resolved.provenance === 'corporate' ? 'Corporate' : 'Custom'}`
-      : 'FinSight default benchmark',
+      : `${resolved.thresholdText} · FinSight default`,
   };
 }
 
@@ -654,7 +666,14 @@ function ReportsTab({
                   label="Altman Z''"
                   value={zScoreZoneLabel(latestHealth?.altmanZScore ?? null)}
                   color={zScoreZoneColor(latestHealth?.altmanZScore ?? null)}
-                  sub={resolveRatioBenchmark('altman_z', workspace.targets).targetText ?? 'FinSight default benchmark'}
+                  sub={
+                    (() => {
+                      const r = resolveRatioBenchmark('altman_z', workspace.targets);
+                      return r.targetText
+                        ? `${r.targetText} · ${r.provenance === 'corporate' ? 'Corporate' : 'Custom'}`
+                        : `${r.thresholdText} · FinSight default`;
+                    })()
+                  }
                 />
               </div>
             </div>
@@ -801,6 +820,7 @@ function OverviewTab({
         trend,
         benchmark: resolved.benchmark,
         targetText: resolved.targetText,
+        thresholdText: resolved.thresholdText,
         provenance: resolved.provenance,
         explainer: def.explainer,
       };
@@ -1146,9 +1166,13 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
     return computeScenarioImpact(workspace.accounts, workspace.values, nonBaseScenario);
   }, [workspace.accounts, workspace.values, nonBaseScenario, baseScenario]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const keyAccounts = useMemo(() => (workspace ? getKeyAccounts(workspace) : []), [workspace?.accounts, workspace?.values]); // eslint-disable-line react-hooks/exhaustive-deps
+  const keyAccountIds = useMemo(() => new Set(keyAccounts.map(k => k.id)), [keyAccounts]);
+
   // Slider state (local)
   const [revSlider, setRevSlider] = useState(0);
   const [costSlider, setCostSlider] = useState(0);
+  const [accountSliders, setAccountSliders] = useState<Record<string, number>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync sliders from active scenario
@@ -1158,6 +1182,12 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
     const c = activeScenario.adjustments.find(a => a.accountId === '_all_costs_' && a.type === 'percent');
     setRevSlider(r?.value ?? 0);
     setCostSlider(c?.value ?? 0);
+    const perAccount: Record<string, number> = {};
+    for (const ka of keyAccounts) {
+      const adj = activeScenario.adjustments.find(a => a.accountId === ka.id && a.type === 'percent');
+      if (adj) perAccount[ka.id] = adj.value;
+    }
+    setAccountSliders(perAccount);
   }, [activeScenario?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const firstPeriod = useMemo((): import('@/types').Period => {
@@ -1171,20 +1201,31 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
     return sorted[0]!.period;
   }, [workspace?.values]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const persistSliders = useCallback((rv: number, cv: number) => {
+  const persistSliders = useCallback((rv: number, cv: number, perAccount: Record<string, number>) => {
     if (!activeScenario || activeScenario.isBaseline) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       const baseAdjs = activeScenario.adjustments.filter(
-        a => !(a.accountId === '_all_revenue_' && a.type === 'percent') &&
-             !(a.accountId === '_all_costs_' && a.type === 'percent')
+        a => !(a.type === 'percent' &&
+               (a.accountId === '_all_revenue_' || a.accountId === '_all_costs_' || keyAccountIds.has(a.accountId)))
       );
       const sliderAdjs: import('@/types').ScenarioAdjustment[] = [];
       if (rv !== 0) sliderAdjs.push({ accountId: '_all_revenue_', type: 'percent', value: rv, appliesFrom: firstPeriod });
       if (cv !== 0) sliderAdjs.push({ accountId: '_all_costs_', type: 'percent', value: cv, appliesFrom: firstPeriod });
+      for (const [id, v] of Object.entries(perAccount)) {
+        if (v !== 0) sliderAdjs.push({ accountId: id, type: 'percent', value: v, appliesFrom: firstPeriod });
+      }
       updateScenario(clientId, { ...activeScenario, adjustments: [...sliderAdjs, ...baseAdjs] });
     }, 150);
-  }, [activeScenario, clientId, firstPeriod, updateScenario]);
+  }, [activeScenario, clientId, firstPeriod, updateScenario, keyAccountIds]);
+
+  const handleAccountSlider = useCallback((id: string, v: number) => {
+    setAccountSliders(prev => {
+      const next = { ...prev, [id]: v };
+      persistSliders(revSlider, costSlider, next);
+      return next;
+    });
+  }, [revSlider, costSlider, persistSliders]);
 
   const isBaselineActive = activeScenario?.isBaseline ?? true;
 
@@ -1236,7 +1277,7 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
             type="range" min={-50} max={50} step={5}
             value={revSlider}
             disabled={isBaselineActive}
-            onChange={e => { const v = Number(e.target.value); setRevSlider(v); persistSliders(v, costSlider); }}
+            onChange={e => { const v = Number(e.target.value); setRevSlider(v); persistSliders(v, costSlider, accountSliders); }}
             className="flex-1"
             style={{ accentColor: 'hsl(var(--primary))', opacity: isBaselineActive ? 0.4 : 1 }}
           />
@@ -1257,7 +1298,7 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
             type="range" min={-30} max={30} step={5}
             value={costSlider}
             disabled={isBaselineActive}
-            onChange={e => { const v = Number(e.target.value); setCostSlider(v); persistSliders(revSlider, v); }}
+            onChange={e => { const v = Number(e.target.value); setCostSlider(v); persistSliders(revSlider, v, accountSliders); }}
             className="flex-1"
             style={{ accentColor: 'hsl(var(--primary))', opacity: isBaselineActive ? 0.4 : 1 }}
           />
@@ -1268,6 +1309,46 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
             {costSlider >= 0 ? '+' : ''}{costSlider}%
           </span>
         </div>
+
+        {/* Per-account sliders — the biggest revenue + cost drivers */}
+        {keyAccounts.length > 0 && (
+          <div className="border-t pt-3 flex flex-col gap-3" style={{ borderColor: 'hsl(var(--border))' }}>
+            <p className="text-xs font-medium uppercase tracking-wide" style={{ color: 'hsl(var(--muted-foreground))' }}>
+              Key Accounts
+            </p>
+            {keyAccounts.map((ka) => {
+              const val = accountSliders[ka.id] ?? 0;
+              const isRev = ka.type === 'revenue';
+              const range = isRev ? 50 : 30;
+              // For costs, going up is bad (red); for revenue, up is good (green).
+              const upIsGood = isRev;
+              const color = val === 0
+                ? 'hsl(var(--muted-foreground))'
+                : (val > 0) === upIsGood ? 'hsl(142 71% 45%)' : 'hsl(0 84% 60%)';
+              return (
+                <div key={ka.id} className="flex items-center gap-3">
+                  <span className="text-sm w-28 flex-shrink-0 truncate" style={{ color: 'hsl(var(--foreground))' }} title={ka.name}>
+                    {ka.name}
+                    <span className="block text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                      {isRev ? 'revenue' : ka.type === 'cogs' ? 'COGS' : 'expense'}
+                    </span>
+                  </span>
+                  <input
+                    type="range" min={-range} max={range} step={5}
+                    value={val}
+                    disabled={isBaselineActive}
+                    onChange={e => handleAccountSlider(ka.id, Number(e.target.value))}
+                    className="flex-1"
+                    style={{ accentColor: 'hsl(var(--primary))', opacity: isBaselineActive ? 0.4 : 1 }}
+                  />
+                  <span className="text-sm font-semibold w-12 text-right tabular-nums" style={{ color }}>
+                    {val >= 0 ? '+' : ''}{val}%
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Impact panel */}

@@ -18,6 +18,9 @@ export interface RatioSparklineProps {
   periodLabels?: string[];
   /** "Target ≥ 30.0%" when a client target overrides the default benchmark. */
   targetText?: string | null;
+  /** Threshold of the ACTIVE benchmark (target or default) — always shown so
+   *  the default reads like a settable target. */
+  thresholdText?: string | null;
   /** Where the active benchmark comes from — always shown so a corporate
    *  mandate is never confused with a loose FinSight default. */
   provenance?: 'corporate' | 'custom' | 'default' | 'none';
@@ -92,7 +95,7 @@ const PROVENANCE_TEXT: Record<string, string> = {
   default: 'FinSight default benchmark',
 };
 
-function RatioCard({ label, value, format, trend, benchmark, targetText, provenance, explainer }: RatioSparklineProps) {
+function RatioCard({ label, value, format, trend, benchmark, targetText, thresholdText, provenance, explainer }: RatioSparklineProps) {
   const valueColor =
     value !== null && benchmark
       ? getBenchmarkColor(value, benchmark)
@@ -162,13 +165,14 @@ function RatioCard({ label, value, format, trend, benchmark, targetText, provena
         <div style={{ height: 40 }} />
       )}
 
-      {/* Target / benchmark provenance */}
+      {/* Target / benchmark provenance — always shows the active threshold so
+          the FinSight default reads like a target the user can override */}
       {provenance && provenance !== 'none' && (
         <p className="text-xs leading-snug" style={{ color: 'hsl(var(--muted-foreground))' }}>
-          {targetText ? (
+          {thresholdText ? (
             <>
               <span className="font-medium" style={{ color: 'hsl(var(--foreground))' }}>
-                {targetText}
+                {targetText ?? thresholdText}
               </span>
               {' · '}
             </>

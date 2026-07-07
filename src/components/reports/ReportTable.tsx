@@ -59,6 +59,7 @@ export function ReportTable({ title, periods, rows, periodCount, showChange = fa
                   position: 'sticky',
                   left: 0,
                   background: 'hsl(var(--muted))',
+                  borderRight: '1px solid hsl(var(--border))',
                   zIndex: 2,
                   minWidth: '180px',
                 }}

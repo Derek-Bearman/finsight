@@ -97,13 +97,18 @@ export function MetricRow(props: MetricRowProps) {
   }
 
   const fontWeight = isHighlight ? 700 : isSubtotal ? 400 : 400;
-  const labelPaddingLeft = isSubtotal ? '1.5rem' : '0';
   const labelColor = isHighlight
     ? 'hsl(var(--foreground))'
     : isSubtotal
     ? 'hsl(var(--muted-foreground))'
     : 'hsl(var(--foreground))';
   const rowBg = isHighlight ? 'hsl(var(--muted) / 0.4)' : 'transparent';
+  // The sticky label column MUST be fully opaque or the horizontally-scrolled
+  // value columns show through underneath it. For highlight rows we composite
+  // the semi-transparent tint over an opaque card so it still matches the row.
+  const stickyBg = isHighlight
+    ? 'linear-gradient(hsl(var(--muted) / 0.4), hsl(var(--muted) / 0.4)), hsl(var(--card))'
+    : 'hsl(var(--card))';
 
   const current = values.length > 0 ? values[values.length - 1] ?? null : null;
   const previous = values.length > 1 ? values[values.length - 2] ?? null : null;
@@ -119,7 +124,8 @@ export function MetricRow(props: MetricRowProps) {
           color: labelColor,
           position: 'sticky',
           left: 0,
-          background: rowBg || 'hsl(var(--card))',
+          background: stickyBg,
+          borderRight: '1px solid hsl(var(--border))',
           zIndex: 1,
           minWidth: '180px',
           maxWidth: '240px',

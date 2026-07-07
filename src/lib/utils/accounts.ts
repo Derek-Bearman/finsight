@@ -1,4 +1,30 @@
-import type { Account, AccountValue } from '@/types';
+import type { Account, AccountValue, ClientWorkspace } from '@/types';
+
+export interface KeyAccount {
+  id: string;
+  name: string;
+  type: Account['type'];
+}
+
+/**
+ * The largest revenue and cost accounts by trailing total — the ones worth a
+ * dedicated What-If slider. Top `perSide` of each (default 3), excluded rows
+ * skipped.
+ */
+export function getKeyAccounts(ws: ClientWorkspace, perSide = 3): KeyAccount[] {
+  const total = new Map<string, number>();
+  for (const v of ws.values) total.set(v.accountId, (total.get(v.accountId) ?? 0) + Math.abs(v.amount));
+
+  const pick = (types: Account['type'][]) =>
+    ws.accounts
+      .filter((a) => !a.isExcluded && types.includes(a.type))
+      .map((a) => ({ id: a.id, name: a.name, type: a.type, mag: total.get(a.id) ?? 0 }))
+      .sort((a, b) => b.mag - a.mag)
+      .slice(0, perSide)
+      .map(({ id, name, type }) => ({ id, name, type }));
+
+  return [...pick(['revenue']), ...pick(['expense', 'cogs'])];
+}
 
 /** Returns a Map<accountId, latestAmount> for each account */
 export function getLatestAmounts(

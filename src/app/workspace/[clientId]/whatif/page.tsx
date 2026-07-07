@@ -20,6 +20,7 @@ import {
 } from '@/lib/scenarios';
 import { formatCurrency, formatPercent } from '@/lib/utils/format';
 import { getUniquePeriods } from '@/lib/calculations/period-aggregation';
+import { getKeyAccounts } from '@/lib/utils/accounts';
 import { ScenarioComparisonChart } from '@/components/charts';
 import { ReadOnlyGuard } from '@/components/app/ReadOnlyGuard';
 import { useReadOnly } from '@/components/app/firm-context';
@@ -708,9 +709,14 @@ interface ScenarioEditorProps {
 function ScenarioEditor({ clientId, workspace, scenario, baseScenario }: ScenarioEditorProps) {
   const updateScenario = useWorkspaceStore(s => s.updateScenario);
 
+  const keyAccounts = useMemo(() => getKeyAccounts(workspace), [workspace.accounts, workspace.values]); // eslint-disable-line react-hooks/exhaustive-deps
+  const keyAccountIds = useMemo(() => new Set(keyAccounts.map(k => k.id)), [keyAccounts]);
+
   // Quick slider local state
   const [revenueSlider, setRevenueSlider] = useState(0);
   const [costSlider, setCostSlider] = useState(0);
+  // Per-account slider values (keyed by real account id).
+  const [accountSliders, setAccountSliders] = useState<Record<string, number>>({});
   const [showAddForm, setShowAddForm] = useState(false);
 
   // Debounce ref for Zustand writes
@@ -722,31 +728,48 @@ function ScenarioEditor({ clientId, workspace, scenario, baseScenario }: Scenari
     const costAdj = scenario.adjustments.find(a => a.accountId === '_all_costs_' && a.type === 'percent');
     setRevenueSlider(revenueAdj?.value ?? 0);
     setCostSlider(costAdj?.value ?? 0);
-  }, [scenario.id]); // only re-sync when scenario changes
+    const perAccount: Record<string, number> = {};
+    for (const ka of keyAccounts) {
+      const adj = scenario.adjustments.find(a => a.accountId === ka.id && a.type === 'percent');
+      if (adj) perAccount[ka.id] = adj.value;
+    }
+    setAccountSliders(perAccount);
+  }, [scenario.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const firstPeriod = useMemo(() => getFirstPeriod(workspace), [workspace.values]); // eslint-disable-line react-hooks/exhaustive-deps
   const availableYears = useMemo(() => getAvailableYears(workspace), [workspace.values]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** True when an adjustment is managed by one of the sliders (aggregate or
+   *  per-key-account percent) — those are rebuilt from slider state, not the
+   *  detailed-adjustment list. */
+  const isSliderManaged = useCallback(
+    (a: ScenarioAdjustment) =>
+      a.type === 'percent' &&
+      (a.accountId === '_all_revenue_' || a.accountId === '_all_costs_' || keyAccountIds.has(a.accountId)),
+    [keyAccountIds]
+  );
+
+  /** Build the full adjustment list from the given slider values + the
+   *  scenario's non-slider (detailed) adjustments. */
+  const buildAdjustments = useCallback(
+    (revVal: number, costVal: number, perAccount: Record<string, number>): ScenarioAdjustment[] => {
+      const baseAdjs = scenario.adjustments.filter(a => !isSliderManaged(a));
+      const sliderAdjs: ScenarioAdjustment[] = [];
+      if (revVal !== 0) sliderAdjs.push({ accountId: '_all_revenue_', type: 'percent', value: revVal, appliesFrom: firstPeriod });
+      if (costVal !== 0) sliderAdjs.push({ accountId: '_all_costs_', type: 'percent', value: costVal, appliesFrom: firstPeriod });
+      for (const [id, v] of Object.entries(perAccount)) {
+        if (v !== 0) sliderAdjs.push({ accountId: id, type: 'percent', value: v, appliesFrom: firstPeriod });
+      }
+      return [...sliderAdjs, ...baseAdjs];
+    },
+    [scenario.adjustments, isSliderManaged, firstPeriod]
+  );
+
   // Compute the "live" scenario — merge slider values into the scenario's adjustments
   const liveScenario = useMemo((): Scenario => {
     if (scenario.isBaseline) return scenario;
-
-    // Start with non-slider adjustments
-    const baseAdjs = scenario.adjustments.filter(
-      a => !(a.accountId === '_all_revenue_' && a.type === 'percent') &&
-           !(a.accountId === '_all_costs_' && a.type === 'percent')
-    );
-
-    const sliderAdjs: ScenarioAdjustment[] = [];
-    if (revenueSlider !== 0) {
-      sliderAdjs.push({ accountId: '_all_revenue_', type: 'percent', value: revenueSlider, appliesFrom: firstPeriod });
-    }
-    if (costSlider !== 0) {
-      sliderAdjs.push({ accountId: '_all_costs_', type: 'percent', value: costSlider, appliesFrom: firstPeriod });
-    }
-
-    return { ...scenario, adjustments: [...sliderAdjs, ...baseAdjs] };
-  }, [scenario, revenueSlider, costSlider, firstPeriod]);
+    return { ...scenario, adjustments: buildAdjustments(revenueSlider, costSlider, accountSliders) };
+  }, [scenario, revenueSlider, costSlider, accountSliders, buildAdjustments]);
 
   // Compute live impact for the impact panel (uses liveScenario, not persisted)
   const liveImpact = useMemo(() => {
@@ -755,33 +778,30 @@ function ScenarioEditor({ clientId, workspace, scenario, baseScenario }: Scenari
   }, [workspace.accounts, workspace.values, liveScenario]);
 
   // Debounced persist of slider values to Zustand
-  const persistSliders = useCallback((revVal: number, costVal: number) => {
+  const persistSliders = useCallback((revVal: number, costVal: number, perAccount: Record<string, number>) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      const baseAdjs = scenario.adjustments.filter(
-        a => !(a.accountId === '_all_revenue_' && a.type === 'percent') &&
-             !(a.accountId === '_all_costs_' && a.type === 'percent')
-      );
-      const sliderAdjs: ScenarioAdjustment[] = [];
-      if (revVal !== 0) {
-        sliderAdjs.push({ accountId: '_all_revenue_', type: 'percent', value: revVal, appliesFrom: firstPeriod });
-      }
-      if (costVal !== 0) {
-        sliderAdjs.push({ accountId: '_all_costs_', type: 'percent', value: costVal, appliesFrom: firstPeriod });
-      }
-      updateScenario(clientId, { ...scenario, adjustments: [...sliderAdjs, ...baseAdjs] });
+      updateScenario(clientId, { ...scenario, adjustments: buildAdjustments(revVal, costVal, perAccount) });
     }, 150);
-  }, [scenario, clientId, firstPeriod, updateScenario]);
+  }, [scenario, clientId, updateScenario, buildAdjustments]);
 
   const handleRevenueSlider = useCallback((v: number) => {
     setRevenueSlider(v);
-    persistSliders(v, costSlider);
-  }, [costSlider, persistSliders]);
+    persistSliders(v, costSlider, accountSliders);
+  }, [costSlider, accountSliders, persistSliders]);
 
   const handleCostSlider = useCallback((v: number) => {
     setCostSlider(v);
-    persistSliders(revenueSlider, v);
-  }, [revenueSlider, persistSliders]);
+    persistSliders(revenueSlider, v, accountSliders);
+  }, [revenueSlider, accountSliders, persistSliders]);
+
+  const handleAccountSlider = useCallback((id: string, v: number) => {
+    setAccountSliders(prev => {
+      const next = { ...prev, [id]: v };
+      persistSliders(revenueSlider, costSlider, next);
+      return next;
+    });
+  }, [revenueSlider, costSlider, persistSliders]);
 
   // Gross margin from live impact
   const liveGrossMarginPct = liveImpact?.scenarioGrossMarginPct ?? null;
@@ -789,11 +809,8 @@ function ScenarioEditor({ clientId, workspace, scenario, baseScenario }: Scenari
 
   // Non-slider adjustments (for the adjustment list)
   const detailedAdjs = useMemo(() => {
-    return scenario.adjustments.filter(
-      a => !(a.accountId === '_all_revenue_' && a.type === 'percent') &&
-           !(a.accountId === '_all_costs_' && a.type === 'percent')
-    );
-  }, [scenario.adjustments]);
+    return scenario.adjustments.filter(a => !isSliderManaged(a));
+  }, [scenario.adjustments, isSliderManaged]);
 
   const handleAddAdjustment = useCallback((adj: ScenarioAdjustment) => {
     const updated = { ...scenario, adjustments: [...scenario.adjustments, adj] };
@@ -869,6 +886,27 @@ function ScenarioEditor({ clientId, workspace, scenario, baseScenario }: Scenari
               disabled={isBaseline}
               onChange={handleCostSlider}
             />
+
+            {/* Per-account sliders — the biggest revenue + cost drivers */}
+            {keyAccounts.length > 0 && (
+              <div className="border-t pt-3 flex flex-col gap-3" style={{ borderColor: 'hsl(var(--border))' }}>
+                <p className="text-xs font-medium uppercase tracking-wide" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                  Key Accounts
+                </p>
+                {keyAccounts.map((ka) => (
+                  <SliderRow
+                    key={ka.id}
+                    label={ka.name}
+                    value={accountSliders[ka.id] ?? 0}
+                    min={ka.type === 'revenue' ? -50 : -30}
+                    max={ka.type === 'revenue' ? 50 : 30}
+                    step={5}
+                    disabled={isBaseline}
+                    onChange={(v) => handleAccountSlider(ka.id, v)}
+                  />
+                ))}
+              </div>
+            )}
 
             {/* Margin target */}
             <div className="flex items-center justify-between border-t pt-3" style={{ borderColor: 'hsl(var(--border))' }}>

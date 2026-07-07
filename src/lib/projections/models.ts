@@ -325,6 +325,49 @@ export function projectSeasonal(input: ProjectionInput): ProjectionOutput {
   return { projected, model: 'seasonal', impliedGrowthRate, residualStdDev: residualSd };
 }
 
+/**
+ * Best-available annualized growth rate from history — never assumes 0%.
+ *   ≥24 months  → true YoY (trailing 12 vs prior 12)
+ *   6–23 months → CAGR of the 3-month averages at each end of the series
+ *   3–5 months  → annualized first→last monthly change
+ * Returns 0 only when there's genuinely no signal (flat or <2 points).
+ */
+export function historicalAnnualGrowth(history: { period: Period; amount: number }[]): number {
+  const filled = fillGaps(history);
+  const ys = filled.map((h) => h.amount);
+  const n = ys.length;
+  if (n < 2) return 0;
+
+  if (n >= 24) {
+    const trailing12 = ys.slice(-12).reduce((s, v) => s + v, 0);
+    const prior12 = ys.slice(-24, -12).reduce((s, v) => s + v, 0);
+    if (prior12 > 0) return clampGrowth(trailing12 / prior12 - 1);
+  }
+
+  if (n >= 6) {
+    const w = Math.min(3, Math.floor(n / 2));
+    const startAvg = ys.slice(0, w).reduce((s, v) => s + v, 0) / w;
+    const endAvg = ys.slice(-w).reduce((s, v) => s + v, 0) / w;
+    // Months between the two window centers, annualized.
+    const monthsApart = n - w;
+    if (startAvg > 0 && monthsApart > 0) {
+      return clampGrowth(Math.pow(endAvg / startAvg, 12 / monthsApart) - 1);
+    }
+  }
+
+  const first = ys[0]!;
+  const last = ys[n - 1]!;
+  if (first > 0 && n > 1) return clampGrowth(Math.pow(last / first, 12 / (n - 1)) - 1);
+  return 0;
+}
+
+function clampGrowth(rate: number): number {
+  // Guard against runaway extrapolation from a single anomalous month.
+  if (rate < -0.5) return -0.5;
+  if (rate > 3) return 3;
+  return rate;
+}
+
 // ─────────────────────────────────────────────
 // Model 3: YoY growth rate
 // ─────────────────────────────────────────────
@@ -346,10 +389,13 @@ export function projectYoY(input: ProjectionInput): ProjectionOutput {
   let annualRate: number;
   if (input.growthRateOverride !== undefined) {
     annualRate = input.growthRateOverride;
-  } else if (prior12 > 0) {
+  } else if (n >= 24 && prior12 > 0) {
     annualRate = trailing12 / prior12 - 1;
   } else {
-    annualRate = 0;
+    // No full prior year to compare — derive growth from the available history
+    // (partial-year windows) instead of collapsing to 0%.
+    void prior12;
+    annualRate = historicalAnnualGrowth(history);
   }
 
   // Cap negative (decline) projections at -30% annually to prevent runaway

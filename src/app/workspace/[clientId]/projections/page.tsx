@@ -11,11 +11,11 @@ import {
   ProjectionChart,
   ProjectionControls,
   AnnualSummaryTable,
+  ForecastSummary,
 } from '@/components/projections';
 import type { HorizonKey } from '@/components/projections/ProjectionControls';
 import type { ProjectionChartDataPoint } from '@/components/projections/ProjectionChart';
 import { periodLabel } from '@/lib/utils/period';
-import { formatPercent } from '@/lib/utils/format';
 
 const HORIZON_MONTHS: Record<HorizonKey, number> = {
   '12m': 12,
@@ -24,27 +24,6 @@ const HORIZON_MONTHS: Record<HorizonKey, number> = {
   '5y': 60,
   '10y': 120,
 };
-
-function abbreviateCurrency(v: number): string {
-  if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(v) >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
-  return `$${v.toFixed(0)}`;
-}
-
-function MetricCard({ label, value, sub, accent }: {
-  label: string; value: string; sub?: string; accent?: boolean;
-}) {
-  return (
-    <div className="rounded-xl border p-4 flex flex-col gap-1"
-      style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}>
-      <p className="text-xs font-medium uppercase tracking-wide"
-        style={{ color: 'hsl(var(--muted-foreground))' }}>{label}</p>
-      <p className="text-xl font-bold"
-        style={{ color: accent ? 'hsl(217 91% 55%)' : 'hsl(var(--foreground))' }}>{value}</p>
-      {sub && <p className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>{sub}</p>}
-    </div>
-  );
-}
 
 // ─── Inner component — all useMemo calls live here, no early returns ──────────
 
@@ -122,16 +101,6 @@ function ProjectionsContent({
     }));
   }, [projectionResult, useAnnualGranularity]);
 
-  const projectedRevenue12m = useMemo(() => {
-    if (!projectionResult) return null;
-    return projectionResult.rolledUp.filter((r) => r.isProjected).slice(0, 12).reduce((s, r) => s + r.revenue, 0);
-  }, [projectionResult]);
-
-  const projectedNetIncome12m = useMemo(() => {
-    if (!projectionResult) return null;
-    return projectionResult.rolledUp.filter((r) => r.isProjected).slice(0, 12).reduce((s, r) => s + r.netIncome, 0);
-  }, [projectionResult]);
-
   const impliedGrowthRate = useMemo(() => {
     if (!projectionResult) return undefined;
     const historical = projectionResult.rolledUp.filter((r) => !r.isProjected);
@@ -193,18 +162,14 @@ function ProjectionsContent({
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <MetricCard label="Projected Revenue (12 mo)"
-                value={projectedRevenue12m !== null ? abbreviateCurrency(projectedRevenue12m) : '—'}
-                sub="Next 12 projected months" accent />
-              <MetricCard label="Projected Net Income (12 mo)"
-                value={projectedNetIncome12m !== null ? abbreviateCurrency(projectedNetIncome12m) : '—'}
-                sub="Next 12 projected months"
-                accent={(projectedNetIncome12m ?? 0) >= 0} />
-              <MetricCard label="Implied Growth Rate"
-                value={impliedGrowthRate !== undefined ? formatPercent(impliedGrowthRate) : '—'}
-                sub={`Annualized · ${model} model`} />
-            </div>
+            {projectionResult && (
+              <ForecastSummary
+                result={projectionResult}
+                accounts={workspace.accounts}
+                values={workspace.values}
+                modelLabel={model}
+              />
+            )}
 
             <div className="rounded-xl border p-4"
               style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}>
