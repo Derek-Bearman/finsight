@@ -42,8 +42,9 @@
 > **Known/flagged:** firm "Arktos Bookkeeping" (plan_status=trialing) goes
 > read-only when its trial_ends_at passes 2026-07-12 — intended fail-closed
 > behavior; set plan_status='active' if it should stay complimentary.
-> Resend SMTP still not wired (built-in Supabase email is slow/rate-limited
-> — the #1 first-impression risk for Bob's OTP login).
+> ~~Resend SMTP still not wired~~ **RESOLVED 2026-07-07 (later session):
+> Resend custom SMTP live in Supabase Auth, delivery verified end-to-end
+> (real OTP → Resend "delivered" from finsight@arktosmarketing.com).**
 **GitHub:** https://github.com/Derek-Bearman/finsight
 **Deploy command:** `cd ~/Documents/finsight && git pull && npm run cf:deploy`
 
@@ -74,6 +75,43 @@
 All 8 phases of the original spec are built (data model, CSV import,
 mapping UI, calculations, projections, visualization, what-if scenarios,
 operational metrics). On top of that, recent sessions shipped:
+
+- **2026-07-07 final polish pass (this session, commits `f6b60a6..`,
+  live version `05b3d3e7`)** — Resend custom SMTP is LIVE in Supabase
+  (sender finsight@arktosmarketing.com, delivery verified end-to-end via
+  a real OTP → Resend "delivered"; email rate limit 30/hr). A 6-dimension
+  full-app adversarial review (cross-feature datasets, multi-tab sync,
+  calc correctness, responsive/theme, first-run, import/merge) raised 22
+  findings, 21 CONFIRMED, all fixed + regression-checked:
+  - Imports: dataset switch discards in-flight review (was: merge could
+    pollute the wrong dataset); duplicate-name matcher claims Nth↔Nth;
+    additive merge paths for same-period BS imports and new-accounts-only
+    imports; merge toast reports actual result.
+  - Calcs: quarterly/annual series now snapshot balance-sheet ENDING
+    balances instead of summing months (`aggregateValuesStockAware` in
+    period-aggregation, used by balance-sheet/efficiency/profitability/
+    health series); breakeven with CM ≤ 0 is Infinity + red (never green
+    "$0 breakeven"); bucket day-counts fixed (was 30 hardcoded); exec
+    summary anchors on the latest month WITH P&L data.
+  - Sync: mid-session read_only no longer permanently kills cloud sync —
+    30s access recheck + visibilitychange re-resolve, pending saves flush
+    on recovery.
+  - What-If: impact panels compute TRAILING 12 MONTHS (were mislabeled
+    all-history totals); orphaned adjustments (stale account ids after
+    re-import) excluded from calc + surfaced with names; picker filtered
+    to non-excluded P&L accounts; 375px layout; touch-visible card actions.
+  - First-run: wizard manual account entry actually persists (was no-op);
+    wizard seeds REAL Best/Worst adjustments; empty-state Import CTAs
+    deep-link to the workspace's Statements import (`?tab=` param now
+    honored) instead of the duplicate-creating home wizard.
+  - Print/PDF: P&L chunks into stacked 6-month fit-width tables (was
+    clipping everything past ~6 columns in the letter page); BS column
+    labeled "Ending"; dark: utilities stripped from banners (app is
+    single-theme).
+  All 6 check suites green (datasets/calculations/insights grew new
+  regressions that fail on the old code). Prod click-verified: print fit
+  (612px=612px), trailing-12 impact, quarterly ratios ending-balance,
+  "Ending" label, ?tab= deep link, header flex-wrap + pointer-coarse CSS.
 
 - **Phase 3.5** — mapping UI iteration (bulk select, keyboard shortcuts,
   source filter chips, section-context conflict warnings, refresh-auto
@@ -564,7 +602,8 @@ A clean way for a future Claude to resume:
    architectural rationale.
 4. Check the live app version vs latest commit hash to confirm
    nothing's drifted. As of last update the live version was
-   `6ff8fdf3` and the latest commit was `d2e5edd`.
+   `05b3d3e7` and the latest commit was the 2026-07-07 final-polish
+   series (see Current state, top entry).
 5. Ask the user what they want to tackle, or propose from the queued
    list above. **Default next priority is Phase 2 of the SaaS
    conversion** (firm tables + workspace CRUD + RLS) — see "SaaS
