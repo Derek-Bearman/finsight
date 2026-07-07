@@ -1228,7 +1228,10 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
         </p>
         {/* Revenue slider */}
         <div className="flex items-center gap-3">
-          <span className="text-sm w-28 flex-shrink-0" style={{ color: 'hsl(var(--foreground))' }}>Revenue</span>
+          <span className="text-sm w-28 flex-shrink-0" style={{ color: 'hsl(var(--foreground))' }}>
+            Revenue
+            <span className="block text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>% change</span>
+          </span>
           <input
             type="range" min={-50} max={50} step={5}
             value={revSlider}
@@ -1246,7 +1249,10 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
         </div>
         {/* Cost slider */}
         <div className="flex items-center gap-3">
-          <span className="text-sm w-28 flex-shrink-0" style={{ color: 'hsl(var(--foreground))' }}>Costs</span>
+          <span className="text-sm w-28 flex-shrink-0" style={{ color: 'hsl(var(--foreground))' }}>
+            Costs
+            <span className="block text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>% change</span>
+          </span>
           <input
             type="range" min={-30} max={30} step={5}
             value={costSlider}

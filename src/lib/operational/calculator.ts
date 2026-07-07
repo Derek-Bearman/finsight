@@ -22,6 +22,8 @@ export interface MetricResult {
   benchmarkColor: string;
   formula: string;
   category?: string;
+  /** Plain-English "what this means" from the metric definition. */
+  description?: string;
   /** Where the active benchmark comes from (client target vs FinSight default). */
   provenance: TargetProvenance;
   /** "Target ≤ 30.0%" when a client target is set for this metric. */
@@ -188,6 +190,7 @@ export function computeMetricsForPeriod(
       benchmarkColor: color,
       formula: def.formula,
       category: def.category,
+      description: def.description,
       provenance,
       targetText: target ? `Target ${formatTargetThreshold(target, def.format)}` : null,
     };

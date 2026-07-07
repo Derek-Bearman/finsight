@@ -465,7 +465,9 @@ export default function HomePage() {
   const { workspaces, addWorkspace, setActiveWorkspace, deleteWorkspace } = useWorkspaceStore();
   const firm = useFirmContext();
   const readOnly = firm?.readOnly ?? false;
-  const tourHook = useTour({ autoOpen: false });
+  // Home tour auto-opens for brand-new users (own storage key — completing it
+  // must not suppress the workspace tour, which keeps the legacy key).
+  const tourHook = useTour({ storageKey: 'finsight-tour-home-seen' });
 
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -1024,7 +1026,7 @@ export default function HomePage() {
               <p className="text-sm font-medium mb-3" style={{ color: 'hsl(var(--foreground))' }}>
                 Industry Profile
               </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" data-tour="profile-grid">
                 {ALL_PROFILES.map((p) => (
                   <ProfileCard
                     key={p.id}

@@ -32,6 +32,7 @@ export function MetricCard({ result, showFormula = false }: MetricCardProps) {
         background: 'hsl(var(--card))',
       }}
       data-testid={`metric-card-${result.metricId}`}
+      title={result.description}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >

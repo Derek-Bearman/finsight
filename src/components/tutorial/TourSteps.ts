@@ -32,13 +32,15 @@ export const HOME_TOUR_STEPS: TourStep[] = [
     id: 'industry-profile',
     title: 'Pick an industry profile',
     body: "Profiles bundle classification rules, benchmarks, and operational metrics by industry. Pick whichever fits the client's business — Trades for HVAC/plumbing/electrical, SaaS for subscription products, Restaurant for food service, and so on. Generic SMB is the fallback. You can change profiles later in workspace settings.",
-    position: 'center',
+    target: '[data-tour="profile-grid"]',
+    position: 'above',
   },
   {
     id: 'upload-pnl',
     title: 'Upload your P&L',
     body: "After clicking Continue, you'll reach the upload step. Export a CSV or Excel file from QuickBooks, Xero, or your accounting software and drop it in. FinSight auto-detects column headers, handles QBO formatting quirks, and works with single-month or multi-month exports.",
-    position: 'center',
+    target: '[data-testid="profile-next"]',
+    position: 'above',
   },
   {
     id: 'home-done',
