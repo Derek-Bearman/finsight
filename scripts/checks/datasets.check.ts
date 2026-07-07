@@ -7,7 +7,7 @@
  */
 
 import type { Account, AccountValue } from '../../src/types';
-import { diffImport, mergeNewPeriods } from '../../src/lib/data/datasets';
+import { diffImport, mergeNewPeriods, isAdditiveStatementMerge } from '../../src/lib/data/datasets';
 
 let failures = 0;
 function check(cond: boolean, label: string): void {
@@ -159,6 +159,104 @@ for (let m = 1; m <= 6; m++) {
   check(diff.changedCells.length === 0, `should not compare #7000 against #6000, got ${diff.changedCells.length} changed`);
   const merged = mergeNewPeriods(ea, ev, ia, iv);
   check(merged.accounts.length === 2, `should keep both #6000 and #7000, got ${merged.accounts.length}`);
+}
+
+// ── Scenario 9: a NEW account name appearing TWICE in the incoming file (QBO
+//    leaf rows like COGS:Insurance + Overhead:Insurance export as two rows
+//    both named 'Insurance') — the second row's backfill history must not be
+//    dropped when it's remapped onto the newly-adopted first row ──────────────
+{
+  const ea = [acc('e1', 'Food Sales', 'revenue')];
+  const ev: AccountValue[] = [];
+  for (let m = 1; m <= 6; m++) ev.push(val('e1', 2026, m, 100));
+  const ia = [acc('i1', 'Food Sales', 'revenue'), acc('i2', 'Insurance', 'expense'), acc('i3', 'Insurance', 'expense')];
+  const iv: AccountValue[] = [];
+  for (let m = 1; m <= 7; m++) {
+    iv.push(val('i1', 2026, m, 100));
+    iv.push(val('i2', 2026, m, 200));
+    iv.push(val('i3', 2026, m, 500));
+  }
+  const merged = mergeNewPeriods(ea, ev, ia, iv);
+  const insuranceIds = new Set(merged.accounts.filter((a) => a.name === 'Insurance').map((a) => a.id));
+  const insuranceTotal = (month: number) =>
+    merged.values.filter((v) => insuranceIds.has(v.accountId) && v.period.month === month).reduce((s, v) => s + v.amount, 0);
+  check(insuranceTotal(1) === 700, `duplicate new-name backfill: Jan Insurance should total 700, got ${insuranceTotal(1)}`);
+  check(insuranceTotal(6) === 700, `duplicate new-name backfill: Jun Insurance should total 700, got ${insuranceTotal(6)}`);
+  check(insuranceTotal(7) === 700, `duplicate new-name July should total 700, got ${insuranceTotal(7)}`);
+}
+
+// ── Scenario 10: EXISTING duplicate same-name twins (numberless) must pair
+//    positionally, not both collapse onto the first twin ──────────────────────
+{
+  const ea = [acc('e1', 'Sales', 'revenue'), acc('e2', 'Other', 'expense'), acc('e3', 'Other', 'expense')];
+  const ev: AccountValue[] = [];
+  for (let m = 1; m <= 6; m++) {
+    ev.push(val('e1', 2026, m, 1000));
+    ev.push(val('e2', 2026, m, 100));
+    ev.push(val('e3', 2026, m, 120));
+  }
+  // (a) Identical re-import must NOT report phantom conflicts between the twins.
+  const ia = [acc('i1', 'Sales', 'revenue'), acc('i2', 'Other', 'expense'), acc('i3', 'Other', 'expense')];
+  const iv: AccountValue[] = [];
+  for (let m = 1; m <= 6; m++) {
+    iv.push(val('i1', 2026, m, 1000));
+    iv.push(val('i2', 2026, m, 100));
+    iv.push(val('i3', 2026, m, 120));
+  }
+  const diff = diffImport(ea, ev, ia, iv);
+  check(diff.status === 'identical', `twin re-import should be 'identical', got ${diff.status}`);
+  check(diff.changedCells.length === 0, `twin re-import: no phantom changed cells, got ${diff.changedCells.length}`);
+  check(diff.newAccounts.length === 0, `twin re-import: no new accounts, got ${diff.newAccounts.length}`);
+
+  // (b) YTD merge through July must attach each twin's July to its OWN account.
+  const iv7 = [...iv, val('i1', 2026, 7, 1000), val('i2', 2026, 7, 110), val('i3', 2026, 7, 990)];
+  const merged = mergeNewPeriods(ea, ev, ia, iv7);
+  check(merged.accounts.length === 3, `twin merge: no duplicate accounts adopted, got ${merged.accounts.length}`);
+  const julyE2 = merged.values.filter((v) => v.accountId === 'e2' && v.period.month === 7);
+  const julyE3 = merged.values.filter((v) => v.accountId === 'e3' && v.period.month === 7);
+  check(julyE2.length === 1 && julyE2[0]!.amount === 110, `twin merge: first twin's July should be [110], got ${JSON.stringify(julyE2.map((v) => v.amount))}`);
+  check(julyE3.length === 1 && julyE3[0]!.amount === 990, `twin merge: second twin's July should be [990], got ${JSON.stringify(julyE3.map((v) => v.amount))}`);
+}
+
+// ── Scenario 11: same-period Balance Sheet into a P&L-only working set — no
+//    new periods, all-new accounts: must qualify as an additive statement
+//    merge and adopt the BS with full history, leaving the P&L untouched ──────
+{
+  const ea = [acc('e1', 'Food Sales', 'revenue'), acc('e2', 'Rent', 'expense')];
+  const ev: AccountValue[] = [];
+  for (let m = 1; m <= 6; m++) {
+    ev.push(val('e1', 2026, m, 1000));
+    ev.push(val('e2', 2026, m, 300));
+  }
+  const ia = [acc('i1', 'Cash', 'asset'), acc('i2', 'Loan Payable', 'liability'), acc('i3', 'Owner Equity', 'equity')];
+  const iv: AccountValue[] = [];
+  for (let m = 1; m <= 6; m++) {
+    iv.push(val('i1', 2026, m, 5000));
+    iv.push(val('i2', 2026, m, 2000));
+    iv.push(val('i3', 2026, m, 3000));
+  }
+  const diff = diffImport(ea, ev, ia, iv);
+  check(diff.status === 'extends' && diff.newPeriods.length === 0, `BS-into-P&L: extends with 0 new periods, got ${diff.status}/${diff.newPeriods.length}`);
+  check(diff.newAccounts.length === 3 && diff.changedCells.length === 0, `BS-into-P&L: 3 new accounts, 0 conflicts, got ${diff.newAccounts.length}/${diff.changedCells.length}`);
+  check(isAdditiveStatementMerge(ea, ia), 'BS-into-P&L: disjoint-by-type BS should qualify for additive merge');
+
+  const merged = mergeNewPeriods(ea, ev, ia, iv);
+  check(merged.accounts.length === 5, `BS-into-P&L merge: 2 P&L + 3 BS accounts, got ${merged.accounts.length}`);
+  check(merged.values.length === 30, `BS-into-P&L merge: 12 P&L + 18 BS values, got ${merged.values.length}`);
+  const janCash = merged.values.find((v) => v.accountId === 'i1' && v.period.month === 1);
+  check(janCash?.amount === 5000, `BS-into-P&L merge: Cash keeps overlapping-period history, got ${janCash?.amount}`);
+  const janFood = merged.values.filter((v) => v.accountId === 'e1' && v.period.month === 1);
+  check(janFood.length === 1 && janFood[0]!.amount === 1000, 'BS-into-P&L merge: existing P&L values untouched');
+}
+
+// ── Scenario 12: cross-statement name collision — a BS account that would
+//    attach to a same-named P&L account must NOT qualify for additive merge ───
+{
+  const ea = [acc('e1', 'Insurance', 'expense')];
+  const ia = [acc('i1', 'Insurance', 'asset'), acc('i2', 'Cash', 'asset')];
+  check(!isAdditiveStatementMerge(ea, ia), 'cross-statement name collision should disqualify the additive merge');
+  // Same-side matches (a normal P&L re-import) still qualify.
+  check(isAdditiveStatementMerge(ea, [acc('i3', 'Insurance', 'expense')]), 'same-side name match should still qualify');
 }
 
 if (failures > 0) {

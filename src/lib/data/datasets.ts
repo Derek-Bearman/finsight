@@ -33,34 +33,85 @@ function nameKey(a: Account): string {
   return `n:${normName(a.name)}`;
 }
 
+interface AccountMatcher {
+  /** Match an incoming account to an existing one (number first, then name)
+   *  and claim it, so each existing account is matched at most once. */
+  match(inc: Account): Account | undefined;
+  /** Register a newly-adopted account as a candidate for later incoming rows. */
+  add(a: Account): void;
+}
+
 /**
  * Build a dual index of existing accounts keyed by BOTH account number and
  * normalized name, and a resolver that matches an incoming account by number
  * first, then name. This makes matching robust when one side has account
  * numbers and the other only names (common across QBO export settings).
+ *
+ * The matcher CONSUMES matches: duplicate same-name accounts (e.g. two
+ * numberless 'Other' leaves from a QBO export) pair positionally — the Nth
+ * incoming duplicate claims the Nth existing duplicate — instead of every
+ * duplicate collapsing onto the first, which produced phantom conflicts on
+ * identical re-imports and stacked twins' values onto one account on merge.
  */
-function buildMatcher(existing: Account[]): (inc: Account) => Account | undefined {
-  const byNumber = new Map<string, Account>();
-  const byName = new Map<string, Account>();
-  for (const a of existing) {
+function buildMatcher(existing: Account[]): AccountMatcher {
+  const byNumber = new Map<string, Account[]>();
+  const byName = new Map<string, Account[]>();
+  const claimed = new Set<Account>();
+  const add = (a: Account) => {
     const nk = numberKey(a);
-    if (nk && !byNumber.has(nk)) byNumber.set(nk, a);
+    if (nk) byNumber.set(nk, [...(byNumber.get(nk) ?? []), a]);
     const nm = nameKey(a);
-    if (!byName.has(nm)) byName.set(nm, a);
-  }
-  return (inc: Account) => {
-    const nk = numberKey(inc);
-    if (nk && byNumber.has(nk)) return byNumber.get(nk);
-    const cand = byName.get(nameKey(inc));
-    // If BOTH sides carry a number and they disagree, these are different
-    // accounts that happen to share a name ('Other' #6000 vs 'Other' #7000) —
-    // don't name-merge them. The one-side-missing-number case still matches.
-    if (nk && cand) {
-      const ck = numberKey(cand);
-      if (ck && ck !== nk) return undefined;
-    }
-    return cand;
+    byName.set(nm, [...(byName.get(nm) ?? []), a]);
   };
+  for (const a of existing) add(a);
+  return {
+    add,
+    match(inc: Account): Account | undefined {
+      const nk = numberKey(inc);
+      if (nk) {
+        const byNum = (byNumber.get(nk) ?? []).find((a) => !claimed.has(a));
+        if (byNum) {
+          claimed.add(byNum);
+          return byNum;
+        }
+      }
+      for (const cand of byName.get(nameKey(inc)) ?? []) {
+        if (claimed.has(cand)) continue;
+        // If BOTH sides carry a number and they disagree, these are different
+        // accounts that happen to share a name ('Other' #6000 vs 'Other' #7000) —
+        // don't name-merge them. The one-side-missing-number case still matches.
+        if (nk) {
+          const ck = numberKey(cand);
+          if (ck && ck !== nk) continue;
+        }
+        claimed.add(cand);
+        return cand;
+      }
+      return undefined;
+    },
+  };
+}
+
+const PNL_TYPES = new Set<Account['type']>(['revenue', 'cogs', 'expense']);
+
+/**
+ * True when merging the incoming statement into the existing working set is
+ * purely additive across the P&L/Balance-Sheet divide: no incoming account
+ * would attach its values to an existing account on the OTHER statement side
+ * (e.g. a BS 'Insurance' asset landing on the P&L 'Insurance' expense).
+ * This is the safety gate for offering a same-period Balance Sheet merge
+ * into a P&L-only working set (and vice versa).
+ */
+export function isAdditiveStatementMerge(
+  existingAccounts: Account[],
+  incomingAccounts: Account[]
+): boolean {
+  const matcher = buildMatcher(existingAccounts);
+  for (const inc of incomingAccounts) {
+    const exist = matcher.match(inc);
+    if (exist && PNL_TYPES.has(exist.type) !== PNL_TYPES.has(inc.type)) return false;
+  }
+  return true;
 }
 
 /** The list the workspace should show in a dataset selector. Legacy workspaces
@@ -123,7 +174,7 @@ export function diffImport(
   incomingAccounts: Account[],
   incomingValues: AccountValue[]
 ): ImportDiff {
-  const matchExisting = buildMatcher(existingAccounts);
+  const matcher = buildMatcher(existingAccounts);
 
   const existValByAcct = new Map<string, Map<string, number>>(); // acctId -> periodKey -> amount
   for (const v of existingValues) {
@@ -154,7 +205,7 @@ export function diffImport(
   const newAccounts: { name: string; number?: string }[] = [];
 
   for (const inc of incomingAccounts) {
-    const exist = matchExisting(inc);
+    const exist = matcher.match(inc);
     if (!exist) {
       // Only flag as a new account if it actually carries values.
       const hasValues = (incValByAcct.get(inc.id)?.size ?? 0) > 0;
@@ -217,21 +268,23 @@ export function mergeNewPeriods(
   const values = [...existingValues];
 
   // Map incoming account id -> the existing account id it should attach to.
-  // Rebuild the matcher as we adopt new accounts so two incoming rows with the
-  // same name don't each become a separate new account.
+  // Adopted accounts are registered on the matcher so a later incoming row
+  // with the same name remaps onto them instead of becoming another new
+  // account (registering — rather than rebuilding — preserves the matcher's
+  // claimed set, so existing duplicate twins keep pairing positionally).
   const idRemap = new Map<string, string>();
   // Newly-adopted accounts have no existing values in ANY period, so their
   // full history (including overlapping periods) must come in — otherwise a
   // back-filled new account shows blank for the prior months.
   const newAccountIds = new Set<string>();
-  let matchExisting = buildMatcher(accounts);
+  const matcher = buildMatcher(accounts);
   for (const inc of incomingAccounts) {
-    const exist = matchExisting(inc);
+    const exist = matcher.match(inc);
     if (exist) {
       idRemap.set(inc.id, exist.id);
     } else {
       accounts.push(inc);
-      matchExisting = buildMatcher(accounts);
+      matcher.add(inc);
       idRemap.set(inc.id, inc.id);
       newAccountIds.add(inc.id);
     }
@@ -239,10 +292,13 @@ export function mergeNewPeriods(
 
   // Add values for new periods, plus ALL periods of a newly-adopted account
   // (its overlapping-period values can't overwrite anything that exists).
+  // The new-account test must use the remap TARGET id: a second incoming row
+  // remapped onto a newly-adopted duplicate must bring its backfill history
+  // too, not just its new-period values.
   for (const v of incomingValues) {
-    const isNewAccount = newAccountIds.has(v.accountId);
-    if (existPeriods.has(periodKey(v.period)) && !isNewAccount) continue;
     const targetId = idRemap.get(v.accountId) ?? v.accountId;
+    const isNewAccount = newAccountIds.has(targetId);
+    if (existPeriods.has(periodKey(v.period)) && !isNewAccount) continue;
     values.push({ ...v, accountId: targetId });
   }
 

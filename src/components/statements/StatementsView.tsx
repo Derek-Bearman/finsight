@@ -16,6 +16,7 @@ import { parseImportFile } from '@/lib/data/import-pipeline';
 import {
   diffImport,
   mergeNewPeriods,
+  isAdditiveStatementMerge,
   datasetOptions,
   activeDatasetId,
   periodKey,
@@ -290,19 +291,31 @@ interface PendingImport {
   warnings: string[];
 }
 
-function StatusBadge({ status }: { status: ImportDiff['status'] }) {
+function StatusBadge({ status, matchedCells }: { status: ImportDiff['status']; matchedCells: number }) {
   const map: Record<ImportDiff['status'], { text: string; color: string; bg: string }> = {
     identical: { text: '✓ Matches existing data', color: 'hsl(142 71% 30%)', bg: 'hsl(142 71% 45% / 0.1)' },
     extends: { text: '✓ Historical matches · new data to add', color: 'hsl(142 71% 30%)', bg: 'hsl(142 71% 45% / 0.1)' },
     conflicts: { text: '⚠ Some existing values differ', color: 'hsl(32 81% 29%)', bg: 'hsl(38 92% 50% / 0.12)' },
     disjoint: { text: 'New periods (no overlap with existing)', color: 'hsl(217 60% 35%)', bg: 'hsl(217 91% 55% / 0.1)' },
   };
-  const s = map[status];
+  // 'extends' with zero compared cells (e.g. a Balance Sheet into a P&L-only
+  // set) verified nothing — don't claim the history matched.
+  const s = status === 'extends' && matchedCells === 0
+    ? { text: 'New data to add (no overlapping accounts to compare)', color: 'hsl(217 60% 35%)', bg: 'hsl(217 91% 55% / 0.1)' }
+    : map[status];
   return (
     <span className="inline-flex items-center rounded-md px-2.5 py-1 text-xs font-semibold" style={{ color: s.color, background: s.bg }}>
       {s.text}
     </span>
   );
+}
+
+/** "2 new periods + 5 new accounts" — what an additive merge would bring in. */
+function mergeAdditionsLabel(diff: ImportDiff): string {
+  const parts: string[] = [];
+  if (diff.newPeriods.length > 0) parts.push(`${diff.newPeriods.length} new period${diff.newPeriods.length === 1 ? '' : 's'}`);
+  if (diff.newAccounts.length > 0) parts.push(`${diff.newAccounts.length} new account${diff.newAccounts.length === 1 ? '' : 's'}`);
+  return parts.join(' + ');
 }
 
 // ── Main view ────────────────────────────────────────────────────────────────
@@ -339,6 +352,15 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
   const options = datasetOptions(workspace);
   const activeId = activeDatasetId(workspace);
 
+  // An additive merge is offered when the reviewed file brings new periods or
+  // new accounts AND no incoming account would attach to an existing account
+  // on the other statement side — this is what lets a same-period Balance
+  // Sheet merge into a P&L-only working set instead of forcing a replace.
+  const canAdditiveMerge =
+    !!pending &&
+    (pending.diff.newPeriods.length > 0 || pending.diff.newAccounts.length > 0) &&
+    isAdditiveStatementMerge(workspace.accounts, pending.accounts);
+
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3500);
@@ -348,6 +370,12 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
     if (!workspace || id === activeId) return;
     const ds = workspace.datasets?.find((d) => d.id === id);
     if (!ds || !workspace.datasets) return;
+    // An in-flight import review was diffed against the OUTGOING dataset —
+    // committing it after the switch would merge into data the review never
+    // described, so discard it (re-upload to diff against the new dataset).
+    const droppedReview = pending !== null;
+    setPending(null);
+    setParseError(null);
     // Snapshot the current working set back into the outgoing dataset first, so
     // any mapping/operational edits made while it was active are preserved.
     const preserved = workspace.datasets.map((d) =>
@@ -359,7 +387,7 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
       values: ds.values,
       activeDatasetId: id,
     });
-    showToast(`Now analyzing "${ds.label}"`);
+    showToast(droppedReview ? `Now analyzing "${ds.label}" — pending import review discarded` : `Now analyzing "${ds.label}"`);
   }
 
   async function handleFile(file: File) {
@@ -421,7 +449,17 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
     });
     setPending(null);
     setImporting(false);
-    showToast(`Added ${pending.diff.newPeriods.length} new period${pending.diff.newPeriods.length === 1 ? '' : 's'} to "${active.label}"`);
+    // Report what the merge actually added (not the reviewed diff's counts),
+    // so the toast can never overstate the commit.
+    const periodsBefore = new Set(workspace.values.map((v) => periodKey(v.period)));
+    const periodsAdded = new Set(
+      merged.values.filter((v) => !periodsBefore.has(periodKey(v.period))).map((v) => periodKey(v.period))
+    ).size;
+    const accountsAdded = merged.accounts.length - workspace.accounts.length;
+    const parts: string[] = [];
+    if (periodsAdded > 0) parts.push(`${periodsAdded} new period${periodsAdded === 1 ? '' : 's'}`);
+    if (accountsAdded > 0) parts.push(`${accountsAdded} new account${accountsAdded === 1 ? '' : 's'}`);
+    showToast(parts.length > 0 ? `Added ${parts.join(' + ')} to "${active.label}"` : `Nothing new to add to "${active.label}"`);
   }
 
   function commitReplaceAsNewDataset() {
@@ -534,7 +572,7 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
           {pending && (
             <div className="flex flex-col gap-3 border-t pt-3" style={{ borderColor: 'hsl(var(--border))' }}>
               <div className="flex items-center gap-3 flex-wrap">
-                <StatusBadge status={pending.diff.status} />
+                <StatusBadge status={pending.diff.status} matchedCells={pending.diff.matchedCells} />
                 <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>{pending.fileName}</span>
               </div>
 
@@ -606,18 +644,18 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
 
               {/* Actions */}
               <div className="flex items-center gap-2 flex-wrap pt-1">
-                {pending.diff.newPeriods.length > 0 && pending.diff.changedCells.length === 0 && (
+                {canAdditiveMerge && pending.diff.changedCells.length === 0 && (
                   <button onClick={commitMergeNewPeriods} data-testid="import-merge-btn"
                     className="rounded-lg px-3 py-1.5 text-xs font-semibold"
                     style={{ background: 'hsl(142 71% 40%)', color: '#fff' }}>
-                    Add {pending.diff.newPeriods.length} new period{pending.diff.newPeriods.length === 1 ? '' : 's'} to current data
+                    Add {mergeAdditionsLabel(pending.diff)} to current data
                   </button>
                 )}
-                {pending.diff.newPeriods.length > 0 && pending.diff.changedCells.length > 0 && (
+                {canAdditiveMerge && pending.diff.changedCells.length > 0 && (
                   <button onClick={commitMergeNewPeriods}
                     className="rounded-lg px-3 py-1.5 text-xs font-semibold"
                     style={{ background: 'hsl(142 71% 40%)', color: '#fff' }}>
-                    Add new periods only (keep existing values)
+                    Add {mergeAdditionsLabel(pending.diff)} only (keep existing values)
                   </button>
                 )}
                 <button onClick={commitReplaceAsNewDataset} data-testid="import-replace-btn"
