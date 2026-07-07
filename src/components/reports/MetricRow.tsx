@@ -87,7 +87,7 @@ export function MetricRow(props: MetricRowProps) {
     benchmark,
     dense = false,
   } = props;
-  const cellClass = dense ? 'px-1.5 py-1 text-xs' : 'px-3 py-2 text-sm';
+  const cellClass = dense ? 'px-1 py-1 text-xs' : 'px-3 py-2 text-sm';
 
   if (isSeparator) {
     return (

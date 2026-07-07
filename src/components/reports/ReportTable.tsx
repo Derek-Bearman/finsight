@@ -56,7 +56,7 @@ export function ReportTable({ title, periods, rows, periodCount, showChange = fa
             <tr style={{ borderBottom: '1px solid hsl(var(--border))' }}>
               {/* Label header */}
               <th
-                className={`${fit ? 'px-1.5 py-1' : 'px-3 py-2'} text-left text-xs font-medium uppercase tracking-wide`}
+                className={`${fit ? 'px-1 py-1' : 'px-3 py-2'} text-left text-xs font-medium uppercase tracking-wide`}
                 style={{
                   color: 'hsl(var(--muted-foreground))',
                   position: 'sticky',
@@ -74,7 +74,7 @@ export function ReportTable({ title, periods, rows, periodCount, showChange = fa
               {displayPeriods.map((p, i) => (
                 <th
                   key={i}
-                  className={`${fit ? 'px-1.5 py-1' : 'px-3 py-2'} text-right text-xs font-medium uppercase tracking-wide`}
+                  className={`${fit ? 'px-1 py-1' : 'px-3 py-2'} text-right text-xs font-medium uppercase tracking-wide`}
                   style={{ color: 'hsl(var(--muted-foreground))', background: 'hsl(var(--muted))', whiteSpace: 'nowrap' }}
                 >
                   {p}
