@@ -426,7 +426,11 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
 
   function commitReplaceAsNewDataset() {
     if (!workspace || !pending) return;
-    const registry = ensureRegistry(workspace);
+    // Snapshot the outgoing active dataset's in-session edits before appending,
+    // mirroring handleSelectDataset, so mapping edits aren't lost.
+    const registry = ensureRegistry(workspace).map((d) =>
+      d.id === activeId ? { ...d, accounts: workspace.accounts, values: workspace.values } : d
+    );
     const newDs = {
       id: `ds-${Date.now()}`,
       label: `${pending.statementType === 'pnl' ? 'P&L' : 'Balance Sheet'} · ${pending.fileName}`,

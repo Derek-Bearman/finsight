@@ -813,10 +813,18 @@ function ScenarioEditor({ clientId, workspace, scenario, baseScenario }: Scenari
   }, [scenario.adjustments, isSliderManaged]);
 
   const handleAddAdjustment = useCallback((adj: ScenarioAdjustment) => {
+    // A percent adjustment on a key account is owned by that account's slider;
+    // routing it there (instead of the detailed list) avoids the slider-managed
+    // filter silently dropping it. Non-percent (absolute/replace) pass through.
+    if (adj.type === 'percent' && keyAccountIds.has(adj.accountId)) {
+      handleAccountSlider(adj.accountId, adj.value);
+      setShowAddForm(false);
+      return;
+    }
     const updated = { ...scenario, adjustments: [...scenario.adjustments, adj] };
     updateScenario(clientId, updated);
     setShowAddForm(false);
-  }, [scenario, clientId, updateScenario]);
+  }, [scenario, clientId, updateScenario, keyAccountIds, handleAccountSlider]);
 
   const handleRemoveAdjustment = useCallback((index: number) => {
     // index is within detailedAdjs — we need to remove from the full adjustments array

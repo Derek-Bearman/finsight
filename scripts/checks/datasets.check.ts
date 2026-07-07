@@ -106,6 +106,61 @@ for (let m = 1; m <= 6; m++) {
   check(diff.matchedCells === 1 && diff.newPeriods.length === 1, 'Jan matches, Feb is new');
 }
 
+// ── Scenario 6: existing has numbers, incoming has ONLY names (QBO export
+//    without account numbers) — must still match by name, not flag as new ────
+{
+  const ea = [acc('e1', 'Food Sales', 'revenue', '4000'), acc('e2', 'Rent', 'expense', '6300')];
+  const ev = [val('e1', 2026, 1, 100), val('e2', 2026, 1, 50)];
+  const ia = [acc('i1', 'Food Sales', 'revenue'), acc('i2', 'Rent', 'expense')]; // no numbers
+  const iv = [val('i1', 2026, 1, 100), val('i1', 2026, 2, 110), val('i2', 2026, 1, 50), val('i2', 2026, 2, 50)];
+  const diff = diffImport(ea, ev, ia, iv);
+  check(diff.newAccounts.length === 0, `number-vs-name: should match by name, got ${diff.newAccounts.length} new accounts`);
+  check(diff.matchedCells === 2, `number-vs-name: 2 cells should match, got ${diff.matchedCells}`);
+  check(diff.status === 'extends' && diff.newPeriods.length === 1, 'number-vs-name: Feb is the one new period');
+
+  const merged = mergeNewPeriods(ea, ev, ia, iv);
+  check(merged.accounts.length === 2, `number-vs-name merge: no duplicate accounts, got ${merged.accounts.length}`);
+  const febFood = merged.values.find((v) => v.period.month === 2 && v.accountId === 'e1');
+  check(febFood?.amount === 110, `number-vs-name merge: Feb attaches to existing account, got ${febFood?.amount}`);
+}
+
+// ── Scenario 7: a back-filled NEW account must bring its full history on merge,
+//    not just the new period (review fix) ──────────────────────────────────────
+{
+  const ea = [acc('e1', 'Food Sales', 'revenue', '4000')];
+  const ev: AccountValue[] = [];
+  for (let m = 1; m <= 6; m++) ev.push(val('e1', 2026, m, 100));
+  // Incoming adds a brand-new account 'Delivery' spanning Jan–Jul.
+  const ia = [acc('i1', 'Food Sales', 'revenue', '4000'), acc('i2', 'Delivery', 'expense', '5300')];
+  const iv: AccountValue[] = [];
+  for (let m = 1; m <= 7; m++) {
+    iv.push(val('i1', 2026, m, 100));
+    iv.push(val('i2', 2026, m, 20));
+  }
+  const merged = mergeNewPeriods(ea, ev, ia, iv);
+  const deliveryId = merged.accounts.find((a) => a.number === '5300')?.id;
+  const deliveryVals = merged.values.filter((v) => v.accountId === deliveryId);
+  check(deliveryVals.length === 7, `new account should keep full 7-month history, got ${deliveryVals.length}`);
+  const janDelivery = deliveryVals.find((v) => v.period.month === 1);
+  check(janDelivery?.amount === 20, `new account's Jan (overlapping) value should be present, got ${janDelivery?.amount}`);
+  // Existing Food Sales unchanged: 6 values, no July duplicate-overwrite issue.
+  const foodVals = merged.values.filter((v) => merged.accounts.find((a) => a.id === v.accountId)?.number === '4000');
+  check(foodVals.length === 7, `Food Sales should be 6 existing + 1 new July = 7, got ${foodVals.length}`);
+}
+
+// ── Scenario 8: same name, DIFFERENT numbers = different accounts (no misgmerge)
+{
+  const ea = [acc('e1', 'Other', 'expense', '6000')];
+  const ev = [val('e1', 2026, 1, 100)];
+  const ia = [acc('i1', 'Other', 'expense', '7000')]; // same name, different number
+  const iv = [val('i1', 2026, 1, 999), val('i1', 2026, 2, 50)];
+  const diff = diffImport(ea, ev, ia, iv);
+  check(diff.newAccounts.length === 1, `differing-number same-name should be a NEW account, got ${diff.newAccounts.length}`);
+  check(diff.changedCells.length === 0, `should not compare #7000 against #6000, got ${diff.changedCells.length} changed`);
+  const merged = mergeNewPeriods(ea, ev, ia, iv);
+  check(merged.accounts.length === 2, `should keep both #6000 and #7000, got ${merged.accounts.length}`);
+}
+
 if (failures > 0) {
   console.error(`\n${failures} dataset check(s) FAILED`);
   process.exit(1);
