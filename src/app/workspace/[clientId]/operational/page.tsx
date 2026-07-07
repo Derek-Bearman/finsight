@@ -91,8 +91,10 @@ function OperationalContent({ clientId, workspace }: OperationalContentProps) {
 
   // ── Handlers ─────────────────────────────────────────────────────────────
   const handleSaveData = useCallback(
-    ({ pool, points }: DataEntrySave) => {
-      upsertOperationalInputs(clientId, pool);
+    ({ pool, renderedFieldIds, points }: DataEntrySave) => {
+      // renderedFieldIds lets cleared inputs actually DELETE their stored
+      // values (a plain merge would resurrect them on the next save).
+      upsertOperationalInputs(clientId, pool, renderedFieldIds);
       // Legacy fan-out keeps per-metric consumers + older workspaces coherent.
       for (const point of points) {
         upsertOperationalDataPoint(clientId, point);
@@ -258,9 +260,12 @@ function OperationalContent({ clientId, workspace }: OperationalContentProps) {
           </div>
         )}
 
-        {/* Data entry form (inline) */}
+        {/* Data entry form (inline). Keyed by period: switching the period
+            selector while the form is open must remount + reseed it — the old
+            state would otherwise save one month's numbers into another. */}
         {showDataEntry && selectedPeriod && (
           <DataEntryForm
+            key={`${selectedPeriod.year}-${selectedPeriod.month}`}
             metricDefs={profile.operationalMetrics}
             existingData={workspace.operationalData}
             existingPools={workspace.operationalInputs}

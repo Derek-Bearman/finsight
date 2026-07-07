@@ -206,7 +206,7 @@ function RatiosSection({ workspace }: { workspace: ClientWorkspace }) {
   const assetTotals: Record<string, number> = {};
   for (const v of valuesUpToLatest) {
     const acc = workspace.accounts.find((a) => a.id === v.accountId);
-    if (!acc) continue;
+    if (!acc || acc.isExcluded) continue; // summary rows never count
     if (acc.type === 'asset' || acc.type === 'liability' || acc.type === 'equity') {
       // Balance-sheet accounts: take the LATEST period value (running balance)
       assetTotals[acc.id] = v.amount;
@@ -214,6 +214,7 @@ function RatiosSection({ workspace }: { workspace: ClientWorkspace }) {
   }
   let assets = 0, liabilities = 0, equity = 0;
   for (const acc of workspace.accounts) {
+    if (acc.isExcluded) continue;
     const val = assetTotals[acc.id] ?? 0;
     if (acc.type === 'asset') assets += val;
     else if (acc.type === 'liability') liabilities += val;

@@ -165,8 +165,15 @@ interface WorkspaceActions {
   // Operational data
   setOperationalData: (workspaceId: string, data: OperationalDataPoint[]) => void;
   upsertOperationalDataPoint: (workspaceId: string, point: OperationalDataPoint) => void;
-  /** Merge shared operational inputs for a period (shared-input pool). */
-  upsertOperationalInputs: (workspaceId: string, pool: OperationalInputPool) => void;
+  /** Merge shared operational inputs for a period (shared-input pool).
+   *  `clearFieldIds`: field ids whose stored values must be REMOVED first —
+   *  the entry form passes every field it rendered, so clearing an input and
+   *  saving actually deletes it instead of the old value resurrecting. */
+  upsertOperationalInputs: (
+    workspaceId: string,
+    pool: OperationalInputPool,
+    clearFieldIds?: string[]
+  ) => void;
 
   // Audit log
   appendAuditEntry: (workspaceId: string, entry: AuditEntry) => void;
@@ -352,7 +359,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
           }),
         })),
 
-      upsertOperationalInputs: (workspaceId, pool) =>
+      upsertOperationalInputs: (workspaceId, pool, clearFieldIds) =>
         set((s) => ({
           workspaces: s.workspaces.map((w) => {
             if (w.id !== workspaceId) return w;
@@ -360,11 +367,15 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
             const idx = pools.findIndex(
               (p) => p.period.year === pool.period.year && p.period.month === pool.period.month
             );
-            const merged: OperationalInputPool =
-              idx >= 0
-                ? { period: pool.period, sharedInputs: { ...pools[idx]!.sharedInputs, ...pool.sharedInputs } }
-                : pool;
-            const newPools = idx >= 0 ? pools.map((p, i) => (i === idx ? merged : p)) : [...pools, pool];
+            let merged: OperationalInputPool;
+            if (idx >= 0) {
+              const base = { ...pools[idx]!.sharedInputs };
+              for (const k of clearFieldIds ?? []) delete base[k];
+              merged = { period: pool.period, sharedInputs: { ...base, ...pool.sharedInputs } };
+            } else {
+              merged = pool;
+            }
+            const newPools = idx >= 0 ? pools.map((p, i) => (i === idx ? merged : p)) : [...pools, merged];
             return { ...w, operationalInputs: newPools, updatedAt: new Date().toISOString() };
           }),
         })),

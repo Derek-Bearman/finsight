@@ -84,12 +84,14 @@ function refreshStatus(): void {
   const pendingCount = pendingIds().length;
   let phase: 'idle' | 'saving' | 'saved' | 'error' | 'conflict';
   let message: string | null = null;
-  if (conflicted.size > 0) {
-    phase = 'conflict';
-    message = 'This client was changed by a teammate. Reload to see their changes — unsaved edits here will be lost.';
-  } else if (errorMessage) {
+  // Error outranks conflict: a failing save on ANOTHER workspace must not be
+  // masked by a conflicted one (Retry is the only way to reset its backoff).
+  if (errorMessage) {
     phase = 'error';
     message = errorMessage;
+  } else if (conflicted.size > 0) {
+    phase = 'conflict';
+    message = 'This client was changed by a teammate. Reload to see their changes — unsaved edits here will be lost.';
   } else if (inflight.size > 0 || timers.size > 0 || retryTimers.size > 0 || pendingCount > 0) {
     phase = 'saving';
   } else {
@@ -170,6 +172,14 @@ async function flushSave(id: string): Promise<void> {
     };
   }
   inflight.delete(id);
+
+  // Deleted while the save was on the wire (noteDeleted cleared the id):
+  // the row is gone, so a zero-row "conflict" here is just the delete —
+  // don't resurrect the id or pin a false conflict banner.
+  if (!syncedAt.has(id)) {
+    refreshStatus();
+    return;
+  }
 
   if (res.ok) {
     syncedAt.set(id, sending);

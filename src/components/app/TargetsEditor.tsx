@@ -11,7 +11,7 @@
  * whole percentages (30 = 30%) and stored as fractions.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type {
   ClientWorkspace,
   KpiTarget,
@@ -102,9 +102,14 @@ export function TargetsEditor({
 
   const [state, setState] = useState<Record<string, RowState>>({});
 
-  // (Re)seed local state each time the dialog opens.
-  const [seededFor, setSeededFor] = useState<string | null>(null);
-  if (open && seededFor !== workspace.id + workspace.updatedAt) {
+  function stateKey(row: RowDef): string {
+    return `${row.kind}:${row.key}`;
+  }
+
+  // Reseed from the SAVED targets on every open — cancelled edits from a
+  // previous open must not linger and get silently applied by a later Save.
+  useEffect(() => {
+    if (!open) return;
     const next: Record<string, RowState> = {};
     for (const row of rows) {
       const existing =
@@ -119,12 +124,7 @@ export function TargetsEditor({
       };
     }
     setState(next);
-    setSeededFor(workspace.id + workspace.updatedAt);
-  }
-
-  function stateKey(row: RowDef): string {
-    return `${row.kind}:${row.key}`;
-  }
+  }, [open, rows, workspace.targets]);
 
   const patch = (row: RowDef, p: Partial<RowState>) =>
     setState((s) => ({ ...s, [stateKey(row)]: { ...s[stateKey(row)]!, ...p } }));
@@ -150,7 +150,9 @@ export function TargetsEditor({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      {/* sm:max-w-2xl — the base DialogContent sets sm:max-w-sm, so an
+          unprefixed max-w-2xl loses at the sm breakpoint via tailwind-merge */}
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Client Targets</DialogTitle>
           <DialogDescription>

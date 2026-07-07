@@ -24,7 +24,12 @@ import { periodLabel } from '@/lib/utils/period';
 
 export interface DataEntrySave {
   pool: OperationalInputPool;
-  /** Legacy fan-out: one point per metric that has at least one entered field. */
+  /** Every field id the form rendered — fields absent from pool.sharedInputs
+   *  were cleared by the user and must be DELETED from the stored pool
+   *  (a plain merge would silently resurrect them). */
+  renderedFieldIds: string[];
+  /** Legacy fan-out: one point per metric whose fields the form rendered
+   *  (possibly with empty inputs, which overwrites a stale point). */
   points: OperationalDataPoint[];
 }
 
@@ -125,22 +130,25 @@ export function DataEntryForm({
       if (!isNaN(num)) sharedInputs[sf.field.id] = num;
     }
 
-    // Legacy fan-out: emit a per-metric point when any of its fields exist.
+    // Legacy fan-out: emit a per-metric point for EVERY metric with input
+    // fields — an empty-inputs point overwrites a stale legacy point so a
+    // cleared value can't resurrect through the legacy fallback.
     const points: OperationalDataPoint[] = [];
     for (const def of metricDefs) {
+      if (def.inputFields.length === 0) continue;
       const inputs: Record<string, number> = {};
-      let anyFilled = false;
       for (const field of def.inputFields) {
         const v = sharedInputs[field.id];
-        if (v !== undefined) {
-          inputs[field.id] = v;
-          anyFilled = true;
-        }
+        if (v !== undefined) inputs[field.id] = v;
       }
-      if (anyFilled) points.push({ metricDefId: def.id, period, inputs });
+      points.push({ metricDefId: def.id, period, inputs });
     }
 
-    onSave({ pool: { period, sharedInputs }, points });
+    onSave({
+      pool: { period, sharedInputs },
+      renderedFieldIds: sharedFields.map((sf) => sf.field.id),
+      points,
+    });
   };
 
   // Group by section, preserving profile order.
