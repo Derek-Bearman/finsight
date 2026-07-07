@@ -12,10 +12,12 @@
  */
 
 import type { Account, AccountValue, ClientWorkspace, Period } from '@/types';
-import { buildPeriodAggregations } from '@/lib/calculations/pnl';
+import { buildPeriodAggregations, computePnL, toFinancialSummary } from '@/lib/calculations/pnl';
 import { computeBalanceSheetRatios } from '@/lib/calculations/balance-sheet';
 import { computeHealthScores } from '@/lib/calculations/health';
 import { computeProfitabilityRatios } from '@/lib/calculations/profitability';
+import { computeMetricsForPeriod } from '@/lib/operational/calculator';
+import { getProfile } from '@/lib/profiles';
 import type { PeriodAggregation } from '@/types';
 import { FUNNEL_INPUT_IDS } from '@/lib/operational/funnel';
 import { RATIO_DEF_MAP, meetsTarget, formatTargetThreshold, type RatioKey } from '@/lib/targets';
@@ -176,16 +178,21 @@ export function buildExecutiveSummary(ws: ClientWorkspace): SummaryLine[] {
         recent.reduce((s, a) => s + a.cogs + a.operatingExpenses, 0) / recent.length;
       if (cash > 0 && avgMonthlyCosts > 0) {
         const months = cash / avgMonthlyCosts;
+        const monthsText = months.toFixed(1);
         lines.push({
-          text: `Cash on hand (${formatCurrency(cash)}) covers ${months.toFixed(1)} month${months >= 1.95 ? 's' : ''} of average operating costs.`,
+          text: `Cash on hand (${formatCurrency(cash)}) covers ${monthsText} month${monthsText === '1.0' ? '' : 's'} of average operating costs.`,
           tone: months >= 3 ? 'positive' : months >= 1.5 ? 'neutral' : 'watch',
         });
       }
     }
   }
 
-  // ── 5. Targets scorecard ────────────────────────────────────────────────
-  if (ws.targets && Object.keys(ws.targets.ratios ?? {}).length > 0) {
+  // ── 5. Targets scorecard (ratio AND operational-metric targets) ─────────
+  if (
+    ws.targets &&
+    (Object.keys(ws.targets.ratios ?? {}).length > 0 ||
+      Object.keys(ws.targets.metrics ?? {}).length > 0)
+  ) {
     const bs = computeBalanceSheetRatios(ws.accounts, ws.values, latest.period);
     const health = computeHealthScores(ws.accounts, ws.values, latest.period);
     const prof = computeProfitabilityRatios(
@@ -206,7 +213,7 @@ export function buildExecutiveSummary(ws: ClientWorkspace): SummaryLine[] {
     let total = 0;
     let met = 0;
     let worst: { label: string; valueText: string; target: string } | null = null;
-    for (const [key, target] of Object.entries(ws.targets.ratios)) {
+    for (const [key, target] of Object.entries(ws.targets.ratios ?? {})) {
       const def = RATIO_DEF_MAP[key];
       const value = ratioValues[key as RatioKey];
       if (!def || value === null || value === undefined) continue;
@@ -219,6 +226,37 @@ export function buildExecutiveSummary(ws: ClientWorkspace): SummaryLine[] {
           valueText: formatMetric(value, def.format),
           target: formatTargetThreshold(target, def.format),
         };
+      }
+    }
+    // Operational-metric targets (food cost %, CAC, …) count too — corporate
+    // mandates live here for franchise clients.
+    const metricTargets = ws.targets.metrics ?? {};
+    if (Object.keys(metricTargets).length > 0) {
+      const profile = getProfile(ws.industryProfileId);
+      const summary = toFinancialSummary(
+        computePnL(ws.accounts, ws.values, latest.period),
+        latest.period
+      );
+      const metricResults = computeMetricsForPeriod(
+        profile.operationalMetrics,
+        ws.operationalData ?? [],
+        summary,
+        latest.period,
+        ws.operationalInputs
+      );
+      for (const [metricId, target] of Object.entries(metricTargets)) {
+        const result = metricResults.find((r) => r.metricId === metricId);
+        if (!result || result.value === null) continue;
+        total++;
+        if (meetsTarget(result.value, target)) {
+          met++;
+        } else if (!worst) {
+          worst = {
+            label: result.label,
+            valueText: formatMetric(result.value, result.format),
+            target: formatTargetThreshold(target, result.format),
+          };
+        }
       }
     }
     if (total > 0) {

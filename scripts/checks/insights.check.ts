@@ -142,6 +142,31 @@ function mkWorkspace(over: Partial<ClientWorkspace>): ClientWorkspace {
   check(again === all, 'summary must be deterministic');
 }
 
+// ── Summary: operational-metric targets count in the scorecard ──────────────
+{
+  const accounts = [
+    acc('r1', 'Food Sales', 'revenue'),
+    acc('c1', 'Food Purchases', 'cogs', { costBehavior: 'variable' }),
+  ];
+  const values: AccountValue[] = [];
+  for (let m = 1; m <= 4; m++) {
+    values.push(val('r1', m, 50000));
+    values.push(val('c1', m, 17500)); // food cost 35% — misses the ≤30% mandate
+  }
+  const ws = mkWorkspace({
+    accounts,
+    values,
+    industryProfileId: 'restaurant',
+    targets: {
+      ratios: {},
+      metrics: { food_cost_pct: { value: 0.3, direction: 'at_most', source: 'corporate' } },
+    },
+  });
+  const all = buildExecutiveSummary(ws).map((l) => l.text).join(' | ');
+  check(/0 of 1 client target is met/.test(all), `metric target should be scored: ${all}`);
+  check(/Food Cost %/.test(all), `worst miss should name the metric: ${all}`);
+}
+
 // ── Summary: declining, loss-making month reads negative ────────────────────
 {
   const accounts = [acc('r1', 'Sales', 'revenue'), acc('e1', 'Payroll', 'expense', { costBehavior: 'fixed' })];

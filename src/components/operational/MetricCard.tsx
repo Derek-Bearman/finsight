@@ -10,9 +10,10 @@ export interface MetricCardProps {
 }
 
 const BENCHMARK_LABELS: Record<string, string> = {
-  good: 'Good',
+  good: 'On Target',
   warn: 'Needs Attention',
-  bad: 'Below Target',
+  // Direction-neutral: a ≤-style target that's exceeded is not "below" anything.
+  bad: 'Off Target',
   none: '',
 };
 

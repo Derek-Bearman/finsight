@@ -20,7 +20,7 @@ import React from 'react';
 import type { ClientWorkspace, Period } from '@/types';
 import { ALL_PROFILES } from '@/lib/profiles';
 import { ProfileIcon } from '@/components/ui/profile-icon';
-import { buildPeriodAggregations } from '@/lib/calculations';
+import { buildPeriodAggregations, computeBalanceSheetRatios } from '@/lib/calculations';
 import { computePnL, toFinancialSummary } from '@/lib/calculations/pnl';
 import { PnLReport } from '@/components/reports';
 import { projectWorkspace } from '@/lib/projections/workspace-projections';
@@ -121,10 +121,16 @@ function KpiTile({ label, value, sublabel }: { label: string; value: string; sub
   );
 }
 
+// getUniquePeriods sorts ASCENDING — the latest period is the LAST element.
+// (Using [0] rendered the whole report "as of" the oldest month.)
+function latestPeriod(periods: Period[]): Period {
+  return periods[periods.length - 1]!;
+}
+
 function ExecSummarySection({ workspace }: { workspace: ClientWorkspace }) {
   const periods = getUniquePeriods(workspace.values);
   if (periods.length === 0) return null;
-  const latest = periods[0]!;
+  const latest = latestPeriod(periods);
   const yearValues = workspace.values.filter((v) => v.period.year === latest.year);
   const yearAggregations = buildPeriodAggregations(workspace.accounts, yearValues, 'monthly');
   // Roll up YTD totals
@@ -174,7 +180,7 @@ function ExecSummarySection({ workspace }: { workspace: ClientWorkspace }) {
 function PnLSection({ workspace }: { workspace: ClientWorkspace }) {
   const periods = getUniquePeriods(workspace.values);
   if (periods.length === 0) return null;
-  const latestYear = periods[0]!.year;
+  const latestYear = latestPeriod(periods).year;
   const yearValues = workspace.values.filter((v) => v.period.year === latestYear);
   const aggregations = buildPeriodAggregations(workspace.accounts, yearValues, 'monthly');
   if (aggregations.length === 0) return null;
@@ -196,7 +202,7 @@ function PnLSection({ workspace }: { workspace: ClientWorkspace }) {
 function RatiosSection({ workspace }: { workspace: ClientWorkspace }) {
   const periods = getUniquePeriods(workspace.values);
   if (periods.length === 0) return null;
-  const latest = periods[0]!;
+  const latest = latestPeriod(periods);
   const pnl = computePnL(workspace.accounts, workspace.values, latest);
 
   // Balance-sheet snapshot at the latest period for current/debt ratios
@@ -222,8 +228,12 @@ function RatiosSection({ workspace }: { workspace: ClientWorkspace }) {
   }
   const hasBS = assets > 0 || liabilities > 0 || equity > 0;
 
-  const currentRatio = hasBS && liabilities > 0 ? assets / liabilities : null;
-  const debtEquity = hasBS && equity > 0 ? liabilities / equity : null;
+  // Same math as the on-screen ratio cards (current assets / current
+  // liabilities) — the old totals-based shortcut disagreed with the app
+  // and could mis-judge targets on the PDF.
+  const bsRatios = computeBalanceSheetRatios(workspace.accounts, workspace.values, latest);
+  const currentRatio = hasBS ? bsRatios.currentRatio : null;
+  const debtEquity = hasBS ? bsRatios.debtToEquity : null;
   const grossMargin = pnl.revenue > 0 ? pnl.grossMarginPct : null;
   const netMargin = pnl.revenue > 0 ? pnl.netMarginPct : null;
   const contribMargin = pnl.revenue > 0 ? pnl.contributionMarginPct : null;
@@ -374,7 +384,7 @@ function OperationalSection({ workspace }: { workspace: ClientWorkspace }) {
   const profile = ALL_PROFILES.find((p) => p.id === workspace.industryProfileId);
   if (!profile || profile.operationalMetrics.length === 0) return null;
 
-  const latest = periods[0]!;
+  const latest = latestPeriod(periods);
   // computeMetricsForPeriod wants a FinancialSummary, which is derived
   // from a PnL for that period.
   const pnl = computePnL(workspace.accounts, workspace.values, latest);
