@@ -1,7 +1,49 @@
 # FinSight — Session Notes
 
-**Last updated:** 2026-05-25
-**Live app:** https://finsight.bearman-derek.workers.dev (version `6ff8fdf3` — Phase 1 auth shipped)
+**Last updated:** 2026-07-07
+**Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
+
+> **2026-07-07 — Bob Volpe readiness overnight run (8 commits, deployed + prod
+> click-verified).** Everything below in one night; full detail in the commit
+> messages `95130dd..` and `~/finsight-handoff/FINSIGHT_BOB_HANDOFF.md`:
+>
+> **Correctness:** `Account.isExcluded` now honored across the ENTIRE calc
+> engine (pnl/balance-sheet/health/profitability/efficiency/projections/
+> scenarios/period-comparison — excluded QBO summary rows were double-counting
+> everywhere); CSV parser headerToIndex is first-wins (the standard QBO
+> blank-header shape silently parsed to ZERO rows); print report no longer
+> renders "as of" the OLDEST month and uses the real current-ratio math.
+>
+> **Sync/billing hardening:** workspaces.version optimistic concurrency
+> (+ DB trigger; teammate edits conflict instead of clobber), cloud-sync
+> rewrite (visible sync chip Saving…/Saved/Not saved+Retry/conflict+Reload,
+> bounded backoff, beforeunload guard, access re-resolve on auth/billing
+> refusals), trialing fails closed to read_only after trial_ends_at, open
+> redirect sanitized (incl. control-char bypass), workspaces_metadata view
+> stripped to SELECT, getClaims() replaces the 2nd serial getUser round-trip,
+> read-only firms get real edit gating (ReadOnlyGuard, inert).
+>
+> **Bob features:** shared-input operational entry (enter each number ONCE
+> per period — OperationalInputPool + "Used by" callouts + legacy fallback);
+> universal Marketing Funnel group in all 6 profiles (spend/leads/appts/
+> customers → CPL, stage %, CAC, ROI + FunnelChart w/ trend); per-client KPI
+> targets w/ provenance ("Corporate target" vs "FinSight default benchmark")
+> across Overview/Reports/Print/metric cards + Targets editor dialog;
+> deterministic plain-English executive summary on Overview/Reports/Print;
+> first-run home tour fixed (anchors + per-tour storage keys).
+>
+> **Checks:** `scripts/checks/*.check.ts` (tsx, headless) — calc exclusion,
+> csv fixtures, billing matrix, funnel/pool resolution, exec-summary. Run
+> all before deploying. **Seeding:** `scripts/seed/` has the deterministic
+> Bella Roma Pizza #42 franchise-client generator + PROVISION_BOB.md (proven
+> runbook for Bob's complimentary firm — waiting on his email).
+> Demo firm Arktos Advisory now has 3 clients incl. the Bella Roma showcase.
+>
+> **Known/flagged:** firm "Arktos Bookkeeping" (plan_status=trialing) goes
+> read-only when its trial_ends_at passes 2026-07-12 — intended fail-closed
+> behavior; set plan_status='active' if it should stay complimentary.
+> Resend SMTP still not wired (built-in Supabase email is slow/rate-limited
+> — the #1 first-impression risk for Bob's OTP login).
 **GitHub:** https://github.com/Derek-Bearman/finsight
 **Deploy command:** `cd ~/Documents/finsight && git pull && npm run cf:deploy`
 
