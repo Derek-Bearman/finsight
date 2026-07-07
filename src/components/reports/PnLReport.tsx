@@ -9,9 +9,13 @@ import { ReportTable } from './ReportTable';
 export interface PnLReportProps {
   aggregations: PeriodAggregation[];
   granularity: Granularity;
+  /** Optional title override (e.g. "Income Statement — Jan–Jun 2026" for print chunks). */
+  title?: string;
+  /** Fit the table to its container width (print pages can't scroll horizontally). */
+  fit?: boolean;
 }
 
-export function PnLReport({ aggregations }: PnLReportProps) {
+export function PnLReport({ aggregations, title, fit }: PnLReportProps) {
   if (aggregations.length === 0) {
     return (
       <div
@@ -51,7 +55,6 @@ export function PnLReport({ aggregations }: PnLReportProps) {
     },
     {
       label: 'Gross Profit',
-      sublabel: 'Gross Margin %',
       values: vals('grossProfit'),
       format: 'currency',
       isHighlight: true,
@@ -155,10 +158,11 @@ export function PnLReport({ aggregations }: PnLReportProps) {
 
   return (
     <ReportTable
-      title="Income Statement"
+      title={title ?? 'Income Statement'}
       periods={periods}
       rows={rows}
       showChange={false}
+      fit={fit}
     />
   );
 }

@@ -319,13 +319,17 @@ function ImpactPanel({ workspace, activeScenario, baseScenario }: ImpactPanelPro
   const impact = useMemo(() => {
     if (!activeScenario || !baseScenario || activeScenario.isBaseline) return null;
     if (workspace.accounts.length === 0 || workspace.values.length === 0) return null;
-    return computeScenarioImpact(workspace.accounts, workspace.values, activeScenario);
+    // Trailing 12 months — all-history totals read as nonsense once a client
+    // has more than a year of data (30 months looked like "annual" revenue).
+    const trailing12 = getUniquePeriods(workspace.values).slice(-12);
+    return computeScenarioImpact(workspace.accounts, workspace.values, activeScenario, trailing12);
   }, [workspace.accounts, workspace.values, activeScenario, baseScenario]);
 
   const baselinePnL = useMemo(() => {
     if (workspace.accounts.length === 0 || workspace.values.length === 0) return null;
     if (!baseScenario) return null;
-    return computeScenarioImpact(workspace.accounts, workspace.values, baseScenario);
+    const trailing12 = getUniquePeriods(workspace.values).slice(-12);
+    return computeScenarioImpact(workspace.accounts, workspace.values, baseScenario, trailing12);
   }, [workspace.accounts, workspace.values, baseScenario]);
 
   if (!impact && activeScenario?.isBaseline) {
@@ -366,6 +370,9 @@ function ImpactPanel({ workspace, activeScenario, baseScenario }: ImpactPanelPro
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
           Impact vs Base Case
+          <span className="block text-xs font-normal" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            Trailing 12 months
+          </span>
         </h4>
         <HealthLight isAboveBreakeven={impact.isAboveBreakeven} marginOfSafetyPct={marginOfSafetyPct} />
       </div>
@@ -1034,8 +1041,9 @@ function ComparisonSection({ clientId: _clientId, workspace }: ComparisonSection
       return { allImpacts: [], scenarioSeries: [] };
     }
 
+    const trailing12 = getUniquePeriods(workspace.values).slice(-12);
     const impacts = workspace.scenarios.map(sc =>
-      computeScenarioImpact(workspace.accounts, workspace.values, sc)
+      computeScenarioImpact(workspace.accounts, workspace.values, sc, trailing12)
     );
 
     const series = buildScenarioSeries(workspace.accounts, workspace.values, workspace.scenarios, granularity);

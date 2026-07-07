@@ -185,12 +185,28 @@ function PnLSection({ workspace }: { workspace: ClientWorkspace }) {
   const aggregations = buildPeriodAggregations(workspace.accounts, yearValues, 'monthly');
   if (aggregations.length === 0) return null;
 
+  // A letter-width page fits ~6 monthly columns; more than that overflows the
+  // printable area and Chrome CLIPS it in the PDF. Chunk into stacked tables.
+  const chunks: typeof aggregations[] = [];
+  for (let i = 0; i < aggregations.length; i += 6) chunks.push(aggregations.slice(i, i + 6));
+
   return (
     <section className="page-break-before">
       <SectionHeader title="Income Statement" subtitle={`FY${latestYear} — monthly`} />
-      <div className="avoid-break">
-        <PnLReport aggregations={aggregations} granularity="monthly" />
-      </div>
+      {chunks.map((chunk, i) => (
+        <div className="avoid-break" key={i}>
+          <PnLReport
+            aggregations={chunk}
+            granularity="monthly"
+            fit
+            title={
+              chunks.length > 1
+                ? `Income Statement · ${chunk[0]!.label} – ${chunk[chunk.length - 1]!.label}`
+                : 'Income Statement'
+            }
+          />
+        </div>
+      ))}
     </section>
   );
 }

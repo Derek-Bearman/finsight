@@ -110,7 +110,7 @@ interface Row {
   kind: 'account' | 'subtotal' | 'total' | 'header' | 'spacer';
 }
 
-function StatementTable({ title, buckets, rows }: { title: string; buckets: Bucket[]; rows: Row[] }) {
+function StatementTable({ title, buckets, rows, totalLabel = 'Total' }: { title: string; buckets: Bucket[]; rows: Row[]; totalLabel?: string }) {
   return (
     <div className="mb-8">
       <div
@@ -143,7 +143,7 @@ function StatementTable({ title, buckets, rows }: { title: string; buckets: Buck
               ))}
               <th className="px-3 py-2 text-right text-xs font-medium uppercase tracking-wide whitespace-nowrap"
                 style={{ background: HEADER_BG, color: 'hsl(var(--muted-foreground))' }}>
-                Total
+                {totalLabel}
               </th>
             </tr>
           </thead>
@@ -646,7 +646,7 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
       ) : (
         <>
           {hasPnL && <StatementTable title={`Profit & Loss${embedded ? '' : ' — ' + workspace.name}`} buckets={buckets} rows={pnlRows} />}
-          {hasBS && <StatementTable title="Balance Sheet" buckets={buckets} rows={bsRows} />}
+          {hasBS && <StatementTable title="Balance Sheet" buckets={buckets} rows={bsRows} totalLabel="Ending" />}
         </>
       )}
 

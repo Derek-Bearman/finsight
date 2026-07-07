@@ -15,6 +15,8 @@ export interface MetricRowProps {
   showChange?: boolean;
   invertChange?: boolean;
   benchmark?: BenchmarkRange;
+  /** Compact cells so the table fits a fixed-width (print) page. */
+  dense?: boolean;
 }
 
 function getBenchmarkColor(
@@ -83,7 +85,9 @@ export function MetricRow(props: MetricRowProps) {
     showChange,
     invertChange = false,
     benchmark,
+    dense = false,
   } = props;
+  const cellClass = dense ? 'px-1.5 py-1 text-xs' : 'px-3 py-2 text-sm';
 
   if (isSeparator) {
     return (
@@ -117,9 +121,9 @@ export function MetricRow(props: MetricRowProps) {
     <tr style={{ background: rowBg }}>
       {/* Label column */}
       <td
-        className="px-3 py-2 text-sm"
+        className={cellClass}
         style={{
-          paddingLeft: isSubtotal ? '1.5rem' : '0.75rem',
+          paddingLeft: isSubtotal ? (dense ? '1rem' : '1.5rem') : (dense ? '0.375rem' : '0.75rem'),
           fontWeight,
           color: labelColor,
           position: 'sticky',
@@ -127,8 +131,8 @@ export function MetricRow(props: MetricRowProps) {
           background: stickyBg,
           borderRight: '1px solid hsl(var(--border))',
           zIndex: 1,
-          minWidth: '180px',
-          maxWidth: '240px',
+          minWidth: dense ? '120px' : '180px',
+          maxWidth: dense ? '150px' : '240px',
         }}
       >
         {label}
@@ -150,7 +154,7 @@ export function MetricRow(props: MetricRowProps) {
         return (
           <td
             key={i}
-            className="px-3 py-2 text-sm text-right"
+            className={`${cellClass} text-right`}
             style={{
               fontWeight,
               color: valueColor,
@@ -165,7 +169,7 @@ export function MetricRow(props: MetricRowProps) {
 
       {/* Change column */}
       {showChange && (
-        <td className="px-3 py-2 text-sm text-right" style={{ whiteSpace: 'nowrap' }}>
+        <td className={`${cellClass} text-right`} style={{ whiteSpace: 'nowrap' }}>
           <ChangeIndicator
             current={current}
             previous={previous}

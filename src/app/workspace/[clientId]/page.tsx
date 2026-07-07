@@ -1165,7 +1165,10 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
   const impact = useMemo(() => {
     if (!nonBaseScenario || !baseScenario) return null;
     if (workspace.accounts.length === 0 || workspace.values.length === 0) return null;
-    return computeScenarioImpact(workspace.accounts, workspace.values, nonBaseScenario);
+    // Trailing 12 months — all-history totals read as nonsense once a client
+    // has more than a year of data (30 months looked like "annual" revenue).
+    const trailing12 = getUniquePeriods(workspace.values).slice(-12);
+    return computeScenarioImpact(workspace.accounts, workspace.values, nonBaseScenario, trailing12);
   }, [workspace.accounts, workspace.values, nonBaseScenario, baseScenario]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const keyAccounts = useMemo(() => (workspace ? getKeyAccounts(workspace) : []), [workspace?.accounts, workspace?.values]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1267,7 +1270,7 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
           Quick Adjustments — {activeScenario?.name ?? 'No scenario'}
         </h3>
         <p className="text-xs -mt-2" style={{ color: 'hsl(var(--muted-foreground))' }}>
-          Drag a slider to model a % change against this client&apos;s actuals. The dollar impact updates below. (Pick a non-baseline scenario to enable.)
+          Drag a slider to model a % change against this client&apos;s actuals. The dollar impact updates below.{isBaselineActive ? ' (Pick a non-baseline scenario to enable.)' : ''}
         </p>
         {/* Revenue slider */}
         <div className="flex items-center gap-3">
@@ -1363,7 +1366,7 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
             Impact vs Base Case
           </h3>
           <p className="text-xs mb-1" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            Projected annual figures under this scenario vs the client&apos;s actual baseline. Green = improvement.
+            Trailing 12 months under this scenario vs the client&apos;s actual baseline. Green = improvement.
           </p>
           {[{
             label: 'Revenue',
