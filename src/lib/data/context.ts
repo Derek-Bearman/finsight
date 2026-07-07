@@ -36,12 +36,16 @@ export type UserContext =
 
 export async function resolveUserContext(): Promise<UserContext> {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { state: 'unauthenticated' };
+  // getClaims verifies the JWT locally (asymmetric keys; falls back to a
+  // network getUser on legacy HS256 projects) instead of paying a second
+  // serial GoTrue round-trip on every server action/page — the middleware
+  // already did the authoritative getUser + token refresh for this request.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const claims = claimsData?.claims;
+  if (!claims?.sub) return { state: 'unauthenticated' };
+  const userId = claims.sub;
 
-  const email = user.email ?? null;
+  const email = typeof claims.email === 'string' && claims.email.length > 0 ? claims.email : null;
 
   // Active memberships (RLS-scoped to this user's firms), earliest first.
   const { data: memberships, error } = await supabase
@@ -54,7 +58,7 @@ export async function resolveUserContext(): Promise<UserContext> {
 
   const first = memberships?.[0];
   if (!first || !first.firms) {
-    return { state: 'onboarding', userId: user.id, email };
+    return { state: 'onboarding', userId, email };
   }
 
   const firm = first.firms as FirmRow;
@@ -67,7 +71,7 @@ export async function resolveUserContext(): Promise<UserContext> {
 
   return {
     state: 'active',
-    userId: user.id,
+    userId,
     email,
     firm,
     role: first.role as MembershipRole,

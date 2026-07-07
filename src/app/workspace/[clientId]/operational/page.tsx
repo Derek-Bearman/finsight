@@ -14,6 +14,7 @@ import {
   DataEntryForm,
   CustomMetricBuilder,
 } from '@/components/operational';
+import { ReadOnlyGuard } from '@/components/app/ReadOnlyGuard';
 import type { ClientWorkspace, Period, OperationalDataPoint, CustomMetricDef } from '@/types';
 
 // ── Inner content — all hooks here ─────────────────────────────────────────
@@ -130,6 +131,7 @@ function OperationalContent({ clientId, workspace }: OperationalContentProps) {
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-8 flex flex-col gap-6">
+        <ReadOnlyGuard>
         {/* Toolbar */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <PeriodSelector
@@ -276,6 +278,7 @@ function OperationalContent({ clientId, workspace }: OperationalContentProps) {
             period={selectedPeriod}
           />
         )}
+        </ReadOnlyGuard>
       </main>
     </div>
   );

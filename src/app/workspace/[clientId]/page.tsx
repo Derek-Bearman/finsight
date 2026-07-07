@@ -63,7 +63,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ProfileIcon } from '@/components/ui/profile-icon';
-import { useFirmContext } from '@/components/app/firm-context';
+import { useFirmContext, useReadOnly } from '@/components/app/firm-context';
+import { ReadOnlyGuard } from '@/components/app/ReadOnlyGuard';
 import { AppNav } from '@/components/app/AppNav';
 import { BillingBanner } from '@/components/billing/BillingBanner';
 
@@ -1110,9 +1111,12 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
   const updateScenario = useWorkspaceStore(s => s.updateScenario);
   const activeScenarioId = useWorkspaceStore(s => s.activeScenarioId);
   const setActiveScenario = useWorkspaceStore(s => s.setActiveScenario);
+  const readOnly = useReadOnly();
 
-  // Initialize default scenarios on first mount
+  // Initialize default scenarios on first mount (skipped while read-only —
+  // the seed mutation could never persist and would dirty the sync state)
   useEffect(() => {
+    if (readOnly) return;
     if (!workspace || workspace.scenarios.length > 0) return;
     const firstPeriod: import('@/types').Period = (() => {
       if (workspace.values.length === 0) {
@@ -1722,7 +1726,11 @@ export default function WorkspacePage({ params }: PageProps) {
             onGranularityChange={setSharedGranularity}
           />
         )}
-        {activeTab === 'mapping' && <MappingTab clientId={clientId} />}
+        {activeTab === 'mapping' && (
+          <ReadOnlyGuard>
+            <MappingTab clientId={clientId} />
+          </ReadOnlyGuard>
+        )}
         {activeTab === 'reports' && (
           <ReportsTab
             clientId={clientId}
@@ -1731,8 +1739,16 @@ export default function WorkspacePage({ params }: PageProps) {
           />
         )}
         {activeTab === 'projections' && <ProjectionsTab clientId={clientId} />}
-        {activeTab === 'whatif' && <WhatIfTab clientId={clientId} />}
-        {activeTab === 'operational' && <OperationalTab clientId={clientId} />}
+        {activeTab === 'whatif' && (
+          <ReadOnlyGuard>
+            <WhatIfTab clientId={clientId} />
+          </ReadOnlyGuard>
+        )}
+        {activeTab === 'operational' && (
+          <ReadOnlyGuard>
+            <OperationalTab clientId={clientId} />
+          </ReadOnlyGuard>
+        )}
       </main>
     </div>
   );

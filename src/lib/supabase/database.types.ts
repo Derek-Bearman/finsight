@@ -192,6 +192,7 @@ export type Database = {
           name: string
           source_local_id: string | null
           updated_at: string
+          version: number
         }
         Insert: {
           created_at?: string
@@ -203,6 +204,7 @@ export type Database = {
           name: string
           source_local_id?: string | null
           updated_at?: string
+          version?: number
         }
         Update: {
           created_at?: string
@@ -214,6 +216,7 @@ export type Database = {
           name?: string
           source_local_id?: string | null
           updated_at?: string
+          version?: number
         }
         Relationships: [
           {

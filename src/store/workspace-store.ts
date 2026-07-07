@@ -102,6 +102,16 @@ const conditionalStorage: StateStorage = {
   },
 };
 
+/** What the cloud write-through engine is doing right now — drives the
+ *  header sync chip so failed/conflicted saves are never silent. */
+export interface SyncStatus {
+  phase: 'idle' | 'saving' | 'saved' | 'error' | 'conflict';
+  /** Human-readable detail for error/conflict phases. */
+  message: string | null;
+  /** Workspaces with changes not yet confirmed persisted. */
+  pendingCount: number;
+}
+
 interface WorkspaceState {
   workspaces: ClientWorkspace[];
   activeWorkspaceId: string | null;
@@ -118,12 +128,19 @@ interface WorkspaceState {
   firmId: string | null;
   currentUserId: string | null;
   accessLevel: AccessLevel;
+  /** Written only by lib/data/cloud-sync.ts. */
+  syncStatus: SyncStatus;
 }
 
 interface WorkspaceActions {
   // Cloud mode
   enterCloudMode: (opts: { firmId: string; userId: string; accessLevel: AccessLevel }) => void;
   hydrateFromCloud: (workspaces: ClientWorkspace[]) => void;
+  /** Cloud-sync engine only: publish the current sync state (no-op when unchanged). */
+  setSyncStatus: (status: SyncStatus) => void;
+  /** Cloud-sync engine only: record the server-confirmed version after a save
+   *  WITHOUT touching updatedAt (must not re-trigger the write-through). */
+  bumpCloudVersion: (id: string, version: number) => void;
 
   // Workspace CRUD
   addWorkspace: (workspace: ClientWorkspace) => void;
@@ -179,6 +196,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
       firmId: null,
       currentUserId: null,
       accessLevel: 'full',
+      syncStatus: { phase: 'idle', message: null, pendingCount: 0 },
 
       // ── Cloud mode ─────────────────────────────────────────────────────────
       enterCloudMode: ({ firmId, userId, accessLevel }) => {
@@ -193,6 +211,25 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
       // the firm's authoritative rows from Postgres.
       hydrateFromCloud: (workspaces) =>
         set({ workspaces, cloudHydrated: true }),
+
+      setSyncStatus: (status) => {
+        const cur = get().syncStatus;
+        if (
+          cur.phase === status.phase &&
+          cur.message === status.message &&
+          cur.pendingCount === status.pendingCount
+        ) {
+          return; // avoid render churn from the subscription loop
+        }
+        set({ syncStatus: status });
+      },
+
+      bumpCloudVersion: (id, version) =>
+        set((s) => ({
+          workspaces: s.workspaces.map((w) =>
+            w.id === id && w.cloudVersion !== version ? { ...w, cloudVersion: version } : w
+          ),
+        })),
 
       // ── Workspace CRUD ─────────────────────────────────────────────────────
       addWorkspace: (workspace) =>

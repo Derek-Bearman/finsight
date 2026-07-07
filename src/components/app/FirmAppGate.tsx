@@ -20,7 +20,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { loadFirmApp } from '@/lib/data/workspace-actions';
-import { startCloudSync } from '@/lib/data/cloud-sync';
+import { startCloudSync, registerAccessRefresher } from '@/lib/data/cloud-sync';
 import { FirmProvider, type FirmContextValue } from '@/components/app/firm-context';
 import { ImportPrompt } from '@/components/app/ImportPrompt';
 import { BillingBanner } from '@/components/billing/BillingBanner';
@@ -99,6 +99,22 @@ export function FirmAppGate({ children }: { children: React.ReactNode }) {
       enterCloudMode({ firmId: app.firmId, userId: app.userId, accessLevel: app.access.level });
       hydrateFromCloud(app.workspaces);
       startCloudSync();
+
+      // Let the sync engine re-resolve access when a save is refused (billing
+      // flipped mid-session, session expired then renewed in another tab).
+      // Updates access/banner state only — NEVER re-hydrates workspaces, which
+      // would clobber the very unsaved edits the failed save is protecting.
+      registerAccessRefresher(async () => {
+        const fresh = await loadFirmApp();
+        if (fresh.state !== 'active') return null;
+        useWorkspaceStore.setState({ accessLevel: fresh.access.level });
+        setFirm((prev) =>
+          prev
+            ? { ...prev, access: fresh.access, readOnly: fresh.access.level === 'read_only' }
+            : prev
+        );
+        return fresh.access.level;
+      });
 
       setFirm({
         firmId: app.firmId,

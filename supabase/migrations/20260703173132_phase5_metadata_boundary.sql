@@ -43,5 +43,8 @@ from public.workspaces w;
 comment on view public.workspaces_metadata is
   'PII-safe projection of workspaces (NO data column). security_invoker => RLS-scoped for authenticated; the Phase-5 super-admin console queries this (via service_role) instead of public.workspaces so it never touches financial PII.';
 
-revoke all on public.workspaces_metadata from anon;
+-- Supabase default privileges auto-grant ALL DML to authenticated on new
+-- relations in public — strip BOTH roles so a re-run of this migration ends
+-- read-only (see also 20260707042000_metadata_view_readonly.sql).
+revoke all on public.workspaces_metadata from anon, authenticated;
 grant select on public.workspaces_metadata to authenticated, service_role;

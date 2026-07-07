@@ -13,11 +13,12 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { sanitizeNext } from '@/lib/safe-next';
 
 export async function GET(request: NextRequest) {
   const url = request.nextUrl;
   const code = url.searchParams.get('code');
-  const next = url.searchParams.get('next') ?? '/';
+  const next = sanitizeNext(url.searchParams.get('next'));
 
   if (!code) {
     const failUrl = url.clone();
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
 
   // Success — bounce to the originally-requested path (or /).
   const successUrl = url.clone();
-  successUrl.pathname = next.startsWith('/') ? next : '/';
+  successUrl.pathname = next;
   successUrl.search = '';
   return NextResponse.redirect(successUrl);
 }

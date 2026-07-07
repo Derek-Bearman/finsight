@@ -31,3 +31,9 @@ export const FirmProvider = FirmContext.Provider;
 export function useFirmContext(): FirmContextValue | null {
   return useContext(FirmContext);
 }
+
+/** True when the firm is in read-only billing grace — editing surfaces must
+ *  disable themselves (edits would be silently refused server-side). */
+export function useReadOnly(): boolean {
+  return useContext(FirmContext)?.readOnly ?? false;
+}

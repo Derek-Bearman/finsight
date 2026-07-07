@@ -12,6 +12,7 @@ import {
   computeSourceCounts,
 } from '@/components/mapping';
 import type { SourceFilter } from '@/components/mapping';
+import { ReadOnlyGuard } from '@/components/app/ReadOnlyGuard';
 import type { Account, AccountType, AuditEntry, MappingMemoryEntry, StatementType } from '@/types';
 
 interface PageProps {
@@ -273,6 +274,7 @@ export default function MappingPage({ params }: PageProps) {
 
       {/* Main content */}
       <main className="px-6 py-6">
+        <ReadOnlyGuard>
         <div className="flex flex-col gap-4">
           <MappingToolbar
             view={view}
@@ -339,6 +341,7 @@ export default function MappingPage({ params }: PageProps) {
             </div>
           )}
         </div>
+        </ReadOnlyGuard>
       </main>
 
       {/* Toast notification */}

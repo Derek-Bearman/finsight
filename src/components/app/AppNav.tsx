@@ -8,6 +8,7 @@
 
 import Link from 'next/link';
 import { useFirmContext } from '@/components/app/firm-context';
+import { SyncStatusChip } from '@/components/app/SyncStatusChip';
 
 export function AppNav() {
   const firm = useFirmContext();
@@ -23,6 +24,7 @@ export function AppNav() {
 
   return (
     <nav className="flex items-center gap-2" aria-label="Firm">
+      <SyncStatusChip />
       <Link href="/team" className={linkClass} style={linkStyle} data-testid="nav-team">
         Team
       </Link>

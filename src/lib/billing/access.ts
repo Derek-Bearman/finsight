@@ -76,6 +76,22 @@ export function resolveAccess(
       return { level: 'full', reason: 'subscription active', banner: null, trialDaysLeft: null };
 
     case 'trialing': {
+      // Fail toward restriction if the trial window has passed but Stripe
+      // never moved us off 'trialing' (dropped/failed webhook): read-only —
+      // not locked — until billing state is confirmed. Without this check a
+      // missed webhook granted full access forever.
+      if (trialEnds && now.getTime() > trialEnds.getTime()) {
+        return {
+          level: 'read_only',
+          reason: 'trial ended — awaiting billing confirmation',
+          banner: {
+            severity: 'warning',
+            message:
+              'Your trial has ended and we are confirming your subscription. Your workspace is read-only until billing is confirmed — check the Billing page.',
+          },
+          trialDaysLeft: 0,
+        };
+      }
       const daysLeft = trialEnds ? Math.max(0, daysBetween(now, trialEnds)) : null;
       let banner: AccessBanner | null = null;
       if (daysLeft !== null && daysLeft <= 3) {

@@ -21,6 +21,8 @@ import {
 import { formatCurrency, formatPercent } from '@/lib/utils/format';
 import { getUniquePeriods } from '@/lib/calculations/period-aggregation';
 import { ScenarioComparisonChart } from '@/components/charts';
+import { ReadOnlyGuard } from '@/components/app/ReadOnlyGuard';
+import { useReadOnly } from '@/components/app/firm-context';
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -1161,9 +1163,12 @@ function WhatIfContent({ clientId, workspace }: { clientId: string; workspace: C
   const deleteScenario = useWorkspaceStore(s => s.deleteScenario);
   const activeScenarioId = useWorkspaceStore(s => s.activeScenarioId);
   const setActiveScenario = useWorkspaceStore(s => s.setActiveScenario);
+  const readOnly = useReadOnly();
 
-  // Ensure default scenarios exist
+  // Ensure default scenarios exist (skipped while read-only — the seed
+  // mutation could never persist)
   useEffect(() => {
+    if (readOnly) return;
     if (workspace.scenarios.length === 0) {
       const firstPeriod = getFirstPeriod(workspace);
       const defaults = buildDefaultScenarios(firstPeriod);
@@ -1370,7 +1375,9 @@ export default function WhatIfPage({ params }: PageProps) {
   return (
     <div className="min-h-screen" style={{ background: 'hsl(var(--background))' }}>
       <div className="mx-auto max-w-6xl px-6 py-8">
-        <WhatIfContent clientId={clientId} workspace={workspace} />
+        <ReadOnlyGuard>
+          <WhatIfContent clientId={clientId} workspace={workspace} />
+        </ReadOnlyGuard>
       </div>
     </div>
   );

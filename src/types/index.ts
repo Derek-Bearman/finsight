@@ -154,6 +154,13 @@ export interface ClientWorkspace {
   auditLog: AuditEntry[];
   createdAt: string;
   updatedAt: string;
+  /**
+   * Cloud optimistic-concurrency counter, mirrored from workspaces.version.
+   * Sent with every save; the server updates only when it still matches, so
+   * concurrent teammate edits surface as a conflict instead of silently
+   * overwriting each other. Absent for local-only (never-synced) workspaces.
+   */
+  cloudVersion?: number;
 }
 
 // ─────────────────────────────────────────────

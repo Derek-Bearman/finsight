@@ -13,7 +13,7 @@
  * behind the client-side gating.
  */
 
-import { resolveUserContext, requireActiveContext } from '@/lib/data/context';
+import { resolveUserContext } from '@/lib/data/context';
 import {
   listWorkspaces,
   createWorkspace,
@@ -68,17 +68,44 @@ export async function loadFirmApp(): Promise<FirmAppState> {
   };
 }
 
+/** Why a save was refused/failed — lets the client sync engine react
+ *  correctly (retry transient errors, stop on conflict, re-resolve access on
+ *  auth/billing refusals) instead of treating every failure the same. */
+export type SaveErrorCode = 'conflict' | 'read_only' | 'locked' | 'unauthenticated' | 'error';
+
+export type SaveResult<T = ClientWorkspace> =
+  | { ok: true; data: T }
+  | { ok: false; error: string; code: SaveErrorCode };
+
 /** Guard: only a full-access firm may write. Returns the active context or an error. */
 async function requireWritableContext() {
-  const ctx = await requireActiveContext();
-  if (ctx.access.level !== 'full') {
+  const ctx = await resolveUserContext();
+  if (ctx.state === 'unauthenticated') {
     return {
       ok: false as const,
-      error:
-        ctx.access.level === 'read_only'
-          ? 'Your workspace is read-only while payment is being resolved — changes are not saved.'
-          : 'Your account is locked. Restore billing to make changes.',
+      error: 'Your session has expired. Sign in again (a new tab works) to keep saving.',
+      code: 'unauthenticated' as const,
     };
+  }
+  if (ctx.state === 'onboarding') {
+    return {
+      ok: false as const,
+      error: 'No active firm for the current user.',
+      code: 'unauthenticated' as const,
+    };
+  }
+  if (ctx.access.level !== 'full') {
+    return ctx.access.level === 'read_only'
+      ? {
+          ok: false as const,
+          error: 'Your workspace is read-only while payment is being resolved — changes are not saved.',
+          code: 'read_only' as const,
+        }
+      : {
+          ok: false as const,
+          error: 'Your account is locked. Restore billing to make changes.',
+          code: 'locked' as const,
+        };
   }
   return { ok: true as const, ctx };
 }
@@ -99,17 +126,27 @@ export async function saveNewWorkspace(
 }
 
 /** Persist an existing workspace (by its DB uuid). firm_id/created_by are pinned
- *  immutable by a DB trigger, so only name/profile/data change. */
-export async function saveWorkspace(
-  ws: ClientWorkspace
-): Promise<ActionResult<ClientWorkspace>> {
+ *  immutable by a DB trigger, so only name/profile/data change. Guarded on the
+ *  workspace's cloudVersion — a concurrent teammate save returns a conflict. */
+export async function saveWorkspace(ws: ClientWorkspace): Promise<SaveResult> {
   const guard = await requireWritableContext();
   if (!guard.ok) return guard;
   try {
-    const stored = await updateWorkspace(ws);
-    return { ok: true, data: stored };
+    const outcome = await updateWorkspace(ws);
+    if (!outcome.ok) {
+      return {
+        ok: false,
+        error: 'This client was changed by a teammate. Reload to see their changes.',
+        code: 'conflict',
+      };
+    }
+    return { ok: true, data: outcome.workspace };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Failed to save workspace.' };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Failed to save workspace.',
+      code: 'error',
+    };
   }
 }
 

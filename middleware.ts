@@ -19,6 +19,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { createSupabaseProxyClient } from '@/lib/supabase/proxy-client';
+import { sanitizeNext } from '@/lib/safe-next';
 
 // Public routes — anyone can hit these whether logged in or not.
 // The Stripe webhook MUST be public: Stripe posts to it with no session, so it
@@ -52,10 +53,12 @@ export async function middleware(request: NextRequest) {
   }
 
   // Logged in + /login → bounce them to home (or `next` param if present).
+  // sanitizeNext: assigning to url.pathname is origin-preserving already,
+  // but route every `next` through the one shared rule (defense in depth).
   if (user && pathname === '/login') {
-    const next = request.nextUrl.searchParams.get('next') || '/';
+    const next = sanitizeNext(request.nextUrl.searchParams.get('next'));
     const url = request.nextUrl.clone();
-    url.pathname = next.startsWith('/') ? next : '/';
+    url.pathname = next;
     url.search = '';
     return NextResponse.redirect(url);
   }

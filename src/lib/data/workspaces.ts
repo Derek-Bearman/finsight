@@ -37,6 +37,8 @@ function rowToWorkspace(row: WorkspaceRow): ClientWorkspace {
     id: row.id,
     name: row.name,
     industryProfileId: row.industry_profile,
+    // Always the column value — the copy inside the blob is stale by one save.
+    cloudVersion: row.version,
   };
 }
 
@@ -84,22 +86,36 @@ export async function createWorkspace(
   return rowToWorkspace(data);
 }
 
+export type UpdateWorkspaceResult =
+  | { ok: true; workspace: ClientWorkspace }
+  | { ok: false; reason: 'conflict' };
+
 /** Overwrite an existing workspace (by its DB uuid). firm_id/created_by are
- *  ignored by the DB trigger even if present, so tenant + authorship are safe. */
-export async function updateWorkspace(ws: ClientWorkspace): Promise<ClientWorkspace> {
+ *  ignored by the DB trigger even if present, so tenant + authorship are safe.
+ *
+ *  Optimistic concurrency: the UPDATE is guarded on the version the caller
+ *  hydrated (`cloudVersion`); the DB trigger increments `version` on every
+ *  write. Zero matched rows = a teammate saved first (or deleted the
+ *  workspace) — reported as a conflict, never silently overwritten. */
+export async function updateWorkspace(ws: ClientWorkspace): Promise<UpdateWorkspaceResult> {
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from('workspaces')
     .update({
       name: ws.name,
       industry_profile: ws.industryProfileId,
       data: ws as unknown as Json,
     })
-    .eq('id', ws.id)
-    .select('*')
-    .single();
+    .eq('id', ws.id);
+  // Legacy sessions hydrated before the version column shipped save
+  // unconditionally (pre-fix behavior) until their next full hydrate.
+  if (typeof ws.cloudVersion === 'number') {
+    query = query.eq('version', ws.cloudVersion);
+  }
+  const { data, error } = await query.select('*').maybeSingle();
   if (error) throw error;
-  return rowToWorkspace(data);
+  if (!data) return { ok: false, reason: 'conflict' };
+  return { ok: true, workspace: rowToWorkspace(data) };
 }
 
 export async function deleteWorkspace(id: string): Promise<void> {

@@ -35,6 +35,7 @@
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
+import { sanitizeNext } from '@/lib/safe-next';
 import { Button } from '@/components/ui/button';
 
 type Step = 'email' | 'code';
@@ -42,7 +43,9 @@ type Status = 'idle' | 'sending' | 'verifying';
 
 function LoginForm() {
   const params = useSearchParams();
-  const nextPath = params.get('next') || '/';
+  // Sanitized: an attacker-crafted /login?next=//evil.com must never turn
+  // the post-OTP window.location.assign below into an open redirect.
+  const nextPath = sanitizeNext(params.get('next'));
 
   const [step, setStep] = useState<Step>('email');
   const [status, setStatus] = useState<Status>('idle');
