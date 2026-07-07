@@ -83,7 +83,7 @@ function getAccountBalance(
     amountByAccount.set(v.accountId, (amountByAccount.get(v.accountId) ?? 0) + v.amount);
   }
   return accounts
-    .filter(filter)
+    .filter(a => !a.isExcluded && filter(a))
     .reduce((s, a) => s + (amountByAccount.get(a.id) ?? 0), 0);
 }
 

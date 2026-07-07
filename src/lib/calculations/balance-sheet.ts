@@ -107,7 +107,8 @@ export function computeBalanceSheetRatios(
   }
 
   function sumAccounts(filter: (a: Account) => boolean): number {
-    return accounts.filter(filter).reduce((s, a) => s + getAmount(a), 0);
+    // Excluded rows (QBO summary/check rows, manual exclusions) never count.
+    return accounts.filter(a => !a.isExcluded && filter(a)).reduce((s, a) => s + getAmount(a), 0);
   }
 
   const currentAssets = sumAccounts(isCurrentAsset);

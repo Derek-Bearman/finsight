@@ -569,10 +569,15 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
   const columnMapping = detectColumnMapping(rawHeaders);
   const { accountNameColumn, accountNumberColumn } = columnMapping;
 
-  // Build index lookups for header → column index
+  // Build index lookups for header → column index. FIRST occurrence wins:
+  // detectColumnMapping picks the first matching header (falling back to
+  // headers[0], usually the blank account-name column in QBO exports), and
+  // QBO header rows repeat blank cells — last-wins would resolve the name
+  // column to a trailing empty column and silently drop every data row.
   const headerToIndex = new Map<string, number>();
   for (let i = 0; i < rawHeaders.length; i++) {
-    headerToIndex.set(rawHeaders[i] ?? '', i);
+    const h = rawHeaders[i] ?? '';
+    if (!headerToIndex.has(h)) headerToIndex.set(h, i);
   }
 
   const nameColIndex = accountNameColumn !== null ? (headerToIndex.get(accountNameColumn) ?? null) : null;

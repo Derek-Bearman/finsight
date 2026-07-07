@@ -134,6 +134,11 @@ export function computePnL(
   const periodKeys = new Set(periodArr.map(periodToKey));
   const filteredValues = filterValues(values, periodKeys);
 
+  // Excluded accounts (QBO summary rows like "Gross Profit", manual 'E'
+  // exclusions in mapping) must never contribute to any bucket — including
+  // them double-counts across the entire product.
+  const active = accounts.filter(a => !a.isExcluded);
+
   // Build a map for quick lookup: accountId -> amount (summed across all periods)
   const amountByAccount = new Map<string, number>();
   for (const v of filteredValues) {
@@ -145,18 +150,18 @@ export function computePnL(
   }
 
   // Revenue
-  const revenueAccounts = accounts.filter(a => a.type === 'revenue');
+  const revenueAccounts = active.filter(a => a.type === 'revenue');
   const revenue = revenueAccounts.reduce((s, a) => s + accountTotal(a), 0);
 
   // COGS
-  const cogsAccounts = accounts.filter(a => a.type === 'cogs');
+  const cogsAccounts = active.filter(a => a.type === 'cogs');
   const cogs = cogsAccounts.reduce((s, a) => s + accountTotal(a), 0);
 
   const grossProfit = revenue - cogs;
   const grossMarginPct = revenue === 0 ? 0 : grossProfit / revenue;
 
   // Expense accounts (operating expenses)
-  const expenseAccounts = accounts.filter(a => a.type === 'expense');
+  const expenseAccounts = active.filter(a => a.type === 'expense');
 
   let totalFixedCosts = 0;
   let totalVariableCosts = 0;
@@ -232,7 +237,7 @@ export function computePnL(
   const contributionMarginPct = revenue === 0 ? 0 : contributionMargin / revenue;
 
   // Marketing spend
-  const marketingAccounts = accounts.filter(a => a.type === 'expense' && isMarketing(a));
+  const marketingAccounts = active.filter(a => a.type === 'expense' && isMarketing(a));
   const marketingSpend = marketingAccounts.reduce((s, a) => s + accountTotal(a), 0);
 
   return {
@@ -361,7 +366,8 @@ export function runTests(): void {
     name: string,
     type: Account['type'],
     costBehavior?: Account['costBehavior'],
-    mixedFixedPercent?: number
+    mixedFixedPercent?: number,
+    isExcluded?: boolean
   ): Account => ({
     id,
     name,
@@ -369,6 +375,7 @@ export function runTests(): void {
     costBehavior,
     mixedFixedPercent,
     isManuallyClassified: false,
+    isExcluded,
   });
 
   const mkVal = (accountId: string, year: number, month: number, amount: number): AccountValue => ({
@@ -467,6 +474,35 @@ export function runTests(): void {
     ];
     const pnl = computePnL(accounts, values, { year: 2024, month: 1 });
     console.assert(pnl.marketingSpend === 500, `marketingSpend should be 500, got ${pnl.marketingSpend}`);
+  }
+
+  // ── computePnL: excluded summary rows must not double-count ──
+  {
+    const accounts = [
+      mkAccount('r1', 'Sales', 'revenue'),
+      mkAccount('c1', 'Cost of Goods', 'cogs'),
+      // QBO-style summary row the wizard marks isExcluded but keeps in the array
+      mkAccount('gp', 'Gross Profit', 'revenue', undefined, undefined, true),
+    ];
+    const values = [
+      mkVal('r1', 2024, 1, 10000),
+      mkVal('c1', 2024, 1, 3000),
+      mkVal('gp', 2024, 1, 7000),
+    ];
+    const pnl = computePnL(accounts, values, { year: 2024, month: 1 });
+    console.assert(pnl.revenue === 10000, `excluded row leaked into revenue: got ${pnl.revenue}`);
+    console.assert(pnl.grossProfit === 7000, `excluded row skewed grossProfit: got ${pnl.grossProfit}`);
+    console.assert(pnl.netIncome === 7000, `excluded row skewed netIncome: got ${pnl.netIncome}`);
+  }
+  {
+    const accounts = [
+      mkAccount('r1', 'Sales', 'revenue'),
+      mkAccount('oi', 'Operating Income', 'expense', undefined, undefined, true),
+    ];
+    const values = [mkVal('r1', 2024, 1, 10000), mkVal('oi', 2024, 1, 4000)];
+    const pnl = computePnL(accounts, values, { year: 2024, month: 1 });
+    console.assert(pnl.operatingExpenses === 0, `excluded row leaked into opex: got ${pnl.operatingExpenses}`);
+    console.assert(pnl.marketingSpend === 0, `excluded row leaked into marketing: got ${pnl.marketingSpend}`);
   }
 
   // ── buildPeriodAggregations: labels ──

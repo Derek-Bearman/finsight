@@ -76,6 +76,10 @@ export function projectWorkspace(
   const model: ProjectionModel = options.model ?? profileDefaultModel ?? 'linear';
   const { horizonMonths, growthRateOverride } = options;
 
+  // Excluded accounts (QBO summary rows, manual exclusions) are never
+  // projected nor rolled up — their values would double-count every total.
+  accounts = accounts.filter((a) => !a.isExcluded);
+
   // ── Per-account projections ──────────────────────────────────────────────────
 
   const accountProjections: AccountProjection[] = [];

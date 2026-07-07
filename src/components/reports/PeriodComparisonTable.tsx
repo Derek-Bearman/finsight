@@ -50,9 +50,11 @@ export function PeriodComparisonTable({
 }: PeriodComparisonTableProps) {
   const [filterType, setFilterType] = useState<AccountType | 'all'>('all');
 
+  // Excluded rows (summary/subtotal lines) are not real accounts to compare.
+  const activeAccounts = accounts.filter(a => !a.isExcluded);
   const displayAccounts = filterType === 'all'
-    ? accounts
-    : accounts.filter(a => a.type === filterType);
+    ? activeAccounts
+    : activeAccounts.filter(a => a.type === filterType);
 
   const rows = displayAccounts.map(account => {
     const a = getAmountForPeriod(account.id, values, periodA);
@@ -63,7 +65,7 @@ export function PeriodComparisonTable({
     return { account, a, b, variance, variancePct, favorable };
   });
 
-  const hasData = accounts.length > 0;
+  const hasData = activeAccounts.length > 0;
 
   if (!hasData) {
     return (

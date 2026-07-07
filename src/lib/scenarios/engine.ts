@@ -32,14 +32,16 @@ function isAfterOrEqual(p: Period, from: Period): boolean {
  * Expand sentinel accountIds to actual account IDs of the matching type.
  */
 function expandAccountId(accountId: string, accounts: Account[]): string[] {
+  // Sentinels never expand to excluded accounts (summary rows etc.) —
+  // adjusting those would corrupt scenario math.
   if (accountId === '_all_revenue_') {
-    return accounts.filter(a => a.type === 'revenue').map(a => a.id);
+    return accounts.filter(a => a.type === 'revenue' && !a.isExcluded).map(a => a.id);
   }
   if (accountId === '_all_expense_') {
-    return accounts.filter(a => a.type === 'expense').map(a => a.id);
+    return accounts.filter(a => a.type === 'expense' && !a.isExcluded).map(a => a.id);
   }
   if (accountId === '_all_costs_') {
-    return accounts.filter(a => a.type === 'expense' || a.type === 'cogs').map(a => a.id);
+    return accounts.filter(a => (a.type === 'expense' || a.type === 'cogs') && !a.isExcluded).map(a => a.id);
   }
   return [accountId];
 }

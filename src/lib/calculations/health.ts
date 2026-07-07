@@ -77,7 +77,7 @@ function getAccountBalance(
     amountByAccount.set(v.accountId, (amountByAccount.get(v.accountId) ?? 0) + v.amount);
   }
   return accounts
-    .filter(filter)
+    .filter(a => !a.isExcluded && filter(a))
     .reduce((s, a) => s + (amountByAccount.get(a.id) ?? 0), 0);
 }
 
@@ -133,7 +133,7 @@ export function computeHealthScores(
 
   // Interest coverage = EBIT / interest expense
   // Find interest expense accounts
-  const interestAccounts = accounts.filter(isInterestExpense);
+  const interestAccounts = accounts.filter(a => !a.isExcluded && isInterestExpense(a));
   const hasInterestAccounts = interestAccounts.length > 0;
 
   let interestCoverageRatio: number | null = null;
