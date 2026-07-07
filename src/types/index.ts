@@ -117,6 +117,32 @@ export interface OperationalInputPool {
 }
 
 // ─────────────────────────────────────────────
+// KPI Targets (per-workspace benchmark overrides)
+// ─────────────────────────────────────────────
+
+/**
+ * A client-specific KPI target — typically a corporate/franchise-mandated
+ * number (e.g. "food cost ≤ 30%") — that overrides FinSight's default
+ * benchmark wherever the ratio/metric renders. Provenance is always shown:
+ * a corporate mandate reads very differently from a loose industry default.
+ */
+export interface KpiTarget {
+  /** Threshold in the metric's native unit (percents as 0–1 fractions). */
+  value: number;
+  direction: 'at_least' | 'at_most';
+  /** Where the number comes from — drives the provenance label. */
+  source: 'corporate' | 'custom';
+  note?: string;
+}
+
+export interface WorkspaceTargets {
+  /** Financial-ratio targets keyed by RatioKey (lib/targets registry). */
+  ratios: Record<string, KpiTarget>;
+  /** Operational-metric targets keyed by OperationalMetricDef id. */
+  metrics: Record<string, KpiTarget>;
+}
+
+// ─────────────────────────────────────────────
 // Mapping Memory (cross-client classification memory)
 // ─────────────────────────────────────────────
 
@@ -166,6 +192,8 @@ export interface ClientWorkspace {
   /** Shared-input pools (one per period). Optional: pre-refactor workspaces
    *  only have per-metric operationalData; calculators fall back to it. */
   operationalInputs?: OperationalInputPool[];
+  /** Client-specific KPI targets (corporate mandates / custom goals). */
+  targets?: WorkspaceTargets;
   customMetrics: CustomMetricDef[];
   auditLog: AuditEntry[];
   createdAt: string;

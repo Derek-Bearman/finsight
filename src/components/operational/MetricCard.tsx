@@ -77,6 +77,26 @@ export function MetricCard({ result, showFormula = false }: MetricCardProps) {
         </div>
       )}
 
+      {/* Target / benchmark provenance — a corporate mandate must never be
+          confused with a loose FinSight default */}
+      {result.provenance !== 'none' && (
+        <p className="text-xs leading-snug" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          {result.targetText ? (
+            <>
+              <span className="font-medium" style={{ color: 'hsl(var(--foreground))' }}>
+                {result.targetText}
+              </span>
+              {' · '}
+            </>
+          ) : null}
+          {result.provenance === 'corporate'
+            ? 'Corporate target'
+            : result.provenance === 'custom'
+              ? 'Custom target'
+              : 'FinSight default benchmark'}
+        </p>
+      )}
+
       {/* No data state */}
       {!hasValue && (
         <p className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>

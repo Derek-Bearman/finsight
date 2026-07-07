@@ -30,6 +30,13 @@ import { MetricGrid } from '@/components/operational';
 import { computeMetricsForPeriod } from '@/lib/operational';
 import { getUniquePeriods } from '@/lib/calculations/period-aggregation';
 import { formatCurrency, formatPercent, formatRatio } from '@/lib/utils/format';
+import { buildExecutiveSummary } from '@/lib/insights/executive-summary';
+import {
+  RATIO_DEF_MAP,
+  resolveRatioBenchmark,
+  meetsTarget,
+  type RatioKey,
+} from '@/lib/targets';
 
 interface PrintReportProps {
   workspace: ClientWorkspace;
@@ -134,9 +141,21 @@ function ExecSummarySection({ workspace }: { workspace: ClientWorkspace }) {
   const grossMargin = totals.revenue > 0 ? totals.grossProfit / totals.revenue : 0;
   const netMargin = totals.revenue > 0 ? totals.netIncome / totals.revenue : 0;
 
+  const narrative = buildExecutiveSummary(workspace);
+
   return (
     <section className="page-break-before avoid-break" style={{ paddingTop: '0.5rem' }}>
       <SectionHeader title="Executive Summary" subtitle={`FY${latest.year} year-to-date`} />
+
+      {/* Plain-English narrative — the read-first block clients actually read */}
+      {narrative.length > 0 && (
+        <ul style={{ margin: '0 0 1.25rem', paddingLeft: '1.1rem', fontSize: 13, lineHeight: 1.6, color: 'hsl(var(--foreground))' }}>
+          {narrative.map((line, i) => (
+            <li key={i} style={{ marginBottom: '0.25rem' }}>{line.text}</li>
+          ))}
+        </ul>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.75rem' }}>
         <KpiTile label="Revenue" value={formatCurrency(totals.revenue)} />
         <KpiTile label="Gross Profit" value={formatCurrency(totals.grossProfit)} sublabel={formatPercent(grossMargin) + ' margin'} />
@@ -208,12 +227,41 @@ function RatiosSection({ workspace }: { workspace: ClientWorkspace }) {
   const netMargin = pnl.revenue > 0 ? pnl.netMarginPct : null;
   const contribMargin = pnl.revenue > 0 ? pnl.contributionMarginPct : null;
 
-  const rows: { label: string; value: string; benchmark: string }[] = [
-    { label: 'Gross Margin', value: grossMargin !== null ? formatPercent(grossMargin) : '—', benchmark: 'Healthy: 30%+' },
-    { label: 'Net Margin', value: netMargin !== null ? formatPercent(netMargin) : '—', benchmark: 'Healthy: 10%+' },
-    { label: 'Contribution Margin', value: contribMargin !== null ? formatPercent(contribMargin) : '—', benchmark: 'Healthy: 40%+' },
-    { label: 'Current Ratio', value: currentRatio !== null ? formatRatio(currentRatio) : '—', benchmark: 'Healthy: 2.0+' },
-    { label: 'Debt-to-Equity', value: debtEquity !== null ? formatRatio(debtEquity) : '—', benchmark: 'Healthy: <1.0' },
+  // Target-aware rows: a client target (corporate mandate / custom goal)
+  // replaces the generic guidance text and gets a met/off-target verdict.
+  const buildRow = (
+    key: RatioKey,
+    value: number | null,
+    fallbackGuidance: string
+  ): { label: string; value: string; benchmark: string; status: string } => {
+    const def = RATIO_DEF_MAP[key]!;
+    const resolved = resolveRatioBenchmark(key, workspace.targets);
+    const fmt = (v: number) => (def.format === 'percent' ? formatPercent(v) : formatRatio(v));
+    if (resolved.target) {
+      const provenance = resolved.provenance === 'corporate' ? 'Corporate target' : 'Custom target';
+      const verdict =
+        value !== null ? (meetsTarget(value, resolved.target) ? '✓ met' : '✗ off target') : '';
+      return {
+        label: def.label,
+        value: value !== null ? fmt(value) : '—',
+        benchmark: `${resolved.targetText} (${provenance})`,
+        status: verdict,
+      };
+    }
+    return {
+      label: def.label,
+      value: value !== null ? fmt(value) : '—',
+      benchmark: `${fallbackGuidance} (FinSight default)`,
+      status: '',
+    };
+  };
+
+  const rows = [
+    buildRow('gross_margin', grossMargin, 'Healthy: 30%+'),
+    buildRow('net_margin', netMargin, 'Healthy: 10%+'),
+    buildRow('contribution_margin', contribMargin, 'Healthy: 40%+'),
+    buildRow('current_ratio', currentRatio, 'Healthy: 2.0+'),
+    buildRow('debt_to_equity', debtEquity, 'Healthy: <1.0'),
   ];
 
   return (
@@ -237,7 +285,21 @@ function RatiosSection({ workspace }: { workspace: ClientWorkspace }) {
           {rows.map((r) => (
             <tr key={r.label} style={{ borderBottom: '1px solid hsl(var(--border))' }}>
               <td style={{ padding: '0.5rem 0.75rem', color: 'hsl(var(--foreground))' }}>{r.label}</td>
-              <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 600, color: 'hsl(var(--foreground))' }}>{r.value}</td>
+              <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 600, color: 'hsl(var(--foreground))' }}>
+                {r.value}
+                {r.status && (
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: r.status.startsWith('✓') ? 'hsl(142 71% 35%)' : 'hsl(0 72% 45%)',
+                    }}
+                  >
+                    {r.status}
+                  </span>
+                )}
+              </td>
               <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>{r.benchmark}</td>
             </tr>
           ))}
@@ -320,7 +382,9 @@ function OperationalSection({ workspace }: { workspace: ClientWorkspace }) {
     profile.operationalMetrics,
     workspace.operationalData ?? [],
     summary,
-    latest
+    latest,
+    workspace.operationalInputs,
+    workspace.targets?.metrics
   );
   const withData = metricResults.filter((r) => r.value !== null);
   if (withData.length === 0) return null;

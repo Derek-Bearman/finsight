@@ -21,6 +21,7 @@ import {
   PeriodComparisonTable,
 } from '@/components/reports';
 import { getUniquePeriods } from '@/lib/calculations/period-aggregation';
+import { ExecutiveSummary } from '@/components/insights/ExecutiveSummary';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -236,7 +237,10 @@ export default function ReportsPage({ params }: PageProps) {
         ) : (
           <>
             {activeTab === 'pnl' && (
-              <PnLReport aggregations={aggregations} granularity={granularity} />
+              <div className="flex flex-col gap-6">
+                <ExecutiveSummary workspace={workspace} />
+                <PnLReport aggregations={aggregations} granularity={granularity} />
+              </div>
             )}
 
             {activeTab === 'breakeven' && (

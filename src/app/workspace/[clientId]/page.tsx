@@ -15,7 +15,7 @@ import type { ProjectionChartDataPoint } from '@/components/projections/Projecti
 import { periodLabel, periodSortKey } from '@/lib/utils/period';
 import { computePnL, toFinancialSummary } from '@/lib/calculations/pnl';
 import { getUniquePeriods } from '@/lib/calculations/period-aggregation';
-import { computeMetricsForPeriod } from '@/lib/operational';
+import { computeMetricsForPeriod, getBenchmarkStatus } from '@/lib/operational';
 import { PeriodSelector, MetricGrid, FunnelChart } from '@/components/operational';
 import {
   MappingToolbar,
@@ -67,6 +67,9 @@ import { useFirmContext, useReadOnly } from '@/components/app/firm-context';
 import { ReadOnlyGuard } from '@/components/app/ReadOnlyGuard';
 import { AppNav } from '@/components/app/AppNav';
 import { BillingBanner } from '@/components/billing/BillingBanner';
+import { ExecutiveSummary } from '@/components/insights/ExecutiveSummary';
+import { TargetsEditor } from '@/components/app/TargetsEditor';
+import { RATIO_DEF_MAP, resolveRatioBenchmark, type RatioKey } from '@/lib/targets';
 
 // ── Helper: years available in values ────────────────────────────────────────
 
@@ -487,10 +490,12 @@ function RatioCard({
   label,
   value,
   color,
+  sub,
 }: {
   label: string;
   value: string;
   color?: string;
+  sub?: string;
 }) {
   return (
     <div
@@ -503,6 +508,11 @@ function RatioCard({
       <p className="text-xl font-bold" style={{ color: color ?? 'hsl(var(--foreground))' }}>
         {value}
       </p>
+      {sub && (
+        <p className="text-xs leading-snug" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          {sub}
+        </p>
+      )}
     </div>
   );
 }
@@ -519,6 +529,25 @@ function zScoreZoneLabel(z: number | null): string {
   if (z >= 2.6) return `${z.toFixed(2)} (Safe)`;
   if (z >= 1.1) return `${z.toFixed(2)} (Grey Zone)`;
   return `${z.toFixed(2)} (Distress)`;
+}
+
+/** Reports-tab ratio card with target/provenance awareness. */
+function reportRatioCard(
+  key: RatioKey,
+  value: number | null,
+  targets: import('@/types').WorkspaceTargets | undefined
+): { label: string; value: string; color?: string; sub: string } {
+  const def = RATIO_DEF_MAP[key]!;
+  const resolved = resolveRatioBenchmark(key, targets);
+  const status = getBenchmarkStatus(value, resolved.benchmark);
+  return {
+    label: def.label,
+    value: value != null ? formatMetricValue(value, def.format) : '—',
+    color: value != null ? status.color : undefined,
+    sub: resolved.targetText
+      ? `${resolved.targetText} · ${resolved.provenance === 'corporate' ? 'Corporate' : 'Custom'}`
+      : 'FinSight default benchmark',
+  };
 }
 
 function ReportsTab({
@@ -603,6 +632,9 @@ function ReportsTab({
         </div>
       ) : (
         <>
+          {/* Plain-English read first */}
+          <ExecutiveSummary workspace={workspace} />
+
           {/* P&L Table */}
           <PnLReport aggregations={aggregations} granularity={granularity} />
 
@@ -613,30 +645,16 @@ function ReportsTab({
                 Key Ratios (Latest Period)
               </h3>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <RatioCard
-                  label="Gross Margin %"
-                  value={latestAgg ? formatMetricValue(latestAgg.grossMarginPct, 'percent') : '—'}
-                />
-                <RatioCard
-                  label="Net Margin %"
-                  value={latestAgg ? formatMetricValue(latestAgg.netMarginPct, 'percent') : '—'}
-                />
-                <RatioCard
-                  label="Current Ratio"
-                  value={latestBS?.currentRatio != null ? formatMetricValue(latestBS.currentRatio, 'ratio') : '—'}
-                />
-                <RatioCard
-                  label="Debt / Equity"
-                  value={latestBS?.debtToEquity != null ? formatMetricValue(latestBS.debtToEquity, 'ratio') : '—'}
-                />
-                <RatioCard
-                  label="ROE %"
-                  value={latestProf?.roe != null ? formatMetricValue(latestProf.roe, 'percent') : '—'}
-                />
+                <RatioCard {...reportRatioCard('gross_margin', latestAgg?.grossMarginPct ?? null, workspace.targets)} />
+                <RatioCard {...reportRatioCard('net_margin', latestAgg?.netMarginPct ?? null, workspace.targets)} />
+                <RatioCard {...reportRatioCard('current_ratio', latestBS?.currentRatio ?? null, workspace.targets)} />
+                <RatioCard {...reportRatioCard('debt_to_equity', latestBS?.debtToEquity ?? null, workspace.targets)} />
+                <RatioCard {...reportRatioCard('roe', latestProf?.roe ?? null, workspace.targets)} />
                 <RatioCard
                   label="Altman Z''"
                   value={zScoreZoneLabel(latestHealth?.altmanZScore ?? null)}
                   color={zScoreZoneColor(latestHealth?.altmanZScore ?? null)}
+                  sub={resolveRatioBenchmark('altman_z', workspace.targets).targetText ?? 'FinSight default benchmark'}
                 />
               </div>
             </div>
@@ -655,13 +673,8 @@ const GRANULARITIES: { id: Granularity; label: string }[] = [
   { id: 'annual', label: 'Annual' },
 ];
 
-// Benchmarks for ratio dashboard cards
-const GROSS_MARGIN_BENCHMARK: BenchmarkRange = { good: 0.4, warn: 0.2, bad: 0, direction: 'higher' };
-const NET_MARGIN_BENCHMARK: BenchmarkRange = { good: 0.1, warn: 0.03, bad: 0, direction: 'higher' };
-const CURRENT_RATIO_BENCHMARK: BenchmarkRange = { good: 2, warn: 1, bad: 0.5, direction: 'higher' };
-const DEBT_EQUITY_BENCHMARK: BenchmarkRange = { good: 1, warn: 2, bad: 4, direction: 'lower' };
-const CONTRIBUTION_MARGIN_BENCHMARK: BenchmarkRange = { good: 0.4, warn: 0.2, bad: 0, direction: 'higher' };
-const ZSCORE_BENCHMARK: BenchmarkRange = { good: 2.6, warn: 1.1, bad: 0, direction: 'higher' };
+// Ratio benchmarks now come from the lib/targets registry, resolved per
+// workspace so client targets (corporate mandates) override the defaults.
 
 function OverviewTab({
   clientId,
@@ -774,51 +787,34 @@ function OverviewTab({
     const latestBS = bsSlice[bsSlice.length - 1];
     const latestHealth = healthSlice[healthSlice.length - 1];
 
+    const card = (
+      key: RatioKey,
+      value: number | null,
+      trend: number[]
+    ): RatioSparklineProps => {
+      const def = RATIO_DEF_MAP[key]!;
+      const resolved = resolveRatioBenchmark(key, workspace?.targets);
+      return {
+        label: def.label,
+        value,
+        format: def.format,
+        trend,
+        benchmark: resolved.benchmark,
+        targetText: resolved.targetText,
+        provenance: resolved.provenance,
+        explainer: def.explainer,
+      };
+    };
+
     return [
-      {
-        label: 'Gross Margin %',
-        value: latestAgg?.grossMarginPct ?? null,
-        format: 'percent',
-        trend: aggs.map((a) => a.grossMarginPct),
-        benchmark: GROSS_MARGIN_BENCHMARK,
-      },
-      {
-        label: 'Net Margin %',
-        value: latestAgg?.netMarginPct ?? null,
-        format: 'percent',
-        trend: aggs.map((a) => a.netMarginPct),
-        benchmark: NET_MARGIN_BENCHMARK,
-      },
-      {
-        label: 'Current Ratio',
-        value: latestBS?.currentRatio ?? null,
-        format: 'ratio',
-        trend: bsSlice.map((b) => b.currentRatio ?? 0).filter((v, i, a) => a.length > 0 ? true : false),
-        benchmark: CURRENT_RATIO_BENCHMARK,
-      },
-      {
-        label: 'Debt / Equity',
-        value: latestBS?.debtToEquity ?? null,
-        format: 'ratio',
-        trend: bsSlice.map((b) => b.debtToEquity ?? 0),
-        benchmark: DEBT_EQUITY_BENCHMARK,
-      },
-      {
-        label: 'Contribution Margin %',
-        value: latestAgg?.contributionMarginPct ?? null,
-        format: 'percent',
-        trend: aggs.map((a) => a.contributionMarginPct),
-        benchmark: CONTRIBUTION_MARGIN_BENCHMARK,
-      },
-      {
-        label: "Altman Z'' Score",
-        value: latestHealth?.altmanZScore ?? null,
-        format: 'number',
-        trend: healthSlice.map((h) => h.altmanZScore ?? 0),
-        benchmark: ZSCORE_BENCHMARK,
-      },
+      card('gross_margin', latestAgg?.grossMarginPct ?? null, aggs.map((a) => a.grossMarginPct)),
+      card('net_margin', latestAgg?.netMarginPct ?? null, aggs.map((a) => a.netMarginPct)),
+      card('current_ratio', latestBS?.currentRatio ?? null, bsSlice.map((b) => b.currentRatio ?? 0)),
+      card('debt_to_equity', latestBS?.debtToEquity ?? null, bsSlice.map((b) => b.debtToEquity ?? 0)),
+      card('contribution_margin', latestAgg?.contributionMarginPct ?? null, aggs.map((a) => a.contributionMarginPct)),
+      card('altman_z', latestHealth?.altmanZScore ?? null, healthSlice.map((h) => h.altmanZScore ?? 0)),
     ];
-  }, [periodAggs, bsSeries, healthSeries]);
+  }, [periodAggs, bsSeries, healthSeries, workspace?.targets]);
 
   // ── Scenario comparison data ─────────────────────────────────────────────
   const scenarioChartData = useMemo(() => {
@@ -923,6 +919,9 @@ function OverviewTab({
           </span>
         )}
       </div>
+
+      {/* Section 1.5: Executive summary — the plain-English read first */}
+      {hasData && <ExecutiveSummary workspace={workspace} />}
 
       {/* Section 2: KPI Cards */}
       {!hasData ? (
@@ -1376,9 +1375,10 @@ function OperationalTabContent({ clientId }: { clientId: string }) {
       workspace.operationalData,
       financialSummary,
       selectedPeriod,
-      workspace.operationalInputs
+      workspace.operationalInputs,
+      workspace.targets?.metrics
     );
-  }, [profile?.id, workspace?.operationalData, workspace?.operationalInputs, financialSummary, selectedPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [profile?.id, workspace?.operationalData, workspace?.operationalInputs, workspace?.targets, financialSummary, selectedPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const metricsWithData = metricResults.filter((r) => r.value !== null).length;
 
@@ -1460,6 +1460,7 @@ export default function WorkspacePage({ params }: PageProps) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
   const batchUpdateAccountsOuter = useWorkspaceStore((s) => s.batchUpdateAccounts);
   const setValuesOuter = useWorkspaceStore((s) => s.setValues);
+  const updateWorkspaceOuter = useWorkspaceStore((s) => s.updateWorkspace);
   const cloudMode = useWorkspaceStore((s) => s.cloudMode);
   const cloudHydrated = useWorkspaceStore((s) => s.cloudHydrated);
   const firm = useFirmContext();
@@ -1467,6 +1468,7 @@ export default function WorkspacePage({ params }: PageProps) {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [hydrated, setHydrated] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showTargets, setShowTargets] = useState(false);
   const [headerToast, setHeaderToast] = useState<string | null>(null);
   // Shared period granularity across Overview + Reports so switching tabs
   // doesn't silently reset the period a user is reviewing.
@@ -1586,6 +1588,21 @@ export default function WorkspacePage({ params }: PageProps) {
             </span>
             <button
               type="button"
+              data-testid="targets-btn"
+              disabled={readOnly}
+              onClick={() => setShowTargets(true)}
+              className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--foreground))' }}
+              title={
+                readOnly
+                  ? 'Read-only while billing is resolved'
+                  : "Set this client's corporate or custom KPI targets — they override FinSight's default benchmarks everywhere."
+              }
+            >
+              ⌖ Targets
+            </button>
+            <button
+              type="button"
               data-testid="export-pdf-btn"
               onClick={() => {
                 // Opens a new tab on the dedicated print route; that page
@@ -1639,6 +1656,17 @@ export default function WorkspacePage({ params }: PageProps) {
           />
         </div>
       )}
+
+      {/* Targets editor */}
+      <TargetsEditor
+        workspace={workspace}
+        open={showTargets}
+        onOpenChange={setShowTargets}
+        onSave={(targets) => {
+          updateWorkspaceOuter(clientId, { targets });
+          showHeaderToast('Client targets saved');
+        }}
+      />
 
       {/* Clear Data confirmation */}
       <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>

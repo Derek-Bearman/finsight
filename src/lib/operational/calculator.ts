@@ -3,9 +3,11 @@ import type {
   OperationalDataPoint,
   OperationalInputPool,
   FinancialSummary,
+  KpiTarget,
   Period,
   MetricFormat,
 } from '@/types';
+import { targetToBenchmark, formatTargetThreshold, type TargetProvenance } from '@/lib/targets';
 
 // ─────────────────────────────────────────────
 // Types
@@ -20,6 +22,10 @@ export interface MetricResult {
   benchmarkColor: string;
   formula: string;
   category?: string;
+  /** Where the active benchmark comes from (client target vs FinSight default). */
+  provenance: TargetProvenance;
+  /** "Target ≤ 30.0%" when a client target is set for this metric. */
+  targetText: string | null;
 }
 
 // ─────────────────────────────────────────────
@@ -126,7 +132,8 @@ export function computeMetricsForPeriod(
   operationalData: OperationalDataPoint[],
   financialSummary: FinancialSummary,
   period: Period,
-  inputPools?: OperationalInputPool[]
+  inputPools?: OperationalInputPool[],
+  metricTargets?: Record<string, KpiTarget>
 ): MetricResult[] {
   const pool = findInputPool(inputPools, period);
 
@@ -160,7 +167,17 @@ export function computeMetricsForPeriod(
       }
     }
 
-    const { status, color } = getBenchmarkStatus(value, def.benchmark);
+    // Client target (corporate/custom) overrides the profile's default
+    // benchmark; provenance is carried so the card can label it.
+    const target = metricTargets?.[def.id];
+    const activeBenchmark = target ? targetToBenchmark(target) : def.benchmark;
+    const provenance: TargetProvenance = target
+      ? target.source
+      : def.benchmark
+        ? 'default'
+        : 'none';
+
+    const { status, color } = getBenchmarkStatus(value, activeBenchmark);
 
     return {
       metricId: def.id,
@@ -171,6 +188,8 @@ export function computeMetricsForPeriod(
       benchmarkColor: color,
       formula: def.formula,
       category: def.category,
+      provenance,
+      targetText: target ? `Target ${formatTargetThreshold(target, def.format)}` : null,
     };
   });
 }

@@ -16,6 +16,13 @@ export interface RatioSparklineProps {
   trend: number[];        // last N values for the sparkline (oldest first)
   benchmark?: BenchmarkRange;
   periodLabels?: string[];
+  /** "Target ≥ 30.0%" when a client target overrides the default benchmark. */
+  targetText?: string | null;
+  /** Where the active benchmark comes from — always shown so a corporate
+   *  mandate is never confused with a loose FinSight default. */
+  provenance?: 'corporate' | 'custom' | 'default' | 'none';
+  /** Plain-English "what this means" — surfaces as a hover tooltip. */
+  explainer?: string;
 }
 
 export interface RatioDashboardProps {
@@ -79,7 +86,13 @@ function computeChange(trend: number[], format: MetricFormat): { text: string; p
 // Single Ratio Card
 // ─────────────────────────────────────────────
 
-function RatioCard({ label, value, format, trend, benchmark }: RatioSparklineProps) {
+const PROVENANCE_TEXT: Record<string, string> = {
+  corporate: 'Corporate target',
+  custom: 'Custom target',
+  default: 'FinSight default benchmark',
+};
+
+function RatioCard({ label, value, format, trend, benchmark, targetText, provenance, explainer }: RatioSparklineProps) {
   const valueColor =
     value !== null && benchmark
       ? getBenchmarkColor(value, benchmark)
@@ -94,13 +107,16 @@ function RatioCard({ label, value, format, trend, benchmark }: RatioSparklinePro
       ? getBenchmarkColor(value, benchmark)
       : 'hsl(217 91% 55%)';
 
+  const isClientTarget = provenance === 'corporate' || provenance === 'custom';
+
   return (
     <div
       className="rounded-xl border p-4 flex flex-col gap-2"
       style={{
-        borderColor: 'hsl(var(--border))',
+        borderColor: isClientTarget ? 'hsl(217 91% 55% / 0.45)' : 'hsl(var(--border))',
         background: 'hsl(var(--card))',
       }}
+      title={explainer}
     >
       {/* Label */}
       <p
@@ -144,6 +160,21 @@ function RatioCard({ label, value, format, trend, benchmark }: RatioSparklinePro
       {/* Null fallback */}
       {trendData.length < 2 && (
         <div style={{ height: 40 }} />
+      )}
+
+      {/* Target / benchmark provenance */}
+      {provenance && provenance !== 'none' && (
+        <p className="text-xs leading-snug" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          {targetText ? (
+            <>
+              <span className="font-medium" style={{ color: 'hsl(var(--foreground))' }}>
+                {targetText}
+              </span>
+              {' · '}
+            </>
+          ) : null}
+          {PROVENANCE_TEXT[provenance]}
+        </p>
       )}
     </div>
   );

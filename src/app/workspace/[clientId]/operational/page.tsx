@@ -73,12 +73,14 @@ function OperationalContent({ clientId, workspace }: OperationalContentProps) {
       workspace.operationalData,
       financialSummary,
       selectedPeriod,
-      workspace.operationalInputs
+      workspace.operationalInputs,
+      workspace.targets?.metrics
     );
   }, [
     profile.operationalMetrics,
     workspace.operationalData,
     workspace.operationalInputs,
+    workspace.targets,
     financialSummary,
     selectedPeriod,
   ]);
