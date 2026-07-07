@@ -20,7 +20,8 @@ import {
 export interface RevenueBreakevenChartDataPoint {
   label: string;
   revenue: number;
-  breakeven: number;
+  /** null = breakeven not reachable this bucket (contribution margin ≤ 0). */
+  breakeven: number | null;
   netIncome: number;
 }
 
@@ -47,7 +48,7 @@ function abbr(v: number): string {
 interface ChartPoint {
   label: string;
   revenue: number;
-  breakeven: number;
+  breakeven: number | null;
   netIncome: number;
   /** Green zone: how far revenue is ABOVE breakeven */
   profitZone: number;
@@ -59,6 +60,10 @@ interface ChartPoint {
 
 function buildChartData(data: RevenueBreakevenChartDataPoint[]): ChartPoint[] {
   return data.map((d) => {
+    if (d.breakeven === null) {
+      // Breakeven unreachable: no line point, no zones — the tooltip explains.
+      return { ...d, profitZone: 0, lossBase: d.revenue, lossZone: 0 };
+    }
     const diff = d.revenue - d.breakeven;
     if (diff >= 0) {
       return {
@@ -111,7 +116,7 @@ function CustomTooltip({ active, payload, label }: TooltipProps) {
         </p>
         <p>
           <span style={{ color: 'hsl(38 92% 50%)' }}>● </span>
-          Breakeven: {abbr(d.breakeven)}
+          Breakeven: {d.breakeven === null ? 'not reachable (CM ≤ 0)' : abbr(d.breakeven)}
         </p>
         <p>
           <span

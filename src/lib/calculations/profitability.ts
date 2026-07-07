@@ -1,5 +1,5 @@
 import type { Account, AccountValue, Period, ProfitabilityRatios } from '@/types';
-import { aggregateValues, type Granularity } from './period-aggregation';
+import { aggregateValuesStockAware, type Granularity } from './period-aggregation';
 import { computePnL } from './pnl';
 
 // ─────────────────────────────────────────────
@@ -119,7 +119,8 @@ export function computeProfitabilitySeries(
   values: AccountValue[],
   granularity: Granularity
 ): ProfitabilityRatios[] {
-  const aggregated = aggregateValues(values, granularity);
+  // Stock-aware: BS balances snapshot at bucket end instead of summing months.
+  const aggregated = aggregateValuesStockAware(accounts, values, granularity);
   if (aggregated.length === 0) return [];
 
   const seen = new Map<string, Period>();

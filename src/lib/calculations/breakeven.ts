@@ -143,16 +143,24 @@ export function computeBreakeven(
 
   // breakeven revenue = fixed costs / CM%
   let breakevenRevenue: number;
-  if (contributionMarginPct <= 0) {
-    // Can't break even if CM% ≤ 0
-    breakevenRevenue = Infinity;
-  } else {
+  if (contributionMarginPct > 0) {
     breakevenRevenue = fixedCosts / contributionMarginPct;
+  } else if (revenue === 0 && fixedCosts === 0) {
+    // Empty period (e.g. a balance-sheet-only month): nothing to cover.
+    breakevenRevenue = 0;
+  } else {
+    // CM% ≤ 0 with real activity — breakeven is structurally unreachable at
+    // this cost structure. Keep the state explicit as Infinity: sanitizing it
+    // to 0 made loss-making stress scenarios read as "above breakeven" with a
+    // 100% margin of safety. Infinity keeps every `revenue >= breakeven`
+    // check correctly false, and the shared formatters render it as '—'.
+    breakevenRevenue = Infinity;
   }
 
-  // margin of safety
+  // margin of safety (−Infinity when breakeven is unreachable)
   const marginOfSafety = revenue - breakevenRevenue;
-  const marginOfSafetyPct = revenue === 0 ? 0 : marginOfSafety / revenue;
+  const marginOfSafetyPct =
+    revenue === 0 ? (marginOfSafety < 0 ? -Infinity : 0) : marginOfSafety / revenue;
 
   // operating leverage = contribution margin / operating income
   let operatingLeverage: number | null = null;
@@ -164,15 +172,15 @@ export function computeBreakeven(
     period: resultPeriod,
     fixedCosts,
     contributionMarginPct,
-    breakevenRevenue: isFinite(breakevenRevenue) ? breakevenRevenue : 0,
+    breakevenRevenue,
     actualRevenue: revenue,
-    marginOfSafety: isFinite(marginOfSafety) ? marginOfSafety : 0,
-    marginOfSafetyPct: isFinite(marginOfSafetyPct) ? marginOfSafetyPct : 0,
+    marginOfSafety,
+    marginOfSafetyPct,
     operatingLeverage,
   };
 
   if (avgTicket !== undefined && avgTicket > 0) {
-    result.breakevenUnits = isFinite(breakevenRevenue) ? breakevenRevenue / avgTicket : 0;
+    result.breakevenUnits = breakevenRevenue / avgTicket;
   }
 
   return result;
@@ -296,7 +304,28 @@ export function runTests(): void {
     ];
     const result = computeBreakeven(accounts, values, { year: 2024, month: 1 });
     console.assert(result.contributionMarginPct === 0, 'CM% should be 0');
-    console.assert(result.breakevenRevenue === 0, 'breakeven should default to 0 when CM%=0');
+    console.assert(
+      result.breakevenRevenue === Infinity,
+      `breakeven should be unreachable (Infinity) when CM%=0 with fixed costs, got ${result.breakevenRevenue}`
+    );
+    console.assert(
+      !(result.actualRevenue >= result.breakevenRevenue),
+      'CM%=0 with fixed costs must never read as above breakeven'
+    );
+    console.assert(result.marginOfSafety === -Infinity, 'margin of safety should be -Infinity when breakeven is unreachable');
+    console.assert(result.marginOfSafetyPct === -Infinity, 'margin of safety % should be -Infinity when breakeven is unreachable');
+  }
+
+  // ── Empty period (no activity) keeps breakeven at 0, not Infinity ──
+  {
+    const accounts = [
+      mkAccount('r1', 'Revenue', 'revenue'),
+      mkAccount('e1', 'Rent', 'expense', 'fixed'),
+    ];
+    // A balance-sheet-only month has no P&L values at all.
+    const result = computeBreakeven(accounts, [], { year: 2024, month: 1 });
+    console.assert(result.breakevenRevenue === 0, `empty period breakeven should be 0, got ${result.breakevenRevenue}`);
+    console.assert(result.marginOfSafety === 0, 'empty period margin of safety should be 0');
   }
 
   // ── Mixed costs split ──

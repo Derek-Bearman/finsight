@@ -1,5 +1,5 @@
 import type { Account, AccountValue, Period, EfficiencyRatios } from '@/types';
-import { aggregateValues, type Granularity } from './period-aggregation';
+import { aggregateValues, getUniquePeriods, type Granularity } from './period-aggregation';
 import { computePnL } from './pnl';
 
 // ─────────────────────────────────────────────
@@ -130,10 +130,14 @@ export function computeEfficiencyRatios(
   accounts: Account[],
   values: AccountValue[],
   period: Period,
-  priorPeriod?: Period
+  priorPeriod?: Period,
+  granularity?: Granularity
 ): EfficiencyRatios {
-  // Determine days in period
-  const gran = inferGranularity(period, priorPeriod);
+  // Days in period: use the caller-supplied granularity when given — a series
+  // knows its own bucket size, and inferring from prior-period spacing would
+  // hardcode 30 days for the FIRST bucket of a quarterly/annual series.
+  // Inference remains the fallback for direct single-period callers.
+  const gran = granularity ?? inferGranularity(period, priorPeriod);
   const days = daysInPeriod(gran);
 
   // P&L for the period (flow)
@@ -205,31 +209,69 @@ export function computeEfficiencyRatios(
 // computeEfficiencySeries
 // ─────────────────────────────────────────────
 
+/**
+ * Map a monthly period to its bucket period, matching aggregateValues:
+ * quarterly → first month of the quarter, annual → month 1, ttm → the most
+ * recent period, monthly → itself.
+ */
+function bucketPeriodFor(p: Period, granularity: Granularity, mostRecent: Period): Period {
+  switch (granularity) {
+    case 'monthly': return p;
+    case 'quarterly': return { year: p.year, month: (Math.ceil(p.month / 3) - 1) * 3 + 1 };
+    case 'annual': return { year: p.year, month: 1 };
+    case 'ttm': return mostRecent;
+  }
+}
+
 export function computeEfficiencySeries(
   accounts: Account[],
   values: AccountValue[],
   granularity: Granularity
 ): EfficiencyRatios[] {
-  const aggregated = aggregateValues(values, granularity);
-  if (aggregated.length === 0) return [];
+  if (values.length === 0) return [];
 
-  const seen = new Map<string, Period>();
-  for (const v of aggregated) {
-    const k = periodToKey(v.period);
-    if (!seen.has(k)) seen.set(k, v.period);
+  // Flows (P&L accounts) sum across a bucket; balance-sheet balances are
+  // point-in-time snapshots (stocks) — summing them across a quarter/year
+  // would overstate every balance by up to 12x. Stocks instead use the
+  // bucket's ENDING balance: the last month in the bucket with BS data.
+  const stockTypes = new Set<Account['type']>(['asset', 'liability', 'equity']);
+  const stockAccountIds = new Set(accounts.filter(a => stockTypes.has(a.type)).map(a => a.id));
+  const flowValues = values.filter(v => !stockAccountIds.has(v.accountId));
+  const stockValues = values.filter(v => stockAccountIds.has(v.accountId));
+  const aggregatedFlows = aggregateValues(flowValues, granularity);
+  const stockMonthKeys = new Set(stockValues.map(v => periodToKey(v.period)));
+
+  // Buckets derive from ALL monthly periods so the series keeps the same
+  // period set (and count) as the flow-based series rendered alongside it.
+  const months = getUniquePeriods(values);
+  const mostRecent = months[months.length - 1]!;
+  const buckets = new Map<string, { period: Period; months: Period[] }>();
+  for (const m of months) {
+    const bucketPeriod = bucketPeriodFor(m, granularity, mostRecent);
+    const k = periodToKey(bucketPeriod);
+    if (!buckets.has(k)) buckets.set(k, { period: bucketPeriod, months: [] });
+    buckets.get(k)!.months.push(m);
   }
-  const periods = Array.from(seen.values()).sort(comparePeriods);
+  const bucketArr = Array.from(buckets.values()).sort((a, b) => comparePeriods(a.period, b.period));
 
-  return periods.map((period, idx) => {
-    const priorPeriod = idx > 0 ? periods[idx - 1] : undefined;
-    const periodVals = aggregated.filter(v => periodsEqual(v.period, period));
-    const priorVals = priorPeriod
-      ? aggregated.filter(v => periodsEqual(v.period, priorPeriod))
-      : [];
+  // Ending stock snapshot for a bucket, relabeled to the bucket period.
+  function stockSnapshot(bucket: { period: Period; months: Period[] }): AccountValue[] {
+    const withStock = bucket.months.filter(m => stockMonthKeys.has(periodToKey(m)));
+    if (withStock.length === 0) return [];
+    const snapshotMonth = withStock[withStock.length - 1]!;
+    return stockValues
+      .filter(v => periodsEqual(v.period, snapshotMonth))
+      .map(v => ({ ...v, period: bucket.period }));
+  }
 
-    // Combine into a joint values array for both periods (for snapshot lookups)
-    const jointVals = [...periodVals, ...priorVals];
-    return computeEfficiencyRatios(accounts, jointVals, period, priorPeriod);
+  return bucketArr.map((bucket, idx) => {
+    const priorBucket = idx > 0 ? bucketArr[idx - 1] : undefined;
+    const periodFlows = aggregatedFlows.filter(v => periodsEqual(v.period, bucket.period));
+    const priorStocks = priorBucket ? stockSnapshot(priorBucket) : [];
+
+    // Joint values array for both periods (for snapshot lookups)
+    const jointVals = [...periodFlows, ...stockSnapshot(bucket), ...priorStocks];
+    return computeEfficiencyRatios(accounts, jointVals, bucket.period, priorBucket?.period, granularity);
   });
 }
 

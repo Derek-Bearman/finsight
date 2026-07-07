@@ -1,4 +1,4 @@
-import type { AccountValue, Period } from '@/types';
+import type { Account, AccountValue, Period } from '@/types';
 
 // ─────────────────────────────────────────────
 // Types
@@ -128,6 +128,59 @@ export function aggregateValues(
     result.push({ accountId, period, amount });
   }
 
+  result.sort((a, b) => comparePeriods(a.period, b.period));
+  return result;
+}
+
+/**
+ * Like aggregateValues, but treats balance-sheet accounts (asset/liability/
+ * equity) as point-in-time stocks: each quarterly/annual/ttm bucket reports
+ * the ENDING balance (last month in the bucket with BS data, relabeled to the
+ * bucket period) instead of summing months — summing overstates balances by
+ * up to 12x. P&L flows aggregate exactly as aggregateValues does.
+ */
+export function aggregateValuesStockAware(
+  accounts: Account[],
+  values: AccountValue[],
+  granularity: Granularity
+): AccountValue[] {
+  if (values.length === 0) return [];
+  if (granularity === 'monthly') return values.slice();
+
+  const stockTypes = new Set<Account['type']>(['asset', 'liability', 'equity']);
+  const stockIds = new Set(accounts.filter(a => stockTypes.has(a.type)).map(a => a.id));
+  const flows = values.filter(v => !stockIds.has(v.accountId));
+  const stocks = values.filter(v => stockIds.has(v.accountId));
+  const aggregatedFlows = aggregateValues(flows, granularity);
+  if (stocks.length === 0) return aggregatedFlows;
+
+  const sortedAll = values.slice().sort((a, b) => comparePeriods(a.period, b.period));
+  const mostRecent = sortedAll[sortedAll.length - 1]!.period;
+  const bucketPeriodFor = (p: Period): Period => {
+    if (granularity === 'quarterly') return { year: p.year, month: quarterStartMonth(p.month) };
+    if (granularity === 'annual') return { year: p.year, month: 1 };
+    return mostRecent; // ttm
+  };
+
+  // Per bucket, find the last month with stock data; emit that month's stock
+  // rows relabeled to the bucket period.
+  const endingMonthByBucket = new Map<string, Period>();
+  for (const v of stocks) {
+    if (granularity === 'ttm' && comparePeriods(v.period, mostRecent) > 0) continue;
+    const bk = periodToKey(bucketPeriodFor(v.period));
+    const cur = endingMonthByBucket.get(bk);
+    if (!cur || comparePeriods(v.period, cur) > 0) endingMonthByBucket.set(bk, v.period);
+  }
+  const snapshots: AccountValue[] = [];
+  for (const [bk, endingMonth] of endingMonthByBucket) {
+    const bucketPeriod = bucketPeriodFor(endingMonth);
+    if (periodToKey(bucketPeriod) !== bk) continue; // defensive; keys always match
+    for (const v of stocks) {
+      if (periodsEqual(v.period, endingMonth)) snapshots.push({ ...v, period: bucketPeriod });
+    }
+  }
+
+  const result = [...aggregatedFlows, ...snapshots];
   result.sort((a, b) => comparePeriods(a.period, b.period));
   return result;
 }

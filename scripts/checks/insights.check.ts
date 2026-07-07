@@ -182,6 +182,49 @@ function mkWorkspace(over: Partial<ClientWorkspace>): ClientWorkspace {
   check(/lost/.test(all), `loss month should read 'lost': ${all}`);
 }
 
+// ── Summary: trailing balance-sheet-only month must not read as $0 revenue ──
+// P&L closed through May; the balance-sheet export runs one month ahead
+// (June) — a routine QBO as-of offset. The narrative must anchor on May,
+// while the cash snapshot may use the fresher June balance.
+{
+  const accounts = [
+    acc('r1', 'Sales', 'revenue'),
+    acc('e1', 'Payroll', 'expense', { costBehavior: 'fixed' }),
+    acc('cash', 'Business Checking', 'asset', { number: '1010' }),
+    acc('ap', 'Accounts Payable', 'liability', { number: '2100' }),
+  ];
+  const values: AccountValue[] = [];
+  for (let m = 1; m <= 5; m++) {
+    values.push(val('r1', m, 30000));
+    values.push(val('e1', m, 20000));
+  }
+  for (let m = 1; m <= 6; m++) {
+    values.push(val('cash', m, 80000));
+    values.push(val('ap', m, 10000));
+  }
+  const lines = buildExecutiveSummary(mkWorkspace({ accounts, values }));
+  const all = lines.map((l) => l.text).join(' | ');
+  check(/May 2026/.test(all), `summary should anchor on May, the last P&L month: ${all}`);
+  check(!/June 2026/.test(all), `summary must not narrate the BS-only June as a P&L month: ${all}`);
+  check(!/declined/.test(all), `flat revenue must not read as a decline: ${all}`);
+  check(/earned \$10,000 in May 2026/.test(all), `bottom line should be May's $10,000: ${all}`);
+  check(
+    /covers 4\.0 months/.test(all),
+    `cash runway must average costs over P&L months only (80k / 20k = 4.0): ${all}`
+  );
+}
+
+// ── Summary: balance-sheet-only workspace skips the P&L narrative ───────────
+{
+  const accounts = [acc('cash', 'Cash', 'asset', { number: '1010' })];
+  const values = [val('cash', 1, 50000), val('cash', 2, 50000)];
+  const lines = buildExecutiveSummary(mkWorkspace({ accounts, values }));
+  check(
+    lines.length === 0,
+    `BS-only workspace should produce no P&L narrative, got: ${lines.map((l) => l.text).join(' | ')}`
+  );
+}
+
 if (failures > 0) {
   console.error(`\n${failures} insights check(s) FAILED`);
   process.exit(1);

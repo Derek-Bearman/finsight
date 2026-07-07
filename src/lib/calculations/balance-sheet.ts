@@ -1,5 +1,5 @@
 import type { Account, AccountValue, Period, BalanceSheetRatios } from '@/types';
-import { aggregateValues, type Granularity } from './period-aggregation';
+import { getUniquePeriods, type Granularity } from './period-aggregation';
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -149,29 +149,63 @@ export function computeBalanceSheetRatios(
 // computeBalanceSheetSeries
 // ─────────────────────────────────────────────
 
+/**
+ * Map a monthly period to its bucket period, matching aggregateValues:
+ * quarterly → first month of the quarter, annual → month 1, ttm → the most
+ * recent period, monthly → itself.
+ */
+function bucketPeriodFor(p: Period, granularity: Granularity, mostRecent: Period): Period {
+  switch (granularity) {
+    case 'monthly': return p;
+    case 'quarterly': return { year: p.year, month: (Math.ceil(p.month / 3) - 1) * 3 + 1 };
+    case 'annual': return { year: p.year, month: 1 };
+    case 'ttm': return mostRecent;
+  }
+}
+
 export function computeBalanceSheetSeries(
   accounts: Account[],
   values: AccountValue[],
   granularity: Granularity
 ): BalanceSheetRatios[] {
-  // For balance sheet, aggregate to get the "last period" snapshot for each bucket
-  // We take the most recent monthly period within each bucket for the snapshot
-  const aggregated = aggregateValues(values, granularity);
-  if (aggregated.length === 0) return [];
+  if (values.length === 0) return [];
 
-  // Unique periods in aggregated
-  const seen = new Map<string, Period>();
-  for (const v of aggregated) {
-    const k = periodToKey(v.period);
-    if (!seen.has(k)) seen.set(k, v.period);
+  // Balance sheet balances are point-in-time snapshots (stocks), not flows —
+  // summing a bucket's monthly balances would overstate them by up to 12x.
+  // Each quarterly/annual bucket instead reports its ENDING balance: the last
+  // month in the bucket that has balance-sheet data (the same rule the
+  // Statements view uses for balance-sheet columns).
+  const stockTypes = new Set<Account['type']>(['asset', 'liability', 'equity']);
+  const stockAccountIds = new Set(accounts.filter(a => stockTypes.has(a.type)).map(a => a.id));
+  const stockMonthKeys = new Set(
+    values.filter(v => stockAccountIds.has(v.accountId)).map(v => periodToKey(v.period))
+  );
+
+  // Buckets derive from ALL monthly periods so the series keeps the same
+  // period set (and count) as the flow-based series rendered alongside it.
+  const months = getUniquePeriods(values);
+  const mostRecent = months[months.length - 1]!;
+  const buckets = new Map<string, { period: Period; months: Period[] }>();
+  for (const m of months) {
+    const bucketPeriod = bucketPeriodFor(m, granularity, mostRecent);
+    const k = periodToKey(bucketPeriod);
+    if (!buckets.has(k)) buckets.set(k, { period: bucketPeriod, months: [] });
+    buckets.get(k)!.months.push(m);
   }
-  const periods = Array.from(seen.values()).sort(comparePeriods);
 
-  return periods.map(period => {
-    // For balance sheet series, use the aggregated values at the period snapshot
-    const periodVals = aggregated.filter(v => periodsEqual(v.period, period));
-    return computeBalanceSheetRatios(accounts, periodVals, period);
-  });
+  return Array.from(buckets.values())
+    .sort((a, b) => comparePeriods(a.period, b.period))
+    .map(({ period, months: bucketMonths }) => {
+      // Months arrive sorted from getUniquePeriods; take the last one with
+      // balance-sheet data (fall back to the bucket's last month so buckets
+      // without BS data still emit a row of null ratios).
+      const withStock = bucketMonths.filter(m => stockMonthKeys.has(periodToKey(m)));
+      const snapshotMonth = (withStock.length > 0 ? withStock : bucketMonths).slice(-1)[0]!;
+      const snapshotVals = values
+        .filter(v => periodsEqual(v.period, snapshotMonth))
+        .map(v => ({ ...v, period }));
+      return computeBalanceSheetRatios(accounts, snapshotVals, period);
+    });
 }
 
 // ─────────────────────────────────────────────

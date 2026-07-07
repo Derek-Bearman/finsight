@@ -83,7 +83,24 @@ function isCashAccount(a: Account): boolean {
 
 export function buildExecutiveSummary(ws: ClientWorkspace): SummaryLine[] {
   const lines: SummaryLine[] = [];
-  const aggs: PeriodAggregation[] = buildPeriodAggregations(ws.accounts, ws.values, 'monthly');
+  const allAggs: PeriodAggregation[] = buildPeriodAggregations(ws.accounts, ws.values, 'monthly');
+  if (allAggs.length === 0) return lines;
+
+  // Anchor the P&L narrative on months that actually contain P&L data. A
+  // trailing balance-sheet-only month (a BS as-of date one month past the
+  // last closed P&L month is a routine QBO export offset) would otherwise
+  // read as a $0-revenue month and deflate the trailing cost averages.
+  const pnlAccountIds = new Set(
+    ws.accounts
+      .filter((a) => !a.isExcluded && (a.type === 'revenue' || a.type === 'cogs' || a.type === 'expense'))
+      .map((a) => a.id)
+  );
+  const pnlPeriodKeys = new Set(
+    ws.values
+      .filter((v) => pnlAccountIds.has(v.accountId))
+      .map((v) => `${v.period.year}-${v.period.month}`)
+  );
+  const aggs = allAggs.filter((a) => pnlPeriodKeys.has(`${a.period.year}-${a.period.month}`));
   if (aggs.length === 0) return lines;
 
   const latest = aggs[aggs.length - 1]!;
@@ -169,8 +186,24 @@ export function buildExecutiveSummary(ws: ClientWorkspace): SummaryLine[] {
   {
     const cashAccounts = ws.accounts.filter(isCashAccount);
     if (cashAccounts.length > 0) {
+      // Cash is a snapshot — use the freshest month that actually has cash
+      // data (a trailing BS-only month is the right source here), while the
+      // cost average below stays on P&L-bearing months.
+      const cashIds = new Set(cashAccounts.map((a) => a.id));
+      let cashPeriod: Period | null = null;
+      for (const v of ws.values) {
+        if (!cashIds.has(v.accountId)) continue;
+        if (
+          !cashPeriod ||
+          v.period.year > cashPeriod.year ||
+          (v.period.year === cashPeriod.year && v.period.month > cashPeriod.month)
+        ) {
+          cashPeriod = v.period;
+        }
+      }
+      const snapshotPeriod = cashPeriod ?? latest.period;
       const cash = cashAccounts.reduce(
-        (s, a) => s + accountAmount(ws.values, a.id, latest.period),
+        (s, a) => s + accountAmount(ws.values, a.id, snapshotPeriod),
         0
       );
       const recent = aggs.slice(-3);
