@@ -227,7 +227,7 @@ export default function ReportsPage({ params }: PageProps) {
               Import financial data to generate reports.
             </p>
             <Link
-              href="/"
+              href={`/workspace/${clientId}?tab=statements`}
               className="inline-flex items-center gap-1 text-sm font-medium underline underline-offset-2"
               style={{ color: 'hsl(var(--primary))' }}
             >

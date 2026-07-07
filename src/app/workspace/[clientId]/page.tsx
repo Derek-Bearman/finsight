@@ -31,6 +31,7 @@ import {
   applyScenario as _applyScenario,
   computeScenarioImpact,
   buildDefaultScenarios,
+  isOrphanedAdjustment,
   SCENARIO_COLORS,
 } from '@/lib/scenarios';
 import {
@@ -701,10 +702,13 @@ function OverviewTab({
   clientId,
   granularity,
   onGranularityChange,
+  onImportData,
 }: {
   clientId: string;
   granularity: Granularity;
   onGranularityChange: (g: Granularity) => void;
+  /** Opens this workspace's own import surface (the Statements tab) */
+  onImportData: () => void;
 }) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
 
@@ -754,12 +758,17 @@ function OverviewTab({
   // ── Revenue/Breakeven chart data ─────────────────────────────────────────
   const revenueBreakevenData = useMemo(() => {
     if (periodAggs.length === 0 || breakevenSeries.length === 0) return [];
-    return periodAggs.map((agg, i) => ({
-      label: agg.label,
-      revenue: agg.revenue,
-      breakeven: breakevenSeries[i]?.breakevenRevenue ?? 0,
-      netIncome: agg.netIncome,
-    }));
+    return periodAggs.map((agg, i) => {
+      // breakevenRevenue is Infinity when the bucket can't break even (CM ≤ 0);
+      // null keeps recharts from blowing out the Y axis.
+      const be = breakevenSeries[i]?.breakevenRevenue ?? 0;
+      return {
+        label: agg.label,
+        revenue: agg.revenue,
+        breakeven: Number.isFinite(be) ? be : null,
+        netIncome: agg.netIncome,
+      };
+    });
   }, [periodAggs, breakevenSeries]);
 
   // ── Cost structure chart data ────────────────────────────────────────────
@@ -952,15 +961,16 @@ function OverviewTab({
           style={{ borderColor: 'hsl(var(--border))' }}
         >
           <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            No financial data yet — import a P&amp;L or balance sheet to see summary metrics.
+            No financial data yet — import a P&amp;L or balance sheet on the Statements tab to see summary metrics.
           </p>
-          <Link
-            href="/"
+          <button
+            type="button"
+            onClick={onImportData}
             className="inline-flex mt-3 text-sm font-medium underline underline-offset-2"
             style={{ color: 'hsl(var(--primary))' }}
           >
             Import data
-          </Link>
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -1272,6 +1282,16 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
         <p className="text-xs -mt-2" style={{ color: 'hsl(var(--muted-foreground))' }}>
           Drag a slider to model a % change against this client&apos;s actuals. The dollar impact updates below.{isBaselineActive ? ' (Pick a non-baseline scenario to enable.)' : ''}
         </p>
+        {(() => {
+          const orphanCount = activeScenario
+            ? activeScenario.adjustments.filter((a) => isOrphanedAdjustment(a, workspace.accounts)).length
+            : 0;
+          return orphanCount > 0 ? (
+            <p className="text-xs -mt-2" style={{ color: 'hsl(38 80% 40%)' }}>
+              ⚠ {orphanCount} adjustment{orphanCount === 1 ? '' : 's'} reference{orphanCount === 1 ? 's' : ''} accounts from a previous import and {orphanCount === 1 ? 'is' : 'are'} not applied — review them on the full What-If page.
+            </p>
+          ) : null;
+        })()}
         {/* Revenue slider */}
         <div className="flex items-center gap-3">
           <span className="text-sm w-28 flex-shrink-0" style={{ color: 'hsl(var(--foreground))' }}>
@@ -1558,6 +1578,13 @@ export default function WorkspacePage({ params }: PageProps) {
   const firm = useFirmContext();
   const readOnly = firm?.readOnly ?? false;
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+  // Honor deep links like /workspace/<id>?tab=statements from the standalone
+  // reports/operational pages. Set in an effect (not the initializer) so the
+  // hydration pass matches the server-rendered default.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    if (t && TABS.some((x) => x.id === t)) setActiveTab(t as Tab);
+  }, []);
   const [hydrated, setHydrated] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showTargets, setShowTargets] = useState(false);
@@ -1640,7 +1667,7 @@ export default function WorkspacePage({ params }: PageProps) {
         className="border-b px-6 py-4"
         style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
       >
-        <div className="mx-auto max-w-6xl flex items-center justify-between">
+        <div className="mx-auto max-w-6xl flex flex-wrap items-center justify-between gap-y-2">
           <div className="flex items-center gap-3">
             <Link
               href="/"
@@ -1664,7 +1691,7 @@ export default function WorkspacePage({ params }: PageProps) {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <AppNav />
             <HelpButton onOpen={() => tourHook.openTour(0)} />
             {/* Scenarios count — informational badge, intentionally non-button styling */}
@@ -1854,6 +1881,7 @@ export default function WorkspacePage({ params }: PageProps) {
             clientId={clientId}
             granularity={sharedGranularity}
             onGranularityChange={setSharedGranularity}
+            onImportData={() => setActiveTab('statements')}
           />
         )}
         {activeTab === 'statements' && (

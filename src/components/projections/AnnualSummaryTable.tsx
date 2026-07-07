@@ -35,6 +35,7 @@ export function AnnualSummaryTable({ annualSummary }: AnnualSummaryTableProps) {
       className="rounded-xl border overflow-hidden"
       style={{ borderColor: 'hsl(var(--border))' }}
     >
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr
@@ -147,6 +148,7 @@ export function AnnualSummaryTable({ annualSummary }: AnnualSummaryTableProps) {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

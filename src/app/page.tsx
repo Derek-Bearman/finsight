@@ -13,12 +13,13 @@ import { ImportValidationBanner } from '@/components/upload/ImportValidationBann
 import { ManualEntryForm } from '@/components/upload/ManualEntryForm';
 import { Button } from '@/components/ui/button';
 import { ProfileIcon } from '@/components/ui/profile-icon';
-import type { Account, AccountType, AccountValue, ClientWorkspace, Scenario, ImportValidationWarning } from '@/types';
+import type { Account, AccountType, AccountValue, ClientWorkspace, Period, ImportValidationWarning } from '@/types';
 import type { ColumnMapping, ParsedRow } from '@/lib/parsers/csv-parser';
 import type { ClassificationResult } from '@/lib/classifiers';
 import { parseCSV } from '@/lib/parsers/csv-parser';
 import { xlsxToCsvDetailed, isExcelFile, isExcelMimeType } from '@/lib/parsers/xlsx-converter';
 import { classifyAll } from '@/lib/classifiers';
+import { buildDefaultScenarios } from '@/lib/scenarios';
 import { validateImport } from '@/lib/parsers/import-validator';
 import { parseWorkspaceJSON } from '@/lib/utils/workspace-io';
 import { useFirmContext } from '@/components/app/firm-context';
@@ -97,36 +98,6 @@ const EMPTY_UPLOAD: UploadState = {
   warnings: [],
   phase: 'idle',
 };
-
-// ── Default scenarios ────────────────────────────────────────────────────────
-
-function buildDefaultScenarios(): Scenario[] {
-  const now = new Date().toISOString();
-  return [
-    {
-      id: `sc-base-${Date.now()}`,
-      name: 'Base Case',
-      description: 'No adjustments — actuals as imported',
-      adjustments: [],
-      createdAt: now,
-      isBaseline: true,
-    },
-    {
-      id: `sc-best-${Date.now() + 1}`,
-      name: 'Best Case',
-      description: '+15% revenue, −5% costs',
-      adjustments: [],
-      createdAt: now,
-    },
-    {
-      id: `sc-worst-${Date.now() + 2}`,
-      name: 'Worst Case',
-      description: '−20% revenue, +10% costs',
-      adjustments: [],
-      createdAt: now,
-    },
-  ];
-}
 
 // ── Step indicator ───────────────────────────────────────────────────────────
 
@@ -267,6 +238,10 @@ interface UploadStepProps {
   onMappingCancel: () => void;
   onShowManual: () => void;
   showManual: boolean;
+  /** Called when the manual-entry form adds an account — must persist it into this step's upload state */
+  onManualAdd: (account: Account, values: AccountValue[]) => void;
+  /** Called when the user clicks "Done" in the manual-entry form — collapse the panel */
+  onManualDone: () => void;
   /** Called when user clicks "Continue" from the done state */
   onContinue?: () => void;
   /** Called when user clicks "Replace file" from the done state */
@@ -283,6 +258,8 @@ function UploadStep({
   onMappingCancel,
   onShowManual,
   showManual,
+  onManualAdd,
+  onManualDone,
   onContinue,
   onReplace,
 }: UploadStepProps) {
@@ -377,9 +354,9 @@ function UploadStep({
         >
           <ManualEntryForm
             profileId={profileId}
-            existingAccounts={[]}
-            onAdd={() => {}}
-            onDone={() => {}}
+            existingAccounts={state.accounts}
+            onAdd={onManualAdd}
+            onDone={onManualDone}
           />
         </div>
       )}
@@ -745,6 +722,26 @@ export default function HomePage() {
     }
   };
 
+  // ── Manual entry ───────────────────────────────────────────────────────────
+
+  /**
+   * Appends a manually entered account (and its period values) into the given
+   * step's upload state so it flows into the workspace exactly like an upload.
+   * Manual accounts arrive pre-classified (isManuallyClassified: true), so the
+   * classify step passes them through untouched.
+   */
+  const handleManualAdd = (
+    setUpload: React.Dispatch<React.SetStateAction<UploadState>>,
+    account: Account,
+    values: AccountValue[]
+  ) => {
+    setUpload((prev) => ({
+      ...prev,
+      accounts: [...prev.accounts, account],
+      values: [...prev.values, ...values],
+    }));
+  };
+
   // ── Step transitions ───────────────────────────────────────────────────────
 
   const goToStep = (s: Step) => setStep(s);
@@ -789,6 +786,19 @@ export default function HomePage() {
     }
     const wsId = `ws-${Date.now()}`;
     const now = new Date().toISOString();
+    // Seed the canonical default scenarios (real +15%/−20% adjustments) from
+    // the earliest imported period — or the current month for an empty workspace.
+    // Matches how the What-If views seed defaults for scenario-less workspaces.
+    const appliesFrom: Period = (() => {
+      if (mergedValues.length === 0) {
+        const today = new Date();
+        return { year: today.getFullYear(), month: today.getMonth() + 1 };
+      }
+      const sorted = [...mergedValues].sort(
+        (a, b) => a.period.year * 12 + a.period.month - (b.period.year * 12 + b.period.month)
+      );
+      return sorted[0]!.period;
+    })();
     const workspace: ClientWorkspace = {
       id: wsId,
       name: clientName.trim(),
@@ -796,7 +806,7 @@ export default function HomePage() {
       accounts: finalAccounts,
       values: mergedValues,
       fiscalYearStart: 1,
-      scenarios: buildDefaultScenarios(),
+      scenarios: buildDefaultScenarios(appliesFrom),
       operationalData: [],
       customMetrics: [],
       auditLog: [],
@@ -833,7 +843,7 @@ export default function HomePage() {
       )}
       {/* Header */}
       <header
-        className="sticky top-0 z-10 border-b px-6 py-3 flex items-center justify-between"
+        className="sticky top-0 z-10 border-b px-6 py-3 flex flex-wrap items-center justify-between gap-y-2"
         style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--background))' }}
       >
         <div className="flex items-center gap-2">
@@ -847,7 +857,7 @@ export default function HomePage() {
             Beta
           </span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <AppNav />
           {/* Privacy mode toggle — wipes localStorage and stops new writes. */}
           <button
@@ -1123,6 +1133,8 @@ export default function HomePage() {
               onMappingCancel={() => setPnlUpload(EMPTY_UPLOAD)}
               onShowManual={() => setShowPnlManual((v) => !v)}
               showManual={showPnlManual}
+              onManualAdd={(account, values) => handleManualAdd(setPnlUpload, account, values)}
+              onManualDone={() => setShowPnlManual(false)}
               onContinue={handlePnlNext}
               onReplace={() => setPnlUpload(EMPTY_UPLOAD)}
             />
@@ -1166,6 +1178,8 @@ export default function HomePage() {
               onMappingCancel={() => setBsUpload(EMPTY_UPLOAD)}
               onShowManual={() => setShowBsManual((v) => !v)}
               showManual={showBsManual}
+              onManualAdd={(account, values) => handleManualAdd(setBsUpload, account, values)}
+              onManualDone={() => setShowBsManual(false)}
               onContinue={handleBsNext}
               onReplace={() => setBsUpload(EMPTY_UPLOAD)}
             />

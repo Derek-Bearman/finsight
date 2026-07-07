@@ -106,33 +106,35 @@ export function ForecastSummary({
           <div className="px-4 py-2 text-xs font-semibold uppercase tracking-wide" style={{ color: 'hsl(var(--muted-foreground))', borderBottom: '1px solid hsl(var(--border))' }}>
             Key Accounts — Next 12 Months (Projected vs Trailing Actual)
           </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs uppercase tracking-wide" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                <th className="text-left px-4 py-1.5 font-medium">Account</th>
-                <th className="text-right px-4 py-1.5 font-medium">Trailing 12</th>
-                <th className="text-right px-4 py-1.5 font-medium">Projected 12</th>
-                <th className="text-right px-4 py-1.5 font-medium">Change</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accountRows.map((r) => (
-                <tr key={r.account.id} style={{ borderTop: '1px solid hsl(var(--border))' }}>
-                  <td className="px-4 py-1.5" style={{ color: 'hsl(var(--foreground))' }}>
-                    {r.account.name}
-                    <span className="ml-1.5 text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                      {r.account.type === 'revenue' ? 'revenue' : r.account.type === 'cogs' ? 'COGS' : 'expense'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-1.5 text-right tabular-nums" style={{ color: 'hsl(var(--muted-foreground))' }}>{formatCurrency(r.actual12)}</td>
-                  <td className="px-4 py-1.5 text-right tabular-nums font-semibold" style={{ color: 'hsl(var(--foreground))' }}>{formatCurrency(r.proj12)}</td>
-                  <td className="px-4 py-1.5 text-right tabular-nums" style={{ color: r.delta >= 0 ? 'hsl(142 71% 40%)' : 'hsl(0 72% 45%)' }}>
-                    {r.delta >= 0 ? '+' : ''}{abbrev(r.delta)}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs uppercase tracking-wide" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                  <th className="text-left px-4 py-1.5 font-medium">Account</th>
+                  <th className="text-right px-4 py-1.5 font-medium">Trailing 12</th>
+                  <th className="text-right px-4 py-1.5 font-medium">Projected 12</th>
+                  <th className="text-right px-4 py-1.5 font-medium">Change</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {accountRows.map((r) => (
+                  <tr key={r.account.id} style={{ borderTop: '1px solid hsl(var(--border))' }}>
+                    <td className="px-4 py-1.5" style={{ color: 'hsl(var(--foreground))' }}>
+                      {r.account.name}
+                      <span className="ml-1.5 text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                        {r.account.type === 'revenue' ? 'revenue' : r.account.type === 'cogs' ? 'COGS' : 'expense'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-1.5 text-right tabular-nums" style={{ color: 'hsl(var(--muted-foreground))' }}>{formatCurrency(r.actual12)}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums font-semibold" style={{ color: 'hsl(var(--foreground))' }}>{formatCurrency(r.proj12)}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums" style={{ color: r.delta >= 0 ? 'hsl(142 71% 40%)' : 'hsl(0 72% 45%)' }}>
+                      {r.delta >= 0 ? '+' : ''}{abbrev(r.delta)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

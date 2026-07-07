@@ -26,13 +26,13 @@ const SEVERITY_CONFIG: Record<
   }
 > = {
   error: {
-    bg: 'bg-white dark:bg-neutral-900',
-    border: 'border-red-600 dark:border-red-500',
-    headerBg: 'bg-red-600 dark:bg-red-500',
+    bg: 'bg-white',
+    border: 'border-red-600',
+    headerBg: 'bg-red-600',
     headerText: 'text-white',
     iconColor: 'text-white',
-    titleColor: 'text-neutral-900 dark:text-neutral-100',
-    textColor: 'text-neutral-800 dark:text-neutral-200',
+    titleColor: 'text-neutral-900',
+    textColor: 'text-neutral-800',
     icon: (
       <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
@@ -40,13 +40,13 @@ const SEVERITY_CONFIG: Record<
     ),
   },
   warning: {
-    bg: 'bg-white dark:bg-neutral-900',
+    bg: 'bg-white',
     border: 'border-amber-500',
     headerBg: 'bg-amber-500',
     headerText: 'text-white',
     iconColor: 'text-white',
-    titleColor: 'text-neutral-900 dark:text-neutral-100',
-    textColor: 'text-neutral-800 dark:text-neutral-200',
+    titleColor: 'text-neutral-900',
+    textColor: 'text-neutral-800',
     icon: (
       <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
@@ -54,13 +54,13 @@ const SEVERITY_CONFIG: Record<
     ),
   },
   info: {
-    bg: 'bg-white dark:bg-neutral-900',
-    border: 'border-blue-600 dark:border-blue-500',
-    headerBg: 'bg-blue-600 dark:bg-blue-500',
+    bg: 'bg-white',
+    border: 'border-blue-600',
+    headerBg: 'bg-blue-600',
     headerText: 'text-white',
     iconColor: 'text-white',
-    titleColor: 'text-neutral-900 dark:text-neutral-100',
-    textColor: 'text-neutral-800 dark:text-neutral-200',
+    titleColor: 'text-neutral-900',
+    textColor: 'text-neutral-800',
     icon: (
       <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
@@ -173,7 +173,7 @@ export function ImportValidationBanner({ warnings, onDismiss }: ImportValidation
             <div className="flex justify-end pt-1">
               <button
                 onClick={handleDismiss}
-                className="text-xs font-medium underline underline-offset-2 text-neutral-700 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-neutral-100"
+                className="text-xs font-medium underline underline-offset-2 text-neutral-700 hover:text-neutral-900"
                 data-testid="banner-proceed"
               >
                 Proceed Anyway

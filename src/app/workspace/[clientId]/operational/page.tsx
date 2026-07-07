@@ -215,7 +215,7 @@ function OperationalContent({ clientId, workspace }: OperationalContentProps) {
               Import financial data to see metrics.
             </p>
             <Link
-              href="/"
+              href={`/workspace/${clientId}?tab=statements`}
               className="inline-flex mt-2 text-sm font-medium underline underline-offset-2"
               style={{ color: 'hsl(var(--primary))' }}
             >

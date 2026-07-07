@@ -82,7 +82,7 @@ export function FileDropzone({
       className={[
         'relative flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-8 py-12 text-center transition-colors cursor-pointer select-none outline-none',
         isActive
-          ? 'bg-blue-50 dark:bg-blue-950/20'
+          ? 'bg-blue-50'
           : 'bg-card',
         disabled || isLoading
           ? 'opacity-50 cursor-not-allowed'

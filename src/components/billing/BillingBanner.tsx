@@ -28,7 +28,7 @@ export function BillingBanner({
       variant={isError ? 'destructive' : 'default'}
       className={
         severity === 'warning'
-          ? 'border-amber-500/40 bg-amber-500/5 text-amber-900 dark:text-amber-200'
+          ? 'border-amber-500/40 bg-amber-500/5 text-amber-900'
           : severity === 'info'
             ? 'border-primary/30'
             : undefined
