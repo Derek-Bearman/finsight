@@ -36,6 +36,8 @@ import type { ClientWorkspace } from '@/types';
 const DEBOUNCE_MS = 800;
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 1000;
+/** How often to re-resolve access while it is degraded (read_only/locked). */
+const ACCESS_RECHECK_MS = 30_000;
 
 /** id -> the `updatedAt` we last successfully persisted. */
 const syncedAt = new Map<string, string>();
@@ -48,7 +50,10 @@ const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const retryCounts = new Map<string, number>();
 
 let unsubscribe: (() => void) | null = null;
-let beforeUnloadInstalled = false;
+let windowListenersInstalled = false;
+/** Timer for the degraded-access re-resolve loop (at most one armed). */
+let accessRecheckTimer: ReturnType<typeof setTimeout> | null = null;
+let accessRecheckInflight = false;
 let everSaved = false;
 /** Sticky failure message shown until a success or manual retry. */
 let errorMessage: string | null = null;
@@ -60,6 +65,58 @@ type AccessRefresher = () => Promise<AccessLevel | null>;
 let accessRefresher: AccessRefresher | null = null;
 export function registerAccessRefresher(fn: AccessRefresher): void {
   accessRefresher = fn;
+}
+
+/**
+ * Degraded access (read_only/locked) must never permanently kill the sync
+ * loop. The subscription gate skips all scheduling while accessLevel is not
+ * 'full', and the only other path that re-resolves access — a refused save —
+ * becomes unreachable once the editors go inert and the header chip swaps to
+ * its read-only variant. Without this loop, a mid-session billing flip left
+ * the tab read-only forever (with its refused edits unsavable) even after
+ * the Stripe webhook restored the firm to 'active'.
+ *
+ * So: while access is degraded, keep re-resolving it on a timer (and
+ * immediately when the tab regains visibility — the natural moment right
+ * after the user fixes billing elsewhere). The moment it comes back 'full',
+ * clear the stale refusal message and save everything still pending.
+ * Idempotent — at most one timer is ever armed.
+ */
+function ensureAccessRecheck(delayMs: number = ACCESS_RECHECK_MS): void {
+  if (accessRecheckTimer !== null) return;
+  const state = useWorkspaceStore.getState();
+  if (!state.cloudMode || state.accessLevel === 'full') return;
+  accessRecheckTimer = setTimeout(() => {
+    accessRecheckTimer = null;
+    void recheckAccess();
+  }, delayMs);
+}
+
+async function recheckAccess(): Promise<void> {
+  if (accessRecheckInflight) return;
+  const state = useWorkspaceStore.getState();
+  if (!state.cloudMode) return;
+  if (state.accessLevel !== 'full') {
+    if (!accessRefresher) {
+      ensureAccessRecheck(); // gate not registered yet — try again later
+      return;
+    }
+    accessRecheckInflight = true;
+    const level = await accessRefresher().catch(() => null);
+    accessRecheckInflight = false;
+    if (level !== 'full') {
+      ensureAccessRecheck(); // still degraded — keep watching
+      return;
+    }
+  }
+  // Access is back. Same recovery as the manual Retry button: drop the stale
+  // refusal message, reset backoff, and re-save everything still dirty.
+  errorMessage = null;
+  retryCounts.clear();
+  for (const id of pendingIds()) {
+    if (!conflicted.has(id)) scheduleSave(id, 0);
+  }
+  refreshStatus();
 }
 
 function currentWorkspace(id: string): ClientWorkspace | undefined {
@@ -106,8 +163,8 @@ export function startCloudSync(): void {
   const { workspaces } = useWorkspaceStore.getState();
   for (const ws of workspaces) syncedAt.set(ws.id, ws.updatedAt);
 
-  if (typeof window !== 'undefined' && !beforeUnloadInstalled) {
-    beforeUnloadInstalled = true;
+  if (typeof window !== 'undefined' && !windowListenersInstalled) {
+    windowListenersInstalled = true;
     window.addEventListener('beforeunload', (e) => {
       if (hasUnsavedChanges()) {
         e.preventDefault();
@@ -115,11 +172,34 @@ export function startCloudSync(): void {
         e.returnValue = '';
       }
     });
+    // Returning to the tab is the natural moment right after billing/auth was
+    // fixed elsewhere — re-resolve degraded access immediately instead of
+    // waiting out the poll timer.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      const state = useWorkspaceStore.getState();
+      if (!state.cloudMode || state.accessLevel === 'full') return;
+      if (accessRecheckTimer !== null) {
+        clearTimeout(accessRecheckTimer);
+        accessRecheckTimer = null;
+      }
+      void recheckAccess();
+    });
   }
+
+  // A session can bootstrap already degraded (e.g. past_due grace) — start
+  // watching for recovery right away.
+  ensureAccessRecheck();
 
   if (unsubscribe) return; // already listening
   unsubscribe = useWorkspaceStore.subscribe((state) => {
-    if (!state.cloudMode || state.accessLevel !== 'full') return;
+    if (!state.cloudMode) return;
+    if (state.accessLevel !== 'full') {
+      // Never a permanent teardown: keep re-evaluating access so sync
+      // resumes the moment billing/auth recovers.
+      ensureAccessRecheck();
+      return;
+    }
     for (const ws of state.workspaces) {
       if (!syncedAt.has(ws.id)) continue; // not a known cloud row → ignore
       if (conflicted.has(ws.id)) continue; // stopped until the user reloads
@@ -211,13 +291,17 @@ async function flushSave(id: string): Promise<void> {
       errorMessage = res.error;
       // Re-resolve access: billing may have flipped mid-session, or the user
       // may have signed in again in another tab. If we're back to full
-      // access, retry the save; otherwise leave the message standing.
-      if (accessRefresher) {
-        const level = await accessRefresher().catch(() => null);
-        if (level === 'full') {
-          errorMessage = null;
-          scheduleSave(id, BASE_RETRY_MS);
-        }
+      // access, retry the save; otherwise leave the message standing and
+      // keep re-checking in the background — the subscription gate blocks
+      // all scheduling while access is degraded, so without the recheck loop
+      // this session (and its refused edits) would be stuck read-only
+      // forever, even after billing recovers.
+      const level = accessRefresher ? await accessRefresher().catch(() => null) : null;
+      if (level === 'full') {
+        errorMessage = null;
+        scheduleSave(id, BASE_RETRY_MS);
+      } else {
+        ensureAccessRecheck();
       }
       break;
     }

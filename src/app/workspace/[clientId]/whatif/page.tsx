@@ -10,12 +10,13 @@ import React, {
 } from 'react';
 import Link from 'next/link';
 import { useWorkspaceStore } from '@/store/workspace-store';
-import type { Scenario, ScenarioAdjustment, Period, Account, ClientWorkspace } from '@/types';
+import type { Scenario, ScenarioAdjustment, Period, Account, ClientWorkspace, Dataset } from '@/types';
 import {
   applyScenario,
   computeScenarioImpact,
   buildScenarioSeries,
   buildDefaultScenarios,
+  isOrphanedAdjustment,
   SCENARIO_COLORS,
 } from '@/lib/scenarios';
 import { formatCurrency, formatPercent } from '@/lib/utils/format';
@@ -222,11 +223,13 @@ function ScenarioCard({
           {scenario.adjustments.length} adj.
         </span>
 
-        {/* Action buttons (show on hover) */}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Action buttons — hover-revealed on fine pointers, always visible
+            on touch (group-hover compiles behind @media (hover:hover), so it
+            can never fire on a phone/tablet), and revealed on keyboard focus. */}
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
           <button
             onClick={e => { e.stopPropagation(); onDuplicate(); }}
-            className="rounded p-1 text-xs hover:opacity-80 transition-opacity"
+            className="rounded p-1 pointer-coarse:p-2 text-xs hover:opacity-80 transition-opacity"
             style={{ color: 'hsl(var(--muted-foreground))' }}
             title="Duplicate"
           >
@@ -234,7 +237,7 @@ function ScenarioCard({
           </button>
           <button
             onClick={e => { e.stopPropagation(); handleStartEdit(e); }}
-            className="rounded p-1 text-xs hover:opacity-80 transition-opacity"
+            className="rounded p-1 pointer-coarse:p-2 text-xs hover:opacity-80 transition-opacity"
             style={{ color: 'hsl(var(--muted-foreground))' }}
             title="Rename"
           >
@@ -243,7 +246,7 @@ function ScenarioCard({
           {!scenario.isBaseline && (
             <button
               onClick={e => { e.stopPropagation(); onDelete(); }}
-              className="rounded p-1 text-xs hover:opacity-80 transition-opacity"
+              className="rounded p-1 pointer-coarse:p-2 text-xs hover:opacity-80 transition-opacity"
               style={{ color: 'hsl(0 84% 60%)' }}
               title="Delete"
             >
@@ -283,24 +286,28 @@ function SliderRow({
   const color = value > 0 ? 'hsl(142 71% 45%)' : value < 0 ? 'hsl(0 84% 60%)' : 'hsl(var(--muted-foreground))';
 
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-sm w-36 flex-shrink-0" style={{ color: 'hsl(var(--foreground))' }}>
+    // Stacks label-over-slider on narrow screens: the fixed w-36 label plus
+    // the range input's ~129px intrinsic width overflow a 375px viewport.
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+      <span className="text-sm sm:w-36 sm:flex-shrink-0" style={{ color: 'hsl(var(--foreground))' }}>
         {label}
       </span>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        disabled={disabled}
-        onChange={e => onChange(Number(e.target.value))}
-        className="flex-1"
-        style={{ accentColor: 'hsl(var(--primary))', opacity: disabled ? 0.4 : 1 }}
-      />
-      <span className="text-sm font-semibold w-14 text-right tabular-nums" style={{ color }}>
-        {display}
-      </span>
+      <div className="flex items-center gap-3 min-w-0 sm:flex-1">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          disabled={disabled}
+          onChange={e => onChange(Number(e.target.value))}
+          className="flex-1 min-w-0"
+          style={{ accentColor: 'hsl(var(--primary))', opacity: disabled ? 0.4 : 1 }}
+        />
+        <span className="text-sm font-semibold w-14 flex-shrink-0 text-right tabular-nums" style={{ color }}>
+          {display}
+        </span>
+      </div>
     </div>
   );
 }
@@ -396,7 +403,7 @@ function ImpactPanel({ workspace, activeScenario, baseScenario }: ImpactPanelPro
         {/* Revenue row */}
         <div className="flex items-center justify-between text-sm">
           <span style={{ color: 'hsl(var(--muted-foreground))' }}>Revenue</span>
-          <div className="flex items-center gap-2 text-right">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-right">
             <span style={{ color: 'hsl(var(--muted-foreground))' }}>{formatCurrency(impact.baseRevenue)}</span>
             <span style={{ color: 'hsl(var(--muted-foreground))' }}>→</span>
             <span className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
@@ -409,7 +416,7 @@ function ImpactPanel({ workspace, activeScenario, baseScenario }: ImpactPanelPro
         {/* Net Income row */}
         <div className="flex items-center justify-between text-sm">
           <span style={{ color: 'hsl(var(--muted-foreground))' }}>Net Income</span>
-          <div className="flex items-center gap-2 text-right">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-right">
             <span style={{ color: 'hsl(var(--muted-foreground))' }}>{formatCurrency(impact.baseNetIncome)}</span>
             <span style={{ color: 'hsl(var(--muted-foreground))' }}>→</span>
             <span className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
@@ -422,7 +429,7 @@ function ImpactPanel({ workspace, activeScenario, baseScenario }: ImpactPanelPro
         {/* Gross Margin row */}
         <div className="flex items-center justify-between text-sm">
           <span style={{ color: 'hsl(var(--muted-foreground))' }}>Gross Margin</span>
-          <div className="flex items-center gap-2 text-right">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-right">
             <span style={{ color: 'hsl(var(--muted-foreground))' }}>{formatPercent(impact.baseGrossMarginPct)}</span>
             <span style={{ color: 'hsl(var(--muted-foreground))' }}>→</span>
             <span className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
@@ -438,7 +445,7 @@ function ImpactPanel({ workspace, activeScenario, baseScenario }: ImpactPanelPro
         {/* Breakeven row */}
         <div className="flex items-center justify-between text-sm">
           <span style={{ color: 'hsl(var(--muted-foreground))' }}>Breakeven Rev.</span>
-          <div className="flex items-center gap-2 text-right">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-right">
             <span style={{ color: 'hsl(var(--muted-foreground))' }}>{formatCurrency(impact.baseBreakeven)}</span>
             <span style={{ color: 'hsl(var(--muted-foreground))' }}>→</span>
             <span className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
@@ -469,19 +476,32 @@ function ImpactPanel({ workspace, activeScenario, baseScenario }: ImpactPanelPro
 function AdjustmentRow({
   adj,
   accounts,
+  datasets,
   onRemove,
 }: {
   adj: ScenarioAdjustment;
   accounts: Account[];
+  datasets?: Dataset[];
   onRemove: () => void;
 }) {
+  // Scenarios outlive dataset switches, but account ids do not (every import
+  // mints fresh ids). An adjustment keyed to a previous dataset's account is
+  // orphaned: the engine skips it, so render it as inactive — with a human
+  // name recovered from the dataset snapshots, never the raw internal id.
+  const orphaned = useMemo(() => isOrphanedAdjustment(adj, accounts), [adj, accounts]);
+
   const accountName = useMemo(() => {
     if (adj.accountId === '_all_revenue_') return 'All Revenue';
     if (adj.accountId === '_all_expense_') return 'All Expenses';
     if (adj.accountId === '_all_costs_') return 'All Costs (COGS + Expense)';
     const acc = accounts.find(a => a.id === adj.accountId);
-    return acc?.name ?? adj.accountId;
-  }, [adj.accountId, accounts]);
+    if (acc) return acc.name;
+    for (const ds of datasets ?? []) {
+      const snap = ds.accounts.find(a => a.id === adj.accountId);
+      if (snap) return snap.name;
+    }
+    return 'Unknown account';
+  }, [adj.accountId, accounts, datasets]);
 
   const valueDisplay = useMemo(() => {
     if (adj.type === 'percent') {
@@ -495,12 +515,23 @@ function AdjustmentRow({
     return `= ${formatCurrency(adj.value)}`;
   }, [adj.type, adj.value]);
 
-  const valueColor = adj.value >= 0 ? 'hsl(142 71% 45%)' : 'hsl(0 84% 60%)';
+  const valueColor = orphaned
+    ? 'hsl(var(--muted-foreground))' // inactive — don't color it like a live change
+    : adj.value >= 0 ? 'hsl(142 71% 45%)' : 'hsl(0 84% 60%)';
 
   return (
-    <tr>
-      <td className="py-1.5 pr-3 text-sm" style={{ color: 'hsl(var(--foreground))' }}>
+    <tr style={{ opacity: orphaned ? 0.75 : 1 }}>
+      <td className="py-1.5 pr-3 text-sm" style={{ color: orphaned ? 'hsl(var(--muted-foreground))' : 'hsl(var(--foreground))' }}>
         {accountName}
+        {orphaned && (
+          <span
+            className="block text-xs font-medium"
+            style={{ color: 'hsl(38 80% 40%)' }}
+            title="This adjustment points at an account from a previous import. It has no effect on the current dataset — remove it, or re-add it against the current account."
+          >
+            ⚠ Not in current dataset — not applied
+          </span>
+        )}
       </td>
       <td className="py-1.5 pr-3 text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
         {adj.type === 'percent' ? 'Percent' : adj.type === 'absolute' ? 'Absolute' : 'Replace'}
@@ -541,6 +572,17 @@ function AddAdjustmentForm({ accounts, availableYears, onAdd, onCancel }: AddAdj
   const [value, setValue] = useState(0);
   const [fromYear, setFromYear] = useState(availableYears[0] ?? new Date().getFullYear());
   const [fromMonth, setFromMonth] = useState(1);
+
+  // Only accounts the scenario engine can act on. Excluded rows (QBO summary
+  // lines like "Gross Profit") and balance-sheet accounts never enter
+  // computePnL/computeBreakeven, so adjusting them is a silent no-op.
+  const adjustableAccounts = useMemo(
+    () =>
+      accounts.filter(
+        a => !a.isExcluded && (a.type === 'revenue' || a.type === 'cogs' || a.type === 'expense')
+      ),
+    [accounts]
+  );
 
   const SENTINEL_OPTIONS = [
     { id: '_all_revenue_', label: 'All Revenue Accounts' },
@@ -589,9 +631,9 @@ function AddAdjustmentForm({ accounts, availableYears, onAdd, onCancel }: AddAdj
                 <option key={o.id} value={o.id}>{o.label}</option>
               ))}
             </optgroup>
-            {accounts.length > 0 && (
+            {adjustableAccounts.length > 0 && (
               <optgroup label="Specific Accounts">
-                {accounts.map(a => (
+                {adjustableAccounts.map(a => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </optgroup>
@@ -932,9 +974,14 @@ function ScenarioEditor({ clientId, workspace, scenario, baseScenario }: Scenari
                 <span className="text-sm font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
                   {liveGrossMarginPct !== null ? formatPercent(liveGrossMarginPct) : '—'}
                 </span>
-                {liveBreakeven !== null && liveBreakeven > 0 && (
+                {liveBreakeven !== null && liveBreakeven > 0 && Number.isFinite(liveBreakeven) && (
                   <p className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
                     Breakeven at {formatCurrency(liveBreakeven)}
+                  </p>
+                )}
+                {liveBreakeven !== null && !Number.isFinite(liveBreakeven) && (
+                  <p className="text-xs" style={{ color: 'hsl(0 84% 60%)' }}>
+                    Cannot break even at this contribution margin
                   </p>
                 )}
               </div>
@@ -986,6 +1033,7 @@ function ScenarioEditor({ clientId, workspace, scenario, baseScenario }: Scenari
                         key={`${adj.accountId}-${i}`}
                         adj={adj}
                         accounts={workspace.accounts}
+                        datasets={workspace.datasets}
                         onRemove={() => handleRemoveAdjustment(i)}
                       />
                     ))}

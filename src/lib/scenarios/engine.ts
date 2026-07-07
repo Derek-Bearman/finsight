@@ -28,6 +28,26 @@ function isAfterOrEqual(p: Period, from: Period): boolean {
   return p.month >= from.month;
 }
 
+const SENTINEL_ACCOUNT_IDS = new Set(['_all_revenue_', '_all_expense_', '_all_costs_']);
+
+/** True for the aggregate sentinel ids ('_all_revenue_' etc.). Sentinels
+ *  expand against the CURRENT accounts, so they survive dataset switches. */
+export function isSentinelAccountId(accountId: string): boolean {
+  return SENTINEL_ACCOUNT_IDS.has(accountId);
+}
+
+/**
+ * An adjustment is ORPHANED when it targets a specific account id that no
+ * longer exists in the current accounts. Every import mints fresh account
+ * ids, so switching datasets (or re-importing) strands adjustments keyed to
+ * the old ids — they match zero values and would silently no-op. Orphaned
+ * adjustments are excluded from calculation (see expandAccountId) and must
+ * be surfaced as inactive in the UI, never rendered as live adjustments.
+ */
+export function isOrphanedAdjustment(adj: ScenarioAdjustment, accounts: Account[]): boolean {
+  return !isSentinelAccountId(adj.accountId) && !accounts.some(a => a.id === adj.accountId);
+}
+
 /**
  * Expand sentinel accountIds to actual account IDs of the matching type.
  */
@@ -43,7 +63,11 @@ function expandAccountId(accountId: string, accounts: Account[]): string[] {
   if (accountId === '_all_costs_') {
     return accounts.filter(a => (a.type === 'expense' || a.type === 'cogs') && !a.isExcluded).map(a => a.id);
   }
-  return [accountId];
+  // A specific id that is not in the current accounts is orphaned (dataset
+  // switch / re-import minted fresh ids). It could only ever match zero
+  // values anyway — skip it explicitly so the engine's behavior matches the
+  // UI's "not in current dataset — not applied" label.
+  return accounts.some(a => a.id === accountId) ? [accountId] : [];
 }
 
 // ─────────────────────────────────────────────
