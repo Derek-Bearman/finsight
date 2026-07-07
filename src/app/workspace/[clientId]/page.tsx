@@ -26,6 +26,7 @@ import {
 import type { SourceFilter } from '@/components/mapping';
 import { downloadWorkspaceJSON } from '@/lib/utils/workspace-io';
 import { getKeyAccounts } from '@/lib/utils/accounts';
+import { StatementsView } from '@/components/statements/StatementsView';
 import {
   applyScenario as _applyScenario,
   computeScenarioImpact,
@@ -87,10 +88,11 @@ function getLatestYear(values: AccountValue[]): number | null {
 
 // ── Nav tabs ─────────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'mapping' | 'reports' | 'projections' | 'whatif' | 'operational';
+type Tab = 'overview' | 'statements' | 'mapping' | 'reports' | 'projections' | 'whatif' | 'operational';
 
 const TABS: { id: Tab; label: string; phase: string | null }[] = [
   { id: 'overview', label: 'Overview', phase: null },
+  { id: 'statements', label: 'Statements', phase: null },
   { id: 'mapping', label: 'Mapping', phase: null },
   { id: 'reports', label: 'Reports', phase: null },
   { id: 'projections', label: 'Projections', phase: null },
@@ -1850,6 +1852,11 @@ export default function WorkspacePage({ params }: PageProps) {
             granularity={sharedGranularity}
             onGranularityChange={setSharedGranularity}
           />
+        )}
+        {activeTab === 'statements' && (
+          <ReadOnlyGuard>
+            <StatementsView clientId={clientId} embedded />
+          </ReadOnlyGuard>
         )}
         {activeTab === 'mapping' && (
           <ReadOnlyGuard>

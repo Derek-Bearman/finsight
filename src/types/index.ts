@@ -180,12 +180,30 @@ export interface AuditEntry {
 // Client Workspace
 // ─────────────────────────────────────────────
 
+/**
+ * A named import snapshot. Each upload can be kept as its own dataset so the
+ * user can pick which one the whole app analyzes (activeDatasetId). The
+ * workspace's top-level accounts/values mirror the active dataset (the live
+ * working copy), so every existing calc keeps reading accounts/values.
+ */
+export interface Dataset {
+  id: string;
+  label: string;
+  importedAt: string; // ISO 8601
+  accounts: Account[];
+  values: AccountValue[];
+}
+
 export interface ClientWorkspace {
   id: string;
   name: string;
   industryProfileId: string;
   accounts: Account[];
   values: AccountValue[];
+  /** Import snapshots; optional (legacy workspaces have none). */
+  datasets?: Dataset[];
+  /** Which dataset is loaded into accounts/values, if using the registry. */
+  activeDatasetId?: string;
   fiscalYearStart: number; // 1–12, month the fiscal year starts
   scenarios: Scenario[];
   operationalData: OperationalDataPoint[];
