@@ -10,6 +10,17 @@ Domain (decided): **`finsight.arktosmarketing.com`** — already staged in `wran
 
 ## 1. Stripe (test mode first)
 
+> **STATUS 2026-07-08: TEST MODE DONE + verified end-to-end** (product
+> `prod_UqgLaOcRupBuTd`, price `price_1Tqyz4F6PPS8S2D64z3tPOFX`, webhook
+> `we_1Tqyz5F6PPS8S2D6pmrnBiKM`; all 3 wrangler secrets set; real hosted
+> checkout with the 4242 test card provisioned a firm via the webhook, trial
+> anchored +7d, Billing page + Billing Portal verified, test rows cleaned).
+> **Remaining = the Live-mode repeat when ready for real customers.**
+> GOTCHA fixed the same day: `FINSIGHT_ALLOW_DIRECT_SIGNUP` in `.env.local`
+> was baked into the PROD server bundle by `next build` (prod silently
+> skipped Stripe and created free firms). Dev-only flags MUST live in
+> `.env.development.local` (never loaded by production builds).
+
 Dashboard → toggle **Test mode** ON (top right).
 
 **a. Product + Price**

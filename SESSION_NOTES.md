@@ -76,6 +76,21 @@ All 8 phases of the original spec are built (data model, CSV import,
 mapping UI, calculations, projections, visualization, what-if scenarios,
 operational metrics). On top of that, recent sessions shipped:
 
+- **2026-07-08 Stripe TEST-mode billing LIVE + verified end-to-end (live
+  version `e5d7956c`)** — product/price ($97/mo)/webhook created via API in
+  Derek's Stripe account (test mode), all 3 wrangler secrets set. Proven with
+  a real throwaway signup: /onboarding → hosted Checkout (card 4242, 7-day
+  trial, card-upfront) → `checkout.session.completed` webhook →
+  `create_firm_with_owner` + `apply_stripe_status` → firm `trialing`,
+  `trial_ends_at` +7d → /billing renders status + working Billing Portal.
+  Test firm/user/customer all deleted after. **Found + fixed in the process:
+  `FINSIGHT_ALLOW_DIRECT_SIGNUP=true` in `.env.local` had been BAKED INTO the
+  prod bundle by `next build`, so prod signup silently skipped Stripe and
+  created free firms** — flag moved to `.env.development.local` (dev-only;
+  production builds never load it), rebuilt, redeployed. Live-mode Stripe
+  (real keys + live price + live webhook) still pending — see
+  DEPLOY_RUNBOOK step 1.
+
 - **2026-07-07 final polish pass (this session, commits `f6b60a6..`,
   live version `05b3d3e7`)** — Resend custom SMTP is LIVE in Supabase
   (sender finsight@arktosmarketing.com, delivery verified end-to-end via
