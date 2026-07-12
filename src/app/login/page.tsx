@@ -39,7 +39,16 @@ import { sanitizeNext } from '@/lib/safe-next';
 import { Button } from '@/components/ui/button';
 
 type Step = 'email' | 'code';
-type Status = 'idle' | 'sending' | 'verifying';
+type Status = 'idle' | 'sending' | 'verifying' | 'demo';
+
+// Public demo account. The credentials are intentionally shipped to the
+// client: the account is a plain 'member' of the sandbox firm "Demo
+// Advisory Group" (cannot invite teammates, cannot reach billing actions),
+// RLS scopes it to that firm only, and a nightly job resets the firm's
+// workspaces to the canonical sample. Password sign-in also keeps the demo
+// independent of OTP email delivery.
+const DEMO_EMAIL = 'demo@finsight.test';
+const DEMO_PASSWORD = 'FinSightDemo!2026';
 
 function LoginForm() {
   const params = useSearchParams();
@@ -131,6 +140,29 @@ function LoginForm() {
     setErrorMsg(null);
   }
 
+  // ── Demo: one-click sign-in to the seeded sandbox firm ───────────────
+  async function handleDemo() {
+    if (status !== 'idle') return;
+    setStatus('demo');
+    setErrorMsg(null);
+
+    const supabase = createSupabaseBrowserClient();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: DEMO_EMAIL,
+      password: DEMO_PASSWORD,
+    });
+
+    if (error) {
+      setStatus('idle');
+      setErrorMsg('The demo is unavailable right now. Sign in with your email instead.');
+      return;
+    }
+
+    // Full page navigation, same as the OTP path — the middleware must see
+    // the fresh session cookie before rendering the protected route.
+    window.location.assign('/');
+  }
+
   return (
     <div
       className="min-h-screen flex items-center justify-center px-4"
@@ -190,9 +222,23 @@ function LoginForm() {
                 {errorMsg}
               </p>
             )}
-            <Button type="submit" disabled={!email || status === 'sending'}>
+            <Button type="submit" disabled={!email || status !== 'idle'}>
               {status === 'sending' ? 'Sending…' : 'Email me a code'}
             </Button>
+            <div className="my-1 flex items-center gap-3">
+              <div className="h-px flex-1" style={{ background: 'hsl(var(--border))' }} />
+              <span className="text-[11px]" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                or
+              </span>
+              <div className="h-px flex-1" style={{ background: 'hsl(var(--border))' }} />
+            </div>
+            <Button type="button" variant="outline" onClick={handleDemo} disabled={status !== 'idle'}>
+              {status === 'demo' ? 'Opening the demo…' : 'Explore the live demo'}
+            </Button>
+            <p className="text-[11px] leading-relaxed" style={{ color: 'hsl(var(--muted-foreground))' }}>
+              No email needed — opens a sample firm with a seeded restaurant client.
+              Shared sandbox; it resets nightly.
+            </p>
           </form>
         ) : (
           <form onSubmit={handleVerifyCode} className="flex flex-col gap-3">
