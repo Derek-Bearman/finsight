@@ -150,10 +150,26 @@ export async function saveWorkspace(ws: ClientWorkspace): Promise<SaveResult> {
   }
 }
 
+/**
+ * The public "Explore the live demo" sandbox is shared: every visitor signs in
+ * as the same member of the demo firm. Deleting the seeded sample would break
+ * the demo for everyone until the nightly reseed. Block destructive workspace
+ * ops on that firm so a casual visitor can't wipe it. Env-overridable; falls
+ * back to the known demo firm id.
+ */
+const DEMO_FIRM_ID = process.env.DEMO_FIRM_ID ?? '3f66a9a8-598b-441c-89e9-de190c60c9be';
+
 /** Delete a workspace (by its DB uuid). */
 export async function removeWorkspace(id: string): Promise<ActionResult> {
   const guard = await requireWritableContext();
   if (!guard.ok) return guard;
+  if (guard.ctx.firm.id === DEMO_FIRM_ID) {
+    return {
+      ok: false,
+      error:
+        'This is the shared demo workspace — deleting the sample client is disabled so the demo stays intact for everyone. Sign up to get a workspace of your own.',
+    };
+  }
   try {
     await deleteWorkspace(id);
     return { ok: true, data: undefined };
