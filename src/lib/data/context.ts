@@ -47,11 +47,16 @@ export async function resolveUserContext(): Promise<UserContext> {
 
   const email = typeof claims.email === 'string' && claims.email.length > 0 ? claims.email : null;
 
-  // Active memberships (RLS-scoped to this user's firms), earliest first.
+  // Active memberships for THIS user, earliest first. The memberships_select
+  // RLS policy is firm-scoped (co-members are visible to each other), so an
+  // explicit user_id filter is required — without it, `[0]` resolves to the
+  // firm's earliest membership (the owner) for every teammate, silently
+  // granting them the owner's role.
   const { data: memberships, error } = await supabase
     .from('memberships')
     .select('firm_id, role, created_at, firms(*)')
     .eq('status', 'active')
+    .eq('user_id', userId)
     .order('created_at', { ascending: true });
 
   if (error) throw error;

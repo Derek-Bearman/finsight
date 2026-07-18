@@ -406,12 +406,13 @@ export function projectYoY(input: ProjectionInput): ProjectionOutput {
 
   const monthlyRate = Math.pow(1 + annualRate, 1 / 12) - 1;
 
-  // Build a lookup for same-month values
-  const byMonthLookup = new Map<number, number[]>();
+  // Build a lookup for same-month values, keeping each anchor's period so we
+  // can compound from the anchor's actual date (not the last historical month).
+  const byMonthLookup = new Map<number, { amount: number; period: Period }[]>();
   for (const h of history) {
     const m = h.period.month;
     if (!byMonthLookup.has(m)) byMonthLookup.set(m, []);
-    byMonthLookup.get(m)!.push(h.amount);
+    byMonthLookup.get(m)!.push({ amount: h.amount, period: h.period });
   }
 
   // Monthly growth rates (for stddev computation)
@@ -432,13 +433,20 @@ export function projectYoY(input: ProjectionInput): ProjectionOutput {
     const futurePeriod = addMonths(lastPeriod, i);
     const targetMonth = futurePeriod.month;
 
-    // Find last known value for this month
+    // Find the most recent historical value for this calendar month (the
+    // seasonal anchor). Compound from the anchor's OWN date — e.g. next
+    // January is projected from last January by a full 12 months of growth,
+    // not by 1 month from the last historical period. Falling back to the
+    // last historical value means no seasonal anchor, so step from there (i).
     const monthHistory = byMonthLookup.get(targetMonth);
-    const sameMonthLast = monthHistory && monthHistory.length > 0 ? monthHistory[monthHistory.length - 1]! : lastHistorical;
+    const anchor = monthHistory && monthHistory.length > 0 ? monthHistory[monthHistory.length - 1]! : null;
+    const sameMonthLast = anchor ? anchor.amount : lastHistorical;
+    const stepsForward = anchor
+      ? (futurePeriod.year - anchor.period.year) * 12 + (futurePeriod.month - anchor.period.month)
+      : i;
 
-    // Number of full years forward
+    // Number of full years forward (for confidence-band widening).
     const yearsForward = Math.ceil(i / 12);
-    const stepsForward = i;
 
     let yHat = sameMonthLast * Math.pow(1 + monthlyRate, stepsForward);
     yHat = Math.max(0, yHat);
