@@ -1,7 +1,36 @@
 # FinSight — Session Notes
 
-**Last updated:** 2026-07-07
+**Last updated:** 2026-07-19
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
+
+> **2026-07-19 — Session-loss bug FIXED: bounced to /login ~1hr after
+> sign-in, on every navigation.** Same bug as CallGauge (its commit
+> `0872f57` in `~/callgauge`), same fix. Root cause in
+> `src/lib/supabase/proxy-client.ts`: the factory returned its `response`
+> object BY VALUE before middleware awaited `getUser()`; when Supabase
+> rotated the session mid-request, `setAll` reassigned a closure-local and
+> the refreshed cookies landed on a response nobody returned. The browser
+> kept a burned refresh token → Supabase revoked the token family → every
+> protected page bounced to `/login?next=…`.
+>
+> Fix: `createSupabaseProxyClient` now returns a **`getResponse()` getter**
+> (middleware reads it AFTER the auth call), and `middleware.ts` copies auth
+> cookie writes onto its redirect responses too
+> (`getResponse().cookies.getAll().forEach((c) => res.cookies.set(c))`).
+>
+> **Proven with a doctored-expiry probe** (recipe, if this ever regresses):
+> mint a real session via the demo account password grant
+> (`demo@finsight.test`, see DEMO_RUNBOOK.md), set the session JSON's
+> `expires_at` an hour into the past, encode as the
+> `sb-camphmqvrzqpgrhdjafo-auth-token` cookie (`'base64-' + base64url(JSON)`,
+> chunk at 3180 chars into `.0`/`.1` suffixes if longer), GET a protected
+> page with that Cookie header, count `headers.getSetCookie()`. Before fix
+> (reproduced against prod): 200 with ZERO Set-Cookie. After fix: 200 with
+> the refreshed cookie set, and a follow-up request using it stays 200.
+> **Gotcha found while verifying: `next dev` does NOT run `middleware.ts`
+> in this repo** (no /login redirect at all on plain `next dev`) — verify
+> middleware behavior via `wrangler dev` on the OpenNext bundle
+> (`npm run cf:preview`) or against prod, never via `next dev`.
 
 > **2026-07-07 — Bob Volpe readiness overnight run (8 commits, deployed + prod
 > click-verified).** Everything below in one night; full detail in the commit

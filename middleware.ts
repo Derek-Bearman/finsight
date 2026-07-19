@@ -31,7 +31,7 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export async function middleware(request: NextRequest) {
-  const { supabase, response } = createSupabaseProxyClient(request);
+  const { supabase, getResponse } = createSupabaseProxyClient(request);
 
   // Refresh session if expired. getUser() validates the JWT against
   // Supabase and rewrites the cookie on the response when it's been
@@ -43,13 +43,23 @@ export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isPublic = isPublicPath(pathname);
 
+  // getUser() may have rotated the session mid-flight; any response we return
+  // — including redirects — must carry those cookie writes, or the browser
+  // keeps a burned refresh token and gets bounced to /login on every page.
+  const withAuthCookies = (res: NextResponse): NextResponse => {
+    getResponse()
+      .cookies.getAll()
+      .forEach((cookie) => res.cookies.set(cookie));
+    return res;
+  };
+
   // Not logged in + private route → redirect to /login with a `next` param
   // so we can bounce them back after they sign in.
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('next', pathname);
-    return NextResponse.redirect(url);
+    return withAuthCookies(NextResponse.redirect(url));
   }
 
   // Logged in + /login → bounce them to home (or `next` param if present).
@@ -60,10 +70,12 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = next;
     url.search = '';
-    return NextResponse.redirect(url);
+    return withAuthCookies(NextResponse.redirect(url));
   }
 
-  return response;
+  // IMPORTANT: read via getResponse() AFTER getUser() — a snapshot taken
+  // before the auth call is the exact bug this fixes.
+  return getResponse();
 }
 
 export const config = {

@@ -19,16 +19,22 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 interface SupabaseProxyResult {
   supabase: ReturnType<typeof createServerClient>;
-  response: NextResponse;
+  /**
+   * The response middleware must return (or copy cookies from, when it
+   * redirects). A GETTER, not a snapshot: setAll REPLACES the response object
+   * when Supabase rotates the session mid-getUser(), so a reference captured
+   * before the auth call silently drops the refreshed cookies — the browser
+   * keeps a burned refresh token and every page bounces to /login about an
+   * hour after sign-in.
+   */
+  getResponse(): NextResponse;
 }
 
 export function createSupabaseProxyClient(request: NextRequest): SupabaseProxyResult {
   // Start with a passthrough response. Any cookies the Supabase client
   // refreshes get appended to this response below, then we return it from
-  // proxy.ts (or further modify it with a redirect, etc.).
-  let response = NextResponse.next({
-    request: { headers: request.headers },
-  });
+  // middleware.ts (or copy its cookies onto a redirect).
+  let response = NextResponse.next({ request });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -49,9 +55,7 @@ export function createSupabaseProxyClient(request: NextRequest): SupabaseProxyRe
         cookiesToSet.forEach(({ name, value }) =>
           request.cookies.set(name, value)
         );
-        response = NextResponse.next({
-          request: { headers: request.headers },
-        });
+        response = NextResponse.next({ request });
         cookiesToSet.forEach(({ name, value, options }: { name: string; value: string; options: CookieOptions }) =>
           response.cookies.set(name, value, options)
         );
@@ -59,5 +63,5 @@ export function createSupabaseProxyClient(request: NextRequest): SupabaseProxyRe
     },
   });
 
-  return { supabase, response };
+  return { supabase, getResponse: () => response };
 }
