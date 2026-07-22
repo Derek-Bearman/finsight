@@ -57,6 +57,11 @@ import type { QboAccount, QboReport } from '@/lib/qbo/qbo-types';
 export interface QboStatusResult {
   connected: boolean;
   companyName: string | null;
+  /** QBO company (realm) id — non-token column; the transform layer
+   *  realm-qualifies imported externalIds with it. Null when disconnected.
+   *  getQboStatus ALWAYS returns it; typed optional only so UI-side literals
+   *  built before the realmId wave keep compiling. */
+  realmId?: string | null;
   status: 'active' | 'needs_reauth' | 'revoked' | 'error' | null;
   lastSyncedAt: string | null;
   lastSyncError: string | null;
@@ -68,7 +73,14 @@ export interface QboStatusResult {
 }
 
 export type QboPlanResult =
-  | { ok: true; companyName: string; chunks: QboSyncChunk[] }
+  | {
+      ok: true;
+      companyName: string;
+      /** QBO company (realm) id from the connection row — the client passes
+       *  it to the transform layer to realm-qualify imported externalIds. */
+      realmId: string;
+      chunks: QboSyncChunk[];
+    }
   | { ok: false; reason: 'needs_reauth' }
   | { ok: false; reason: 'error'; message: string };
 
@@ -197,6 +209,7 @@ export async function getQboStatus(workspaceId: string): Promise<QboStatusResult
   const disconnected: QboStatusResult = {
     connected: false,
     companyName: null,
+    realmId: null,
     status: null,
     lastSyncedAt: null,
     lastSyncError: null,
@@ -218,7 +231,7 @@ export async function getQboStatus(workspaceId: string): Promise<QboStatusResult
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from('qbo_connections')
-    .select('company_name, status, last_synced_at, last_sync_error')
+    .select('company_name, realm_id, status, last_synced_at, last_sync_error')
     .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (error) {
@@ -238,6 +251,7 @@ export async function getQboStatus(workspaceId: string): Promise<QboStatusResult
   return {
     connected: true,
     companyName: data.company_name,
+    realmId: data.realm_id,
     status,
     lastSyncedAt: data.last_synced_at,
     lastSyncError: data.last_sync_error,
@@ -265,6 +279,7 @@ export async function planQboSync(
     return {
       ok: true,
       companyName: info.CompanyName,
+      realmId: gate.connection.realm_id,
       chunks: planSyncChunks(new Date(), opts.yearsBack),
     };
   } catch (err) {
@@ -295,6 +310,15 @@ export async function runQboSyncChunk(
 ): Promise<QboSyncChunkResult> {
   if (!ISO_DATE_RE.test(chunk.startDate) || !ISO_DATE_RE.test(chunk.endDate)) {
     return { ok: false, reason: 'error', message: 'Invalid chunk date range.' };
+  }
+  // Client dates are untrusted: reject inverted ranges and chunks spanning
+  // calendar years — the sync contract is ONE calendar year per chunk (plan
+  // §1 cell-cap / 504 guidance). Lexicographic compare is safe on YYYY-MM-DD.
+  if (
+    chunk.startDate > chunk.endDate ||
+    chunk.startDate.slice(0, 4) !== chunk.endDate.slice(0, 4)
+  ) {
+    return { ok: false, reason: 'error', message: 'Invalid sync chunk range.' };
   }
 
   const gate = await gateSync(workspaceId);

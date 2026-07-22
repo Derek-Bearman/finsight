@@ -193,6 +193,7 @@ export type Database = {
           last_sync_error: string | null
           last_synced_at: string | null
           realm_id: string
+          refresh_claimed_at: string | null
           refresh_token_enc: string | null
           refresh_token_expires_at: string | null
           refresh_token_hard_expires_at: string | null
@@ -211,6 +212,7 @@ export type Database = {
           last_sync_error?: string | null
           last_synced_at?: string | null
           realm_id: string
+          refresh_claimed_at?: string | null
           refresh_token_enc?: string | null
           refresh_token_expires_at?: string | null
           refresh_token_hard_expires_at?: string | null
@@ -229,6 +231,7 @@ export type Database = {
           last_sync_error?: string | null
           last_synced_at?: string | null
           realm_id?: string
+          refresh_claimed_at?: string | null
           refresh_token_enc?: string | null
           refresh_token_expires_at?: string | null
           refresh_token_hard_expires_at?: string | null
@@ -259,6 +262,21 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      qbo_oauth_nonces: {
+        Row: {
+          created_at: string
+          nonce: string
+        }
+        Insert: {
+          created_at?: string
+          nonce: string
+        }
+        Update: {
+          created_at?: string
+          nonce?: string
+        }
+        Relationships: []
       }
       workspaces: {
         Row: {

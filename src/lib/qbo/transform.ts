@@ -23,6 +23,13 @@
  *  - Multiple year-chunk reports merge as a union; when two reports disagree
  *    on the same account-period cell, the later report wins and a warning is
  *    emitted.
+ *  - Emitted ids are REALM-QUALIFIED: QBO's Account.Id is only unique within
+ *    one company (realm), so externalId is `<realmId>:<Account.Id>` and the
+ *    internal id is `qbo-<realmId>-<Account.Id>`. Reconnecting a workspace to
+ *    a different QBO company can therefore never tier-1-match unrelated
+ *    accounts. Internally the walk/merge maps stay keyed by bare Account.Id —
+ *    every report in one transform run comes from the same realm, so bare
+ *    keys join chunks consistently; qualification happens once, at emission.
  */
 
 import type { Account, AccountType, AccountValue, Period } from '@/types';
@@ -34,6 +41,9 @@ import type { QboAccount, QboColData, QboReport, QboReportRow } from './qbo-type
 // ─────────────────────────────────────────────
 
 export interface QboTransformInput {
+  /** QBO company (realm) id — namespaces every emitted account id/externalId,
+   *  because Account.Id is only unique within one QBO company. */
+  realmId: string;
   coa: QboAccount[];
   pnlReports: QboReport[];
   bsReports: QboReport[];
@@ -370,6 +380,7 @@ function mapCoaType(account: QboAccount): AccountType {
 // ─────────────────────────────────────────────
 
 export function transformQboData(input: QboTransformInput): QboTransformResult {
+  const { realmId } = input;
   const warnings: string[] = [];
   const globalCells = new Map<string, CellMap>();
   const globalMeta = new Map<string, GlobalMeta>();
@@ -409,8 +420,9 @@ export function transformQboData(input: QboTransformInput): QboTransformResult {
     }
 
     const account: Account = {
-      id: `qbo-${qboId}`, // stable within one transform run — deterministic, not timestamped
-      externalId: qboId,
+      // Deterministic (not timestamped) AND realm-qualified — see module doc.
+      id: `qbo-${realmId}-${qboId}`,
+      externalId: `${realmId}:${qboId}`,
       name,
       type,
       isManuallyClassified: true,
@@ -426,7 +438,7 @@ export function transformQboData(input: QboTransformInput): QboTransformResult {
 
     const parentQboId = coaAccount?.ParentRef?.value;
     if (parentQboId !== undefined && seenIds.has(parentQboId)) {
-      account.parentId = `qbo-${parentQboId}`;
+      account.parentId = `qbo-${realmId}-${parentQboId}`; // same qualified form as `id`
     }
 
     accounts.push(account);

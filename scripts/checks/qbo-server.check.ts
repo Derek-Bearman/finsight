@@ -6,11 +6,24 @@
  * Covers the pure/injectable parts — no DB, no Next runtime:
  *  - token-freshness decision logic (2-minute window, boundary, null expiry)
  *  - getFreshAccessToken flows against a fake QboConnectionsDb: fresh
- *    shortcut, refresh + guarded rotated-pair persist, the CONCURRENCY GUARD
- *    (0 rows matched → re-read, use the winner's tokens, never refresh
- *    twice), forceRefresh, needs_reauth classification on invalid_grant
+ *    shortcut, the refresh CAS CLAIM (claim won → exactly one Intuit call
+ *    with the claim cleared in the persisted patch; claim lost → NO Intuit
+ *    call, poll for the winner's fresh token; stale claim → retried exactly
+ *    once; poll budget exhausted → retryable QboRefreshInProgressError),
+ *    guarded rotated-pair persist (0 rows matched → re-read, use the
+ *    winner's tokens, never refresh twice), forceRefresh (loser path refuses
+ *    the unchanged ciphertext Intuit just rejected), needs_reauth
+ *    classification on invalid_grant INCLUDING the ciphertext-moved case
+ *    where the guarded needs_reauth write is skipped
+ *  - claimRefresh / clearRefreshClaim adapter: the PostgREST filter chain
+ *    (update/eq/eq/or NULL-or-stale/select) built against a recording fake
+ *    supabase client
  *  - upsertConnection: same-realm update vs different-realm delete+insert
- *    (realm_id is trigger-pinned immutable), audit rows
+ *    (realm_id is trigger-pinned immutable; connected_by IS rewritten and
+ *    persists — migration v2 un-pinned it), refresh-claim reset on
+ *    reconnect, unique-violation → typed QboRealmInUseError, audit rows
+ *  - runQboSyncChunk client-date validation matrix (bad ISO, inverted range,
+ *    cross-year range rejected; valid same-year ranges pass through)
  *  - markSyncResult / resolveSyncStatus (needs_reauth stickiness)
  *  - deleteConnection best-effort revocation
  *  - chunk planning math (year boundaries, current-month end, leap years,
@@ -21,24 +34,38 @@
  *
  * State/nonce SINGLE-USE expectations (enforced by the routes, documented
  * here because routes need the Next runtime):
- *  - /api/qbo/connect sets the nonce in an httpOnly SameSite=Lax cookie
- *    scoped to path /api/qbo (maxAge 600 — matches the state's 10-min exp);
- *  - /api/qbo/callback requires cookie === state.n and clears the cookie on
- *    EVERY exit (success or failure), so a replayed callback URL fails the
- *    nonce check before any code exchange — auth codes are exchanged exactly
- *    once (a duplicate exchange would invalidate the first's tokens).
+ *  - /api/qbo/connect 302s any non-canonical origin (workers.dev alias) to
+ *    the canonical env.redirectOrigin FIRST, then sets the nonce in an
+ *    httpOnly SameSite=Lax cookie scoped to path /api/qbo (maxAge 600 —
+ *    matches the state's 10-min exp) — host-scoped cookie and registered
+ *    redirect URI therefore always share one origin;
+ *  - /api/qbo/callback consumes the nonce ATOMICALLY (insert-once into
+ *    service-only qbo_oauth_nonces) right before the code exchange: a
+ *    double-fired callback hits the 23505 unique violation and exits as an
+ *    idempotent ?qbo=connected WITHOUT a second exchange (a duplicate
+ *    exchange would invalidate the first's tokens);
+ *  - the cookie === state.n check + clear-on-every-exit stays as
+ *    defense-in-depth, and the firm's unique(firm_id, realm_id) is
+ *    pre-checked BEFORE the exchange so a doomed connect can't burn the
+ *    single-use code (?qbo_error=realm_in_use).
  */
 
 import {
   ACCESS_TOKEN_FRESHNESS_WINDOW_MS,
   buildApiContext,
+  createQboConnectionsDb,
   deleteConnection,
   getConnectionForWorkspace,
   getFreshAccessToken,
   isAccessTokenFresh,
   isInvalidGrantError,
+  isUniqueViolationError,
   markSyncResult,
+  QboRealmInUseError,
   QboReauthRequiredError,
+  QboRefreshInProgressError,
+  REFRESH_CLAIM_POLL_ATTEMPTS,
+  REFRESH_CLAIM_STALE_MS,
   resolveSyncStatus,
   upsertConnection,
   type QboConnectionRow,
@@ -46,6 +73,7 @@ import {
   type QboConnectionsDb,
   type QboConnectionsDeps,
 } from '../../src/lib/qbo/connections';
+import { runQboSyncChunk } from '../../src/lib/data/qbo-actions';
 import { decryptSecret, encryptSecret, generateKeyBase64 } from '../../src/lib/qbo/crypto';
 import { QboOAuthError, type QboTokenSet } from '../../src/lib/qbo/oauth';
 import type { QboEnv } from '../../src/lib/qbo/config';
@@ -113,14 +141,25 @@ type AuditInsert = TablesInsert<'audit_log'>;
 interface DbLog {
   updates: Array<{ id: string; patch: QboConnectionUpdate }>;
   guarded: Array<{ id: string; expected: string; patch: QboConnectionUpdate }>;
+  claims: Array<{ id: string; expected: string; claimedAtIso: string; staleBeforeIso: string }>;
+  claimClears: Array<{ id: string; claimedAtIso: string }>;
   inserts: Array<Record<string, unknown>>;
   deletes: string[];
   audits: AuditInsert[];
 }
 
-/** Fake QboConnectionsDb: unexpected calls throw; the log records everything. */
+/** Fake QboConnectionsDb: unexpected calls throw; the log records everything.
+ *  claimRefresh defaults to WINNING the claim (single-caller scenarios). */
 function fakeDb(handlers: Partial<QboConnectionsDb>): { db: QboConnectionsDb; log: DbLog } {
-  const log: DbLog = { updates: [], guarded: [], inserts: [], deletes: [], audits: [] };
+  const log: DbLog = {
+    updates: [],
+    guarded: [],
+    claims: [],
+    claimClears: [],
+    inserts: [],
+    deletes: [],
+    audits: [],
+  };
   const unexpected = (name: string) => async (): Promise<never> => {
     throw new Error(`unexpected db.${name} call`);
   };
@@ -141,6 +180,17 @@ function fakeDb(handlers: Partial<QboConnectionsDb>): { db: QboConnectionsDb; lo
       handlers.updateTokensGuarded ??
       (async () => {
         throw new Error('unexpected db.updateTokensGuarded call');
+      }),
+    claimRefresh:
+      handlers.claimRefresh ??
+      (async (id, expected, claimedAtIso, staleBeforeIso) => {
+        log.claims.push({ id, expected, claimedAtIso, staleBeforeIso });
+        return 1;
+      }),
+    clearRefreshClaim:
+      handlers.clearRefreshClaim ??
+      (async (id, claimedAtIso) => {
+        log.claimClears.push({ id, claimedAtIso });
       }),
     delete:
       handlers.delete ??
@@ -164,6 +214,7 @@ function makeDeps(
     db,
     env,
     now: () => NOW,
+    sleep: async () => {}, // instant polls; tests that count sleeps override
     refresh: async () => {
       throw new Error('unexpected refresh call');
     },
@@ -183,6 +234,7 @@ function makeRow(overrides: Partial<QboConnectionRow>): QboConnectionRow {
     company_name: 'Bella Roma Pizza #42 (mock)',
     access_token_enc: null,
     access_token_expires_at: null,
+    refresh_claimed_at: null,
     refresh_token_enc: null,
     refresh_token_expires_at: null,
     refresh_token_hard_expires_at: null,
@@ -280,7 +332,7 @@ async function main(): Promise<void> {
     });
     const guarded: DbLog['guarded'] = [];
     let refreshCalls = 0;
-    const { db } = fakeDb({
+    const { db, log } = fakeDb({
       getById: async () => row,
       updateTokensGuarded: async (id, expected, patch) => {
         guarded.push({ id, expected, patch });
@@ -297,12 +349,27 @@ async function main(): Promise<void> {
     const result = await getFreshAccessToken('conn-1', {}, deps);
     check(result.accessToken === 'new-at', 'stale token path returns the rotated access token');
     check(refreshCalls === 1, 'exactly one refresh call');
+    check(
+      log.claims.length === 1 &&
+        log.claims[0].expected === refreshEnc &&
+        log.claims[0].claimedAtIso === new Date(NOW).toISOString() &&
+        log.claims[0].staleBeforeIso === new Date(NOW - REFRESH_CLAIM_STALE_MS).toISOString(),
+      'refresh first wins the CAS claim, guarded on the exact ciphertext read'
+    );
     check(guarded.length === 1, 'exactly one guarded update');
     check(
       guarded[0].expected === refreshEnc,
       'guard matches on the EXACT refresh ciphertext that was read'
     );
     const patch = guarded[0].patch;
+    check(
+      patch.refresh_claimed_at === null,
+      'winner clears the claim in the SAME persisted patch'
+    );
+    check(
+      log.claimClears.length === 0,
+      'happy path needs no separate claim clear (the patch does it)'
+    );
     check(
       typeof patch.access_token_enc === 'string' &&
         (await decryptSecret(patch.access_token_enc, TOKEN_KEY)) === 'new-at',
@@ -319,7 +386,8 @@ async function main(): Promise<void> {
     );
   }
 
-  // --------------------- getFreshAccessToken: concurrency guard (lost race)
+  // ------- getFreshAccessToken: guarded persist lost (ciphertext moved while
+  // holding the claim — a stale-claim takeover rotated first)
   {
     const refreshEnc = await encryptSecret('old-rt', TOKEN_KEY);
     const winnerAccessEnc = await encryptSecret('winner-at', TOKEN_KEY);
@@ -336,12 +404,12 @@ async function main(): Promise<void> {
     });
     let reads = 0;
     let refreshCalls = 0;
-    const { db } = fakeDb({
+    const { db, log } = fakeDb({
       getById: async () => {
         reads++;
         return reads === 1 ? staleRow : winnerRow; // re-read sees the winner
       },
-      updateTokensGuarded: async () => 0, // the race was lost
+      updateTokensGuarded: async () => 0, // the persist race was lost
     });
     const deps = makeDeps(db, {
       refresh: async () => {
@@ -350,9 +418,166 @@ async function main(): Promise<void> {
       },
     });
     const result = await getFreshAccessToken('conn-1', {}, deps);
-    check(result.accessToken === 'winner-at', 'lost race uses the concurrent winner\'s tokens');
-    check(refreshCalls === 1, 'lost race does NOT refresh a second time (token-family safety)');
-    check(reads === 2, 'lost race re-reads the row exactly once');
+    check(result.accessToken === 'winner-at', 'lost persist uses the concurrent winner\'s tokens');
+    check(refreshCalls === 1, 'lost persist does NOT refresh a second time (token-family safety)');
+    check(reads === 2, 'lost persist re-reads the row exactly once');
+    check(
+      log.claimClears.length === 1 &&
+        log.claimClears[0].claimedAtIso === new Date(NOW).toISOString(),
+      'lost persist clears OUR claim best-effort (guarded on our claimedAt)'
+    );
+  }
+
+  // ----------------- getFreshAccessToken: claim lost → poll for the winner
+  {
+    const initialEnc = await encryptSecret('old-at', TOKEN_KEY);
+    const refreshEnc = await encryptSecret('old-rt', TOKEN_KEY);
+    const staleRow = makeRow({
+      access_token_enc: initialEnc,
+      access_token_expires_at: new Date(NOW - 1000).toISOString(),
+      refresh_token_enc: refreshEnc,
+      refresh_claimed_at: new Date(NOW - 2000).toISOString(), // live claim
+    });
+    const winnerRow = makeRow({
+      access_token_enc: await encryptSecret('winner-at', TOKEN_KEY),
+      access_token_expires_at: new Date(NOW + 3500_000).toISOString(),
+      refresh_token_enc: await encryptSecret('winner-rt', TOKEN_KEY),
+      refresh_claimed_at: null,
+    });
+    let reads = 0;
+    let sleeps = 0;
+    let claimAttempts = 0;
+    const { db } = fakeDb({
+      getById: async () => {
+        reads++;
+        // Initial read + first poll still see the in-flight state; the
+        // second poll sees the winner's landed pair.
+        return reads <= 2 ? staleRow : winnerRow;
+      },
+      claimRefresh: async () => {
+        claimAttempts++;
+        return 0; // the claim is held elsewhere
+      },
+    });
+    const deps = makeDeps(db, {
+      sleep: async () => {
+        sleeps++;
+      },
+      // makeDeps default refresh throws 'unexpected refresh call' — reaching
+      // Intuit from the loser path would fail the run.
+    });
+    const result = await getFreshAccessToken('conn-1', {}, deps);
+    check(result.accessToken === 'winner-at', 'claim loser returns the winner\'s fresh token');
+    check(result.realmId === '9130001', 'claim loser returns the realm');
+    check(claimAttempts === 1, 'a LIVE claim is never re-claimed (no stale-retry)');
+    check(sleeps === 2, 'claim loser slept between polls');
+  }
+
+  // ------------- claim lost + forceRefresh: unchanged ciphertext is refused
+  {
+    const initialEnc = await encryptSecret('rejected-at', TOKEN_KEY);
+    const refreshEnc = await encryptSecret('old-rt', TOKEN_KEY);
+    const sameEncRow = makeRow({
+      access_token_enc: initialEnc,
+      access_token_expires_at: new Date(NOW + 3500_000).toISOString(), // fresh by clock
+      refresh_token_enc: refreshEnc,
+      refresh_claimed_at: new Date(NOW - 2000).toISOString(),
+    });
+    const rotatedRow = makeRow({
+      access_token_enc: await encryptSecret('rotated-at', TOKEN_KEY),
+      access_token_expires_at: new Date(NOW + 3500_000).toISOString(),
+      refresh_token_enc: await encryptSecret('rotated-rt', TOKEN_KEY),
+      refresh_claimed_at: null,
+    });
+    let reads = 0;
+    const { db } = fakeDb({
+      getById: async () => {
+        reads++;
+        // Initial read + first poll: the very token Intuit just rejected is
+        // still on the row (fresh by clock!); second poll: rotated.
+        return reads <= 2 ? sameEncRow : rotatedRow;
+      },
+      claimRefresh: async () => 0,
+    });
+    const result = await getFreshAccessToken('conn-1', { forceRefresh: true }, makeDeps(db));
+    check(
+      result.accessToken === 'rotated-at',
+      'forceRefresh loser waits for a CHANGED ciphertext (never re-serves the rejected token)'
+    );
+    check(reads === 3, 'forceRefresh loser skipped the unchanged-ciphertext poll');
+  }
+
+  // -------------------- claim gone stale mid-poll → retried EXACTLY once
+  {
+    const refreshEnc = await encryptSecret('old-rt', TOKEN_KEY);
+    const staleClaimRow = makeRow({
+      access_token_enc: await encryptSecret('old-at', TOKEN_KEY),
+      access_token_expires_at: new Date(NOW - 1000).toISOString(),
+      refresh_token_enc: refreshEnc,
+      // Claim is OLDER than the staleness window → abandoned winner.
+      refresh_claimed_at: new Date(NOW - REFRESH_CLAIM_STALE_MS - 1000).toISOString(),
+    });
+    let claimAttempts = 0;
+    let refreshCalls = 0;
+    const guarded: DbLog['guarded'] = [];
+    const { db } = fakeDb({
+      getById: async () => staleClaimRow,
+      claimRefresh: async (_id, expected) => {
+        claimAttempts++;
+        check(expected === refreshEnc, `claim attempt ${claimAttempts} guards on the ciphertext`);
+        return claimAttempts === 1 ? 0 : 1; // initial loses; the stale retry WINS
+      },
+      updateTokensGuarded: async (id, expected, patch) => {
+        guarded.push({ id, expected, patch });
+        return 1;
+      },
+    });
+    const deps = makeDeps(db, {
+      refresh: async () => {
+        refreshCalls++;
+        return rotatedTokenSet();
+      },
+    });
+    const result = await getFreshAccessToken('conn-1', {}, deps);
+    check(result.accessToken === 'new-at', 'stale-claim takeover refreshes and returns the pair');
+    check(claimAttempts === 2, 'stale claim is retried exactly once');
+    check(refreshCalls === 1, 'takeover calls Intuit exactly once');
+    check(
+      guarded.length === 1 && guarded[0].patch.refresh_claimed_at === null,
+      'takeover persists via the guard and clears the claim'
+    );
+
+    // Same stale-claim row, but the retry ALSO loses and the winner never
+    // lands: bounded polling ends in the retryable error, never at Intuit.
+    let claims2 = 0;
+    let sleeps2 = 0;
+    const { db: db2 } = fakeDb({
+      getById: async () => staleClaimRow,
+      claimRefresh: async () => {
+        claims2++;
+        return 0;
+      },
+    });
+    await checkThrows(
+      () =>
+        getFreshAccessToken(
+          'conn-1',
+          {},
+          makeDeps(db2, {
+            sleep: async () => {
+              sleeps2++;
+            },
+          })
+        ),
+      'exhausted poll budget throws',
+      (err) =>
+        check(
+          err instanceof QboRefreshInProgressError,
+          'exhausted poll budget throws the retryable QboRefreshInProgressError'
+        )
+    );
+    check(claims2 === 2, 'even a stuck row claims at most twice (initial + one retry)');
+    check(sleeps2 === REFRESH_CLAIM_POLL_ATTEMPTS, 'poll budget is bounded');
   }
 
   // ------------------- needs_reauth classification + status short-circuits
@@ -377,26 +602,31 @@ async function main(): Promise<void> {
     );
     check(!isInvalidGrantError(new Error('random')), 'plain Error is NOT an invalid grant');
 
-    // invalid_grant on refresh → status needs_reauth + QboReauthRequiredError.
+    // invalid_grant on refresh → needs_reauth via the CIPHERTEXT-GUARDED
+    // write (+ claim cleared in the same patch) + QboReauthRequiredError.
+    const deadRefreshEnc = await encryptSecret('dead-rt', TOKEN_KEY);
     const row = makeRow({
       access_token_enc: await encryptSecret('old-at', TOKEN_KEY),
       access_token_expires_at: new Date(NOW - 1000).toISOString(),
-      refresh_token_enc: await encryptSecret('dead-rt', TOKEN_KEY),
+      refresh_token_enc: deadRefreshEnc,
     });
-    const updates: DbLog['updates'] = [];
-    const { db } = fakeDb({
+    const invalidGrant = () =>
+      new QboOAuthError('QBO token refresh failed with HTTP 400.', {
+        status: 400,
+        body: '{"error":"invalid_grant"}',
+        intuitTid: 'tid-1',
+      });
+    const guarded: DbLog['guarded'] = [];
+    const { db, log } = fakeDb({
       getById: async () => row,
-      update: async (id, patch) => {
-        updates.push({ id, patch });
+      updateTokensGuarded: async (id, expected, patch) => {
+        guarded.push({ id, expected, patch });
+        return 1; // ciphertext still ours → the mark lands
       },
     });
     const deps = makeDeps(db, {
       refresh: async () => {
-        throw new QboOAuthError('QBO token refresh failed with HTTP 400.', {
-          status: 400,
-          body: '{"error":"invalid_grant"}',
-          intuitTid: 'tid-1',
-        });
+        throw invalidGrant();
       },
     });
     await checkThrows(
@@ -406,21 +636,67 @@ async function main(): Promise<void> {
         check(err instanceof QboReauthRequiredError, 'invalid_grant throws QboReauthRequiredError')
     );
     check(
-      updates.length === 1 && updates[0].patch.status === 'needs_reauth',
-      'invalid_grant marks the row needs_reauth'
+      guarded.length === 1 &&
+        guarded[0].expected === deadRefreshEnc &&
+        guarded[0].patch.status === 'needs_reauth',
+      'invalid_grant marks needs_reauth GUARDED on the exact ciphertext read'
     );
     check(
-      typeof updates[0]?.patch.last_sync_error === 'string',
+      typeof guarded[0]?.patch.last_sync_error === 'string',
       'invalid_grant records a last_sync_error'
     );
+    check(
+      guarded[0]?.patch.refresh_claimed_at === null,
+      'invalid_grant clears the claim in the same guarded write'
+    );
+    check(log.updates.length === 0, 'invalid_grant never writes status UNguarded');
 
-    // Non-invalid_grant refresh failures propagate untouched, no status write.
-    const updates2: DbLog['updates'] = [];
-    const { db: db2 } = fakeDb({
-      getById: async () => row,
-      update: async (id, patch) => {
-        updates2.push({ id, patch });
+    // invalid_grant with the ciphertext MOVED (guarded write matches 0): a
+    // race-loser's stale invalid_grant must NOT mark the healthy connection
+    // needs_reauth — the winner's tokens are re-read and used instead.
+    const winnerRow = makeRow({
+      access_token_enc: await encryptSecret('winner-at', TOKEN_KEY),
+      access_token_expires_at: new Date(NOW + 3500_000).toISOString(),
+      refresh_token_enc: await encryptSecret('winner-rt', TOKEN_KEY),
+    });
+    let movedReads = 0;
+    const movedGuarded: DbLog['guarded'] = [];
+    const { db: dbMoved, log: logMoved } = fakeDb({
+      getById: async () => {
+        movedReads++;
+        return movedReads === 1 ? row : winnerRow;
       },
+      updateTokensGuarded: async (id, expected, patch) => {
+        movedGuarded.push({ id, expected, patch });
+        return 0; // ciphertext moved under us
+      },
+    });
+    const movedResult = await getFreshAccessToken(
+      'conn-1',
+      {},
+      makeDeps(dbMoved, {
+        refresh: async () => {
+          throw invalidGrant();
+        },
+      })
+    );
+    check(
+      movedResult.accessToken === 'winner-at',
+      'stale invalid_grant (ciphertext moved) resolves to the winner\'s token'
+    );
+    check(
+      movedGuarded.length === 1 && logMoved.updates.length === 0,
+      'stale invalid_grant SKIPS the needs_reauth mark (guarded write only, 0 rows)'
+    );
+    check(
+      logMoved.claimClears.length === 1,
+      'stale invalid_grant clears the claim best-effort'
+    );
+
+    // Non-invalid_grant refresh failures propagate untouched, no status
+    // write — but the claim IS cleared so the connection isn't wedged.
+    const { db: db2, log: log2 } = fakeDb({
+      getById: async () => row,
     });
     await checkThrows(
       () =>
@@ -444,7 +720,12 @@ async function main(): Promise<void> {
           'transient failure propagates the original error (not reauth)'
         )
     );
-    check(updates2.length === 0, 'transient failure does NOT touch status');
+    check(log2.updates.length === 0 && log2.guarded.length === 0, 'transient failure does NOT touch status');
+    check(
+      log2.claimClears.length === 1 &&
+        log2.claimClears[0].claimedAtIso === new Date(NOW).toISOString(),
+      'transient failure clears the claim best-effort'
+    );
 
     // Rows already needs_reauth / revoked short-circuit before any refresh.
     for (const status of ['needs_reauth', 'revoked'] as const) {
@@ -502,7 +783,13 @@ async function main(): Promise<void> {
 
     // Same realm → update in place (no delete; status back to active).
     {
-      const existing = makeRow({ id: 'conn-9', status: 'needs_reauth', last_sync_error: 'old' });
+      const existing = makeRow({
+        id: 'conn-9',
+        status: 'needs_reauth',
+        last_sync_error: 'old',
+        connected_by: 'someone-else',
+        refresh_claimed_at: new Date(NOW - 5000).toISOString(),
+      });
       const { db, log } = fakeDb({ getByWorkspace: async () => existing });
       await upsertConnection(params, makeDeps(db));
       check(
@@ -513,6 +800,14 @@ async function main(): Promise<void> {
       check(
         log.updates[0].patch.status === 'active' && log.updates[0].patch.last_sync_error === null,
         'same-realm reconnect resets status to active and clears the sync error'
+      );
+      check(
+        log.updates[0].patch.connected_by === 'user-1',
+        'same-realm reconnect rewrites connected_by (persists — migration v2 un-pinned it)'
+      );
+      check(
+        log.updates[0].patch.refresh_claimed_at === null,
+        'same-realm reconnect resets any leftover refresh claim'
       );
     }
 
@@ -531,6 +826,138 @@ async function main(): Promise<void> {
       );
       check(log.updates.length === 0, 'different-realm reconnect never updates the pinned row');
     }
+
+    // unique(firm_id, realm_id) violation on insert (residual connect race)
+    // → typed QboRealmInUseError, no audit row for the failed connect.
+    {
+      const { db, log } = fakeDb({
+        getByWorkspace: async () => null,
+        insert: async () => {
+          throw Object.assign(new Error('duplicate key value violates unique constraint'), {
+            code: '23505',
+          });
+        },
+      });
+      await checkThrows(
+        () => upsertConnection(params, makeDeps(db)),
+        'unique-violation insert throws',
+        (err) =>
+          check(
+            err instanceof QboRealmInUseError,
+            'unique-violation insert maps to QboRealmInUseError'
+          )
+      );
+      check(log.audits.length === 0, 'failed connect writes no qbo.connect audit row');
+
+      // Non-unique insert failures propagate untouched.
+      const boom = new Error('connection reset');
+      const { db: db2 } = fakeDb({
+        getByWorkspace: async () => null,
+        insert: async () => {
+          throw boom;
+        },
+      });
+      await checkThrows(
+        () => upsertConnection(params, makeDeps(db2)),
+        'non-unique insert failure throws',
+        (err) => check(err === boom, 'non-unique insert failure propagates untouched')
+      );
+    }
+
+    // isUniqueViolationError classification matrix.
+    {
+      check(
+        isUniqueViolationError(Object.assign(new Error('dup'), { code: '23505' })),
+        'error with code 23505 classifies as unique violation'
+      );
+      check(
+        isUniqueViolationError({ code: '23505', message: 'dup' }),
+        'plain PostgrestError-shaped object with 23505 classifies too'
+      );
+      check(!isUniqueViolationError(Object.assign(new Error('x'), { code: '23503' })), 'other SQLSTATEs do not');
+      check(!isUniqueViolationError(new Error('23505')), 'code in the MESSAGE does not count');
+      check(!isUniqueViolationError(null), 'null is not a unique violation');
+      check(!isUniqueViolationError('23505'), 'a bare string is not a unique violation');
+    }
+  }
+
+  // -------------- claimRefresh / clearRefreshClaim adapter (filter building)
+  {
+    // Recording fake supabase client: every builder method logs and returns
+    // the chainable; awaiting resolves to a canned PostgREST result. Proves
+    // the adapter emits the exact eq/eq/or(NULL-or-stale)/select chain.
+    interface BuilderCall {
+      method: string;
+      args: unknown[];
+    }
+    const makeFakeService = (result: { data: unknown; error: unknown }) => {
+      const calls: BuilderCall[] = [];
+      const builder: Record<string, unknown> = {};
+      for (const method of ['update', 'eq', 'or', 'select', 'insert', 'delete', 'lt']) {
+        builder[method] = (...args: unknown[]) => {
+          calls.push({ method, args });
+          return builder;
+        };
+      }
+      builder.then = (
+        resolve: (v: unknown) => unknown,
+        reject?: (e: unknown) => unknown
+      ): Promise<unknown> => Promise.resolve(result).then(resolve, reject);
+      const service = {
+        from: (table: string) => {
+          calls.push({ method: 'from', args: [table] });
+          return builder;
+        },
+      };
+      return { service: service as unknown as Parameters<typeof createQboConnectionsDb>[0], calls };
+    };
+
+    const claimedAtIso = new Date(NOW).toISOString();
+    const staleBeforeIso = new Date(NOW - REFRESH_CLAIM_STALE_MS).toISOString();
+
+    const { service, calls } = makeFakeService({ data: [{ id: 'conn-1' }], error: null });
+    const adapter = createQboConnectionsDb(service);
+    const won = await adapter.claimRefresh('conn-1', 'enc-x', claimedAtIso, staleBeforeIso);
+    check(won === 1, 'claimRefresh counts the matched rows');
+    check(
+      JSON.stringify(calls) ===
+        JSON.stringify([
+          { method: 'from', args: ['qbo_connections'] },
+          { method: 'update', args: [{ refresh_claimed_at: claimedAtIso }] },
+          { method: 'eq', args: ['id', 'conn-1'] },
+          { method: 'eq', args: ['refresh_token_enc', 'enc-x'] },
+          {
+            method: 'or',
+            args: [`refresh_claimed_at.is.null,refresh_claimed_at.lt."${staleBeforeIso}"`],
+          },
+          { method: 'select', args: ['id'] },
+        ]),
+      'claimRefresh builds the exact guarded NULL-or-stale filter chain'
+    );
+
+    const lost = makeFakeService({ data: [], error: null });
+    check(
+      (await createQboConnectionsDb(lost.service).claimRefresh(
+        'conn-1',
+        'enc-x',
+        claimedAtIso,
+        staleBeforeIso
+      )) === 0,
+      'claimRefresh returns 0 when no row matches (claim held elsewhere)'
+    );
+
+    const clear = makeFakeService({ data: null, error: null });
+    await createQboConnectionsDb(clear.service).clearRefreshClaim('conn-1', claimedAtIso);
+    check(
+      JSON.stringify(clear.calls) ===
+        JSON.stringify([
+          { method: 'from', args: ['qbo_connections'] },
+          { method: 'update', args: [{ refresh_claimed_at: null }] },
+          { method: 'eq', args: ['id', 'conn-1'] },
+          { method: 'eq', args: ['refresh_claimed_at', claimedAtIso] },
+        ]),
+      'clearRefreshClaim clears ONLY the claim we set (guarded on claimedAt)'
+    );
   }
 
   // ------------------------------------- markSyncResult / resolveSyncStatus
@@ -853,6 +1280,68 @@ async function main(): Promise<void> {
     ] as const) {
       if (value === undefined) delete process.env[envKey];
       else process.env[envKey] = value;
+    }
+  }
+
+  // -------------------- runQboSyncChunk: client-date validation matrix
+  {
+    // The range validation runs BEFORE any auth/context resolution, so the
+    // rejection paths are exercisable headlessly through the real action.
+    const expectInvalid = async (
+      label: string,
+      startDate: string,
+      endDate: string,
+      expected: string
+    ): Promise<void> => {
+      const res = await runQboSyncChunk('ws-1', { year: 2026, startDate, endDate }, { includeCoa: false });
+      check(res.ok === false && res.reason === 'error' && res.message === expected, label);
+    };
+    await expectInvalid(
+      'inverted range rejects',
+      '2026-05-01',
+      '2026-04-30',
+      'Invalid sync chunk range.'
+    );
+    await expectInvalid(
+      'cross-year range rejects (one calendar year per chunk)',
+      '2025-12-01',
+      '2026-01-31',
+      'Invalid sync chunk range.'
+    );
+    await expectInvalid(
+      'decade-spanning range rejects',
+      '2017-01-01',
+      '2026-12-31',
+      'Invalid sync chunk range.'
+    );
+    await expectInvalid('bad ISO start rejects', '2026-5-01', '2026-05-31', 'Invalid chunk date range.');
+    await expectInvalid('bad ISO end rejects', '2026-05-01', 'nope', 'Invalid chunk date range.');
+
+    // Valid same-year ranges must PASS validation. Outside a Next request
+    // scope the action then dies (or fails closed) in gateSync — anything
+    // except the two validation messages proves good chunks flow through.
+    for (const [startDate, endDate] of [
+      ['2026-01-01', '2026-12-31'],
+      ['2026-07-01', '2026-07-01'], // single day, same year
+    ] as const) {
+      try {
+        const res = await runQboSyncChunk(
+          'ws-1',
+          { year: 2026, startDate, endDate },
+          { includeCoa: false }
+        );
+        check(
+          !(
+            res.ok === false &&
+            res.reason === 'error' &&
+            (res.message === 'Invalid sync chunk range.' ||
+              res.message === 'Invalid chunk date range.')
+          ),
+          `valid range ${startDate}..${endDate} passes validation`
+        );
+      } catch {
+        // Threw in gateSync (no Next runtime here) — validation passed. OK.
+      }
     }
   }
 

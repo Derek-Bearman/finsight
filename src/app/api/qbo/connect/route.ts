@@ -12,6 +12,13 @@
  * /api/qbo so the callback can prove the browser that returns is the browser
  * that started (CSRF/replay guard; cleared on first use).
  *
+ * Canonical-origin hop: the nonce cookie is host-scoped but Intuit always
+ * redirects to the REGISTERED redirect URI (env.redirectOrigin), so a flow
+ * started from any other origin (workers.dev alias, preview host) would
+ * dead-end at the callback's nonce check. A request arriving on a
+ * non-canonical origin is 302'd to the same route on the canonical origin
+ * FIRST, so the whole flow — cookie included — runs on one host.
+ *
  * Failures never render raw errors — they 302 back into the app with
  * ?qbo_error=<reason> for the workspace UI to surface.
  */
@@ -44,6 +51,23 @@ export async function GET(request: NextRequest): Promise<Response> {
   const workspaceId = url.searchParams.get('workspaceId');
   if (!workspaceId) return fail('missing_workspace');
 
+  let env;
+  try {
+    env = getQboEnv();
+  } catch (err) {
+    console.error('qbo connect: env not configured', err);
+    return fail('not_configured', workspaceId);
+  }
+
+  // Canonical-origin hop (see header): restart this exact request on the
+  // origin the redirect URI is registered under, so the nonce cookie set
+  // below lives on the host Intuit will redirect back to.
+  if (url.origin !== env.redirectOrigin) {
+    const canonical = new URL('/api/qbo/connect', env.redirectOrigin);
+    canonical.searchParams.set('workspaceId', workspaceId);
+    return NextResponse.redirect(canonical);
+  }
+
   const ctx = await resolveUserContext();
   if (ctx.state !== 'active') return fail('forbidden');
   if (ctx.role !== 'owner' && ctx.role !== 'admin') return fail('forbidden', workspaceId);
@@ -60,14 +84,6 @@ export async function GET(request: NextRequest): Promise<Response> {
     .maybeSingle();
   if (error || !workspace || workspace.firm_id !== ctx.firm.id) {
     return fail('workspace_not_found');
-  }
-
-  let env;
-  try {
-    env = getQboEnv();
-  } catch (err) {
-    console.error('qbo connect: env not configured', err);
-    return fail('not_configured', workspaceId);
   }
 
   const nonce = makeNonce();

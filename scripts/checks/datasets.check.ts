@@ -4,7 +4,9 @@
  *
  * Covers the accountant's "same history + new month" scenario, value
  * conflicts, new accounts, the non-destructive merge, the externalId
- * (QBO Account.Id) matcher tier, and the restatement-capable mergeOverwrite.
+ * (realm-qualified QBO Account.Id) matcher tier, the inferential-tier guards
+ * (cross-statement, realm switch, excluded summary placeholders), and the
+ * restatement-capable mergeOverwrite.
  */
 
 import type { Account, AccountValue } from '../../src/types';
@@ -30,6 +32,14 @@ const val = (accountId: string, year: number, month: number, amount: number): Ac
   period: { year, month },
   amount,
 });
+// Account WITH an externalId (realm-qualified QBO Account.Id, '<realm>:<Id>').
+const accX = (
+  id: string,
+  name: string,
+  type: Account['type'],
+  number: string | undefined,
+  externalId: string
+): Account => ({ id, name, type, number, externalId, isManuallyClassified: false });
 
 // Existing: Jan–Jun 2026, two accounts (matched by number).
 const existAccounts = [acc('e1', 'Food Sales', 'revenue', '4000'), acc('e2', 'Rent', 'expense', '6300')];
@@ -250,25 +260,59 @@ for (let m = 1; m <= 6; m++) {
   check(janFood.length === 1 && janFood[0]!.amount === 1000, 'BS-into-P&L merge: existing P&L values untouched');
 }
 
-// ── Scenario 12: cross-statement name collision — a BS account that would
-//    attach to a same-named P&L account must NOT qualify for additive merge ───
+// ── Scenario 12: cross-statement guard — the inferential (number/name) tiers
+//    must never pair a P&L account with a same-named BS account. The combined-
+//    QBO-batch bug this pins down: an existing 'Insurance' asset (12,000
+//    balance) name-merged with an incoming 'Insurance' expense (350/mo),
+//    overwriting the balance and adopting the wrong externalId forever. ───────
 {
-  const ea = [acc('e1', 'Insurance', 'expense')];
-  const ia = [acc('i1', 'Insurance', 'asset'), acc('i2', 'Cash', 'asset')];
-  check(!isAdditiveStatementMerge(ea, ia), 'cross-statement name collision should disqualify the additive merge');
+  const ea = [acc('e1', 'Insurance', 'asset')];
+  const ev = [val('e1', 2026, 1, 12000)];
+  const ia = [accX('i1', 'Insurance', 'expense', undefined, '9130001:55')];
+  const iv = [val('i1', 2026, 1, 350)];
+
+  const diff = diffImport(ea, ev, ia, iv);
+  check(diff.newAccounts.length === 1, `cross-statement twin: incoming expense is a NEW account, got ${diff.newAccounts.length}`);
+  check(diff.changedCells.length === 0, `cross-statement twin: 12000 vs 350 must never be compared, got ${diff.changedCells.length} changed`);
+
+  const ow = mergeOverwrite(ea, ev, ia, iv);
+  check(ow.accounts.length === 2 && ow.addedAccounts === 1, `cross-statement twin overwrite: both accounts survive, got ${ow.accounts.length}/${ow.addedAccounts}`);
+  check(ow.accounts.find((a) => a.id === 'e1') === ea[0], 'cross-statement twin overwrite: asset untouched (same reference — no externalId adopted)');
+  const assetVals = ow.values.filter((v) => v.accountId === 'e1');
+  check(assetVals.length === 1 && assetVals[0]!.amount === 12000, `cross-statement twin overwrite: the 12,000 balance survives, got ${JSON.stringify(assetVals.map((v) => v.amount))}`);
+  const expVals = ow.values.filter((v) => v.accountId === 'i1');
+  check(expVals.length === 1 && expVals[0]!.amount === 350, 'cross-statement twin overwrite: the expense lands on its OWN account');
+  check(ow.changedCells === 0, `cross-statement twin overwrite: not a restatement, got ${ow.changedCells}`);
+
+  // Guard applies to no-externalId (CSV) flows too — same-name cross-statement
+  // rows are different accounts, never a merge.
+  const csvDiff = diffImport([acc('e1', 'Insurance', 'expense')], [], [acc('c1', 'Insurance', 'asset')], [val('c1', 2026, 1, 1)]);
+  check(csvDiff.newAccounts.length === 1, 'cross-statement twin: guard applies to no-externalId flows too');
+
+  // The additive-statement-merge gate: name twins can no longer cross-attach
+  // (they arrive as NEW accounts), so a same-period BS with a name collision
+  // now QUALIFIES as additive — and the merge proves it is safe.
+  const gateEa = [acc('e1', 'Insurance', 'expense')];
+  const gateIa = [acc('i1', 'Insurance', 'asset'), acc('i2', 'Cash', 'asset')];
+  check(isAdditiveStatementMerge(gateEa, gateIa), 'additive gate: name twin cannot cross-attach, so the BS merge is additive');
+  const bsMerge = mergeNewPeriods(gateEa, [val('e1', 2026, 1, 350)], gateIa, [val('i1', 2026, 1, 12000), val('i2', 2026, 1, 5000)]);
+  check(bsMerge.accounts.length === 3, `additive gate: BS twin ADDS accounts, got ${bsMerge.accounts.length}`);
+  const keptExp = bsMerge.values.filter((v) => v.accountId === 'e1');
+  check(keptExp.length === 1 && keptExp[0]!.amount === 350, 'additive gate: P&L expense untouched by the BS twin');
+  // …while a tier-1 externalId match crossing the divide (user reclassified a
+  // QBO-linked account) still disqualifies the additive merge.
+  check(
+    !isAdditiveStatementMerge(
+      [accX('e9', 'Prepaid Insurance', 'asset', undefined, '9130001:9')],
+      [accX('i9', 'Prepaid Insurance', 'expense', undefined, '9130001:9')]
+    ),
+    'additive gate: externalId-tier cross-statement match still disqualifies'
+  );
   // Same-side matches (a normal P&L re-import) still qualify.
-  check(isAdditiveStatementMerge(ea, [acc('i3', 'Insurance', 'expense')]), 'same-side name match should still qualify');
+  check(isAdditiveStatementMerge(gateEa, [acc('i3', 'Insurance', 'expense')]), 'same-side name match should still qualify');
 }
 
 // ── externalId matcher tier (QBO Account.Id) ─────────────────────────────────
-
-const accX = (
-  id: string,
-  name: string,
-  type: Account['type'],
-  number: string | undefined,
-  externalId: string
-): Account => ({ id, name, type, number, externalId, isManuallyClassified: false });
 
 // ── Scenario 13: externalId match survives a rename AND an account-number
 //    change (the whole point of the tier — idempotent QBO re-sync) ────────────
@@ -463,6 +507,96 @@ const accX = (
   const deliveryVals = ow.values.filter((v) => v.accountId === 'i2');
   check(deliveryVals.length === 2 && deliveryVals[0]!.amount === 20 && deliveryVals[1]!.amount === 25,
     `overwrite adopt: full history should come in, got ${JSON.stringify(deliveryVals.map((v) => v.amount))}`);
+}
+
+// ── Scenario 20: realm switch — the workspace reconnects to a DIFFERENT QBO
+//    company. Every account carries a realm-qualified externalId, so the
+//    externalIdConflict guard blocks BOTH the number and name fallbacks: the
+//    new company arrives as new accounts, never a fake restatement. ───────────
+{
+  const ea = [
+    accX('e1', 'Rent', 'expense', '6300', '9130001:12'),
+    accX('e2', 'Truck Loan', 'liability', undefined, '9130001:44'),
+  ];
+  const ev = [val('e1', 2026, 1, 3000), val('e2', 2026, 1, 25000)];
+  // Same names AND same account numbers — but a different company (realm).
+  const ia = [
+    accX('i1', 'Rent', 'expense', '6300', '4620816365:12'),
+    accX('i2', 'Truck Loan', 'liability', undefined, '4620816365:44'),
+  ];
+  const iv = [val('i1', 2026, 1, 2800), val('i2', 2026, 1, 18000)];
+
+  const diff = diffImport(ea, ev, ia, iv);
+  check(diff.newAccounts.length === 2, `realm switch: both accounts arrive NEW, got ${diff.newAccounts.length}`);
+  check(diff.matchedCells === 0 && diff.changedCells.length === 0, `realm switch: no cell ever compared, got ${diff.matchedCells} matched / ${diff.changedCells.length} changed`);
+
+  const ow = mergeOverwrite(ea, ev, ia, iv);
+  check(ow.accounts.length === 4 && ow.addedAccounts === 2, `realm switch overwrite: old and new company coexist, got ${ow.accounts.length}/${ow.addedAccounts}`);
+  check(ow.changedCells === 0, `realm switch overwrite: never a fake restatement, got ${ow.changedCells}`);
+  check(
+    ow.accounts.find((a) => a.id === 'e1') === ea[0] && ow.accounts.find((a) => a.id === 'e2') === ea[1],
+    'realm switch overwrite: old company accounts untouched (same references)'
+  );
+  const oldRent = ow.values.filter((v) => v.accountId === 'e1');
+  const oldLoan = ow.values.filter((v) => v.accountId === 'e2');
+  check(
+    oldRent.length === 1 && oldRent[0]!.amount === 3000 && oldLoan.length === 1 && oldLoan[0]!.amount === 25000,
+    'realm switch overwrite: old company values survive untouched'
+  );
+}
+
+// ── Scenario 21: a genuine QBO account named like a summary row ('Total
+//    Income') must NOT match the CSV import's auto-excluded placeholder — its
+//    values would vanish from calcs (isExcluded) while the placeholder
+//    adopted the externalId. It lands as a NEW account instead. ───────────────
+{
+  const placeholder: Account = { id: 'e2', name: 'Total Income', type: 'revenue', isManuallyClassified: false, isExcluded: true };
+  const ea = [acc('e1', 'Food Sales', 'revenue', '4000'), placeholder];
+  const ev = [val('e1', 2026, 1, 9000), val('e2', 2026, 1, 10000)];
+  const ia = [
+    accX('i1', 'Food Sales', 'revenue', '4000', '9130001:1'),
+    accX('i2', 'Total Income', 'revenue', undefined, '9130001:490'),
+  ];
+  const iv = [val('i1', 2026, 1, 9000), val('i2', 2026, 1, 250)];
+
+  const diff = diffImport(ea, ev, ia, iv);
+  check(
+    diff.newAccounts.length === 1 && diff.newAccounts[0]!.name === 'Total Income',
+    `summary placeholder: genuine QBO account lands as NEW, got ${JSON.stringify(diff.newAccounts)}`
+  );
+  check(diff.changedCells.length === 0, `summary placeholder: 10000 vs 250 never compared, got ${diff.changedCells.length} changed`);
+
+  const ow = mergeOverwrite(ea, ev, ia, iv);
+  check(ow.accounts.length === 3 && ow.addedAccounts === 1, `summary placeholder overwrite: 2 existing + 1 new, got ${ow.accounts.length}/${ow.addedAccounts}`);
+  const ph = ow.accounts.find((a) => a.id === 'e2');
+  check(
+    ph === placeholder && ph.externalId === undefined && ph.isExcluded === true,
+    'summary placeholder overwrite: placeholder untouched — no externalId adopted, still excluded'
+  );
+  const phVals = ow.values.filter((v) => v.accountId === 'e2');
+  check(phVals.length === 1 && phVals[0]!.amount === 10000, 'summary placeholder overwrite: placeholder values untouched');
+  const genuineVals = ow.values.filter((v) => v.accountId === 'i2');
+  check(genuineVals.length === 1 && genuineVals[0]!.amount === 250, 'summary placeholder overwrite: genuine account keeps its own 250');
+
+  // The number tier is guarded too — a numbered placeholder must not absorb a
+  // same-numbered genuine QBO row.
+  const eaNum: Account[] = [{ ...acc('e3', 'Total Income', 'revenue', '4900'), isExcluded: true }];
+  const iaNum = [accX('i3', 'Total Income', 'revenue', '4900', '9130001:491')];
+  const numDiff = diffImport(eaNum, [val('e3', 2026, 1, 1)], iaNum, [val('i3', 2026, 1, 2)]);
+  check(numDiff.newAccounts.length === 1, 'summary placeholder: number tier guarded too');
+
+  // Back-compat: a CSV re-import (no externalId) still matches the placeholder
+  // onto itself, so identical re-imports stay 'identical'.
+  const csvAgain = diffImport(
+    ea,
+    ev,
+    [acc('c1', 'Food Sales', 'revenue', '4000'), { ...acc('c2', 'Total Income', 'revenue'), isExcluded: true }],
+    [val('c1', 2026, 1, 9000), val('c2', 2026, 1, 10000)]
+  );
+  check(
+    csvAgain.status === 'identical' && csvAgain.newAccounts.length === 0,
+    `summary placeholder back-compat: CSV re-import still matches, got ${csvAgain.status}/${csvAgain.newAccounts.length} new`
+  );
 }
 
 if (failures > 0) {

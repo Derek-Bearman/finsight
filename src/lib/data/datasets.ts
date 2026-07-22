@@ -8,7 +8,8 @@
  * committing — the accountant's "is this the same data plus July?" check.
  */
 
-import type { Account, AccountValue, ClientWorkspace, Dataset, Period } from '@/types';
+import type { Account, AccountValue, ClientWorkspace, Period } from '@/types';
+import { AUTO_EXCLUDE_NAMES } from './import-pipeline';
 
 const EPSILON = 0.5; // dollars — sub-dollar differences are rounding noise
 
@@ -48,6 +49,33 @@ function externalIdConflict(inc: Account, cand: Account): boolean {
   return ik !== null && ck !== null && ik !== ck;
 }
 
+const PNL_TYPES = new Set<Account['type']>(['revenue', 'cogs', 'expense']);
+
+/**
+ * True when the two accounts live on opposite sides of the P&L/Balance-Sheet
+ * divide. The inferential (number/name) matcher tiers must never pair across
+ * it: a combined QBO batch can carry a P&L 'Insurance' expense AND a BS
+ * 'Insurance' asset, and attaching one onto the other silently rewrites a
+ * balance with a monthly expense. Tier-1 externalId matches are exempt — an
+ * established QBO linkage must survive the user reclassifying the account.
+ */
+function crossesStatementSides(a: Account, b: Account): boolean {
+  return PNL_TYPES.has(a.type) !== PNL_TYPES.has(b.type);
+}
+
+/**
+ * An auto-excluded summary row created by a CSV import ('Total Income',
+ * 'Net Income', …). When the INCOMING account is externally linked (a genuine
+ * QBO account that happens to carry a summary-ish name), the inferential tiers
+ * must not match it onto the placeholder — its values would vanish from every
+ * calc (isExcluded) while the placeholder silently adopted the QBO linkage.
+ * CSV-to-CSV re-imports (no externalId) still match placeholder-onto-
+ * placeholder, so identical re-imports stay 'identical'.
+ */
+function isExcludedSummaryPlaceholder(a: Account): boolean {
+  return a.isExcluded === true && AUTO_EXCLUDE_NAMES.has(normName(a.name));
+}
+
 interface AccountMatcher {
   /** Match an incoming account to an existing one (externalId first, then
    *  number, then name) and claim it, so each existing account is matched at
@@ -65,12 +93,19 @@ interface AccountMatcher {
  * name. Number/name tiers keep matching robust when one side has account
  * numbers and the other only names (common across QBO export settings).
  *
- * externalId guards on the lower tiers:
+ * Guards on the lower (inferential) tiers — tier-1 externalId matches are
+ * exempt from all of them, an established linkage always wins:
  *  - both sides carry DIFFERENT externalIds → never match by number or name
- *    (they are provably different records in the source system);
+ *    (they are provably different records in the source system — including a
+ *    reconnect to a different QBO company, whose realm-qualified externalIds
+ *    all disagree);
  *  - incoming carries one, existing doesn't → number/name match still applies
  *    (the merge functions then adopt the incoming externalId — how a
- *    CSV-imported workspace links up on its first QBO sync).
+ *    CSV-imported workspace links up on its first QBO sync);
+ *  - the sides sit on opposite ends of the P&L/Balance-Sheet divide → never
+ *    match (see crossesStatementSides);
+ *  - incoming is externally linked and the candidate is an auto-excluded CSV
+ *    summary placeholder → never match (see isExcludedSummaryPlaceholder).
  *
  * The matcher CONSUMES matches: duplicate same-name accounts (e.g. two
  * numberless 'Other' leaves from a QBO export) pair positionally — the Nth
@@ -103,11 +138,14 @@ function buildMatcher(existing: Account[]): AccountMatcher {
           return byExt;
         }
       }
+      // Shared skip-guards for the inferential tiers below (doc above).
+      const guarded = (cand: Account): boolean =>
+        externalIdConflict(inc, cand) ||
+        crossesStatementSides(inc, cand) ||
+        (xk !== null && isExcludedSummaryPlaceholder(cand));
       const nk = numberKey(inc);
       if (nk) {
-        const byNum = (byNumber.get(nk) ?? []).find(
-          (a) => !claimed.has(a) && !externalIdConflict(inc, a)
-        );
+        const byNum = (byNumber.get(nk) ?? []).find((a) => !claimed.has(a) && !guarded(a));
         if (byNum) {
           claimed.add(byNum);
           return byNum;
@@ -115,7 +153,7 @@ function buildMatcher(existing: Account[]): AccountMatcher {
       }
       for (const cand of byName.get(nameKey(inc)) ?? []) {
         if (claimed.has(cand)) continue;
-        if (externalIdConflict(inc, cand)) continue;
+        if (guarded(cand)) continue;
         // If BOTH sides carry a number and they disagree, these are different
         // accounts that happen to share a name ('Other' #6000 vs 'Other' #7000) —
         // don't name-merge them. The one-side-missing-number case still matches.
@@ -142,15 +180,16 @@ function withAdoptedExternalId(exist: Account, inc: Account): Account {
   return inc.externalId && !exist.externalId ? { ...exist, externalId: inc.externalId } : exist;
 }
 
-const PNL_TYPES = new Set<Account['type']>(['revenue', 'cogs', 'expense']);
-
 /**
  * True when merging the incoming statement into the existing working set is
  * purely additive across the P&L/Balance-Sheet divide: no incoming account
- * would attach its values to an existing account on the OTHER statement side
- * (e.g. a BS 'Insurance' asset landing on the P&L 'Insurance' expense).
- * This is the safety gate for offering a same-period Balance Sheet merge
- * into a P&L-only working set (and vice versa).
+ * would attach its values to an existing account on the OTHER statement side.
+ * The matcher's inferential tiers refuse cross-statement pairs outright (a BS
+ * 'Insurance' asset can no longer land on the P&L 'Insurance' expense — it
+ * arrives as a new account), so the only attachment that can still cross the
+ * divide is a tier-1 externalId match: the user reclassified a QBO-linked
+ * account. This gate catches exactly that case before offering a same-period
+ * Balance Sheet merge into a P&L-only working set (and vice versa).
  */
 export function isAdditiveStatementMerge(
   existingAccounts: Account[],

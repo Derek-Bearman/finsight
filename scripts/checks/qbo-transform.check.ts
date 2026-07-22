@@ -40,6 +40,11 @@ function check(cond: boolean, label: string): void {
   }
 }
 
+/** Realm every main-suite transform runs under (matches makeCtx below). */
+const REALM_ID = '9130001';
+/** A different QBO company — used by the cross-realm collision regression. */
+const OTHER_REALM_ID = '4620816365';
+
 const coa = coaJson.QueryResponse.Account as unknown as QboAccount[];
 const pnl2024 = pnl2024Json as unknown as QboReport;
 const pnl2025 = pnl2025Json as unknown as QboReport;
@@ -62,6 +67,7 @@ const val = (res: QboTransformResult, name: string, year: number, month: number)
 // ═════════════════════════════════════════════════════════════════════════════
 
 const res = transformQboData({
+  realmId: REALM_ID,
   coa,
   pnlReports: [pnl2024, pnl2025],
   bsReports: [bs2024, bs2025],
@@ -73,12 +79,17 @@ const res = transformQboData({
 check(res.accounts.length === 30, `expected 30 accounts, got ${res.accounts.length}`);
 check(res.values.length === 516, `expected 516 values, got ${res.values.length}`);
 check(
-  res.accounts.every((a) => typeof a.externalId === 'string' && a.externalId.length > 0),
-  'every account carries externalId'
+  res.accounts.every(
+    (a) =>
+      typeof a.externalId === 'string' &&
+      a.externalId.startsWith(`${REALM_ID}:`) &&
+      a.externalId.length > REALM_ID.length + 1
+  ),
+  'every account carries a realm-qualified externalId (<realm>:<Id>)'
 );
 check(
-  res.accounts.every((a) => a.id === `qbo-${a.externalId}`),
-  'internal ids are stable qbo-<Id>'
+  res.accounts.every((a) => a.id === `qbo-${REALM_ID}-${a.externalId!.slice(REALM_ID.length + 1)}`),
+  'internal ids are stable qbo-<realm>-<Id>'
 );
 check(
   res.accounts.every(
@@ -156,7 +167,10 @@ check(val(res, 'Office Supplies', 2024, 2) === 0, 'explicit "0.00" cell imports 
 
 // ── Non-COA report row: built from name + section path, with warning ──────────
 const merchant = byName(res, 'Merchant Fees');
-check(merchant?.type === 'expense' && merchant.externalId === '99', 'non-COA row classified from its report section');
+check(
+  merchant?.type === 'expense' && merchant.externalId === `${REALM_ID}:99`,
+  'non-COA row classified from its report section (realm-qualified externalId)'
+);
 check(
   res.warnings.some((w) => w.includes('Merchant Fees') && w.includes('not in the chart of accounts')),
   'warning emitted for the non-COA report row'
@@ -205,7 +219,7 @@ check(res.warnings.length === 2, `exactly 2 warnings expected on the clean fixtu
       ],
     },
   } as unknown as QboReport;
-  const miniRes = transformQboData({ coa, pnlReports: [mini], bsReports: [] });
+  const miniRes = transformQboData({ realmId: REALM_ID, coa, pnlReports: [mini], bsReports: [] });
   check(val(miniRes, 'Payroll', 2024, 1) === 555 && val(miniRes, 'Payroll', 2024, 2) === 556, 'header+data conflict: Data row wins, no double count');
   check(
     miniRes.warnings.some((w) => w.includes('both its section header and a detail row')),
@@ -220,7 +234,7 @@ check(res.warnings.length === 2, `exactly 2 warnings expected on the clean fixtu
 
 // Transform twice → byte-for-byte-equivalent data → 'identical'.
 {
-  const again = transformQboData({ coa, pnlReports: [pnl2024, pnl2025], bsReports: [bs2024, bs2025] });
+  const again = transformQboData({ realmId: REALM_ID, coa, pnlReports: [pnl2024, pnl2025], bsReports: [bs2024, bs2025] });
   const diff = diffImport(res.accounts, res.values, again.accounts, again.values);
   check(diff.status === 'identical', `re-transform should diff 'identical', got ${diff.status}`);
   check(diff.changedCells.length === 0 && diff.newAccounts.length === 0, 're-transform: nothing changed or new');
@@ -228,7 +242,7 @@ check(res.warnings.length === 2, `exactly 2 warnings expected on the clean fixtu
 
 // Restated 2024 swapped in → 'conflicts' with exactly the one restated cell.
 {
-  const restated = transformQboData({ coa, pnlReports: [restatedPnl2024, pnl2025], bsReports: [bs2024, bs2025] });
+  const restated = transformQboData({ realmId: REALM_ID, coa, pnlReports: [restatedPnl2024, pnl2025], bsReports: [bs2024, bs2025] });
   const diff = diffImport(res.accounts, res.values, restated.accounts, restated.values);
   check(diff.status === 'conflicts', `restated import should diff 'conflicts', got ${diff.status}`);
   check(diff.changedCells.length === 1, `exactly 1 changed cell, got ${diff.changedCells.length}`);
@@ -240,9 +254,45 @@ check(res.warnings.length === 2, `exactly 2 warnings expected on the clean fixtu
   check(cell?.oldValue === 1800 && cell.newValue === 2400 && cell.delta === 600, 'restated cell 1800 → 2400 (Δ600)');
 }
 
+// REGRESSION (cross-company collision): the SAME chart of accounts transformed
+// under two different realms must share ZERO externalIds/ids — so reconnecting
+// a workspace to a different QBO company can never tier-1-match unrelated
+// accounts (pre-fix, bare Account.Id let a 'Rent' expense absorb a 'Truck
+// Loan' liability balance). Diffed against the first realm's working set, the
+// second company arrives entirely as NEW accounts — no cell is ever compared.
+{
+  const other = transformQboData({
+    realmId: OTHER_REALM_ID,
+    coa,
+    pnlReports: [pnl2024, pnl2025],
+    bsReports: [bs2024, bs2025],
+  });
+  const firstExternalIds = new Set(res.accounts.map((a) => a.externalId));
+  const firstIds = new Set(res.accounts.map((a) => a.id));
+  check(
+    other.accounts.length === res.accounts.length &&
+      other.accounts.every((a) => !firstExternalIds.has(a.externalId)),
+    'two realms: zero externalId equality across companies'
+  );
+  check(
+    other.accounts.every((a) => !firstIds.has(a.id)),
+    'two realms: zero internal-id equality across companies'
+  );
+  const diff = diffImport(res.accounts, res.values, other.accounts, other.values);
+  const valueCarrying = new Set(other.values.map((v) => v.accountId)).size;
+  check(
+    diff.matchedCells === 0 && diff.changedCells.length === 0,
+    `realm switch: no cell compared — never a fake restatement, got ${diff.matchedCells} matched / ${diff.changedCells.length} changed`
+  );
+  check(
+    diff.newAccounts.length === valueCarrying,
+    `realm switch: every value-carrying account arrives NEW (${valueCarrying}), got ${diff.newAccounts.length}`
+  );
+}
+
 // Same account-period fed by two disagreeing reports → last report wins + warn.
 {
-  const merged = transformQboData({ coa, pnlReports: [pnl2024, restatedPnl2024], bsReports: [] });
+  const merged = transformQboData({ realmId: REALM_ID, coa, pnlReports: [pnl2024, restatedPnl2024], bsReports: [] });
   check(val(merged, 'Marketing', 2024, 3) === 2400, 'cross-report cell conflict: later report wins');
   const conflictWarnings = merged.warnings.filter((w) => w.includes("keeping the later report's value"));
   check(conflictWarnings.length === 1, `exactly 1 cross-report conflict warning, got ${conflictWarnings.length}`);

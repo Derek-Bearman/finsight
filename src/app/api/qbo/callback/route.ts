@@ -13,9 +13,19 @@
  * Replay guards (plan §1: auth codes are single-use — a duplicate exchange
  * invalidates the first exchange's tokens):
  *  - state signature + 10-min expiry (verifyState),
- *  - nonce cookie must match state.n and is CLEARED on first use, so a
- *    replayed/duplicated callback never reaches the code exchange,
+ *  - the nonce is consumed ATOMICALLY right before the exchange (insert-once
+ *    into service-only qbo_oauth_nonces): a double-fired callback hits the
+ *    unique violation on the second fire and exits as an idempotent success
+ *    WITHOUT a second exchange,
+ *  - nonce cookie must match state.n and is CLEARED on first use
+ *    (defense-in-depth on top of the atomic consumption),
  *  - the code is exchanged exactly once, inside the try/catch.
+ *
+ * realm_in_use guard (unique(firm_id, realm_id) — plan §2.1): connecting a
+ * company already wired to ANOTHER workspace in the firm is detected BEFORE
+ * the code exchange (realmId arrives on the redirect query), so the
+ * single-use code isn't burned on a doomed connect; the residual race
+ * surfaces as the typed QboRealmInUseError from upsertConnection.
  *
  * All exits 302 back into the app (?qbo=connected / ?qbo_error=<reason>) —
  * raw errors are never rendered.
@@ -27,7 +37,7 @@ import { getQboEnv, qboApiBaseUrl } from '@/lib/qbo/config';
 import { exchangeCode } from '@/lib/qbo/oauth';
 import { verifyState } from '@/lib/qbo/state';
 import { fetchCompanyInfo, type QboApiContext } from '@/lib/qbo/api';
-import { upsertConnection } from '@/lib/qbo/connections';
+import { QboRealmInUseError, upsertConnection } from '@/lib/qbo/connections';
 
 /** Single-use CSRF nonce cookie — must match the connect route exactly. */
 const NONCE_COOKIE = 'qbo_oauth_nonce';
@@ -111,6 +121,45 @@ export async function GET(request: NextRequest): Promise<Response> {
       return respond(target, { qbo_error: 'forbidden' });
     }
 
+    // The company may already be wired to a DIFFERENT workspace in this firm
+    // (unique(firm_id, realm_id)). Detect it BEFORE the exchange — hitting
+    // the constraint after exchanging would burn the single-use code on a
+    // connect that can never succeed.
+    const { data: realmHolder, error: realmError } = await service
+      .from('qbo_connections')
+      .select('workspace_id')
+      .eq('firm_id', state.f)
+      .eq('realm_id', realmId)
+      .neq('workspace_id', state.w)
+      .maybeSingle();
+    if (realmError) throw realmError;
+    if (realmHolder) return respond(target, { qbo_error: 'realm_in_use' });
+
+    // Consume the nonce ATOMICALLY before the exchange: insert-once into
+    // qbo_oauth_nonces. A double-fired callback (browser retry, duplicate
+    // tab, proxy replay) hits the unique violation on the second fire and
+    // exits as an idempotent success WITHOUT exchanging — a duplicate
+    // exchange would invalidate the first exchange's tokens. The cookie
+    // check above stays as defense-in-depth.
+    const { error: nonceError } = await service
+      .from('qbo_oauth_nonces')
+      .insert({ nonce: state.n });
+    if (nonceError) {
+      if (nonceError.code === '23505') {
+        // Already consumed: the first fire is doing (or has done) the work.
+        return respond(target, { qbo: 'connected' });
+      }
+      throw nonceError;
+    }
+
+    // Opportunistic hygiene: purge day-old nonces (states live 10 minutes).
+    // Best-effort — a purge hiccup must never block the connect.
+    const { error: purgeError } = await service
+      .from('qbo_oauth_nonces')
+      .delete()
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60_000).toISOString());
+    if (purgeError) console.error('qbo nonce purge failed', purgeError.message);
+
     // Exchange the code EXACTLY ONCE (single-use; a duplicate exchange would
     // invalidate this exchange's tokens).
     const tokens = await exchangeCode(env, { code });
@@ -150,6 +199,11 @@ export async function GET(request: NextRequest): Promise<Response> {
     } catch (auditErr) {
       console.error('qbo callback failure audit write failed', auditErr);
     }
-    return respond(target, { qbo_error: 'exchange_failed' });
+    // Residual unique(firm_id, realm_id) race (pre-check passed, a concurrent
+    // connect landed first) gets its precise reason; everything else is a
+    // generic exchange failure.
+    return respond(target, {
+      qbo_error: err instanceof QboRealmInUseError ? 'realm_in_use' : 'exchange_failed',
+    });
   }
 }

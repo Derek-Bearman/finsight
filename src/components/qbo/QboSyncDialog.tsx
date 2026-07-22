@@ -77,7 +77,7 @@ export function QboSyncDialog({
   const [step, setStep] = useState<Step>({ kind: 'range' });
   const [yearsBack, setYearsBack] = useState(YEARS_BACK_DEFAULT);
 
-  const planRef = useRef<{ companyName: string; chunks: QboSyncChunk[] } | null>(null);
+  const planRef = useRef<{ companyName: string; realmId: string; chunks: QboSyncChunk[] } | null>(null);
   const collectedRef = useRef<{
     pnl: QboReport[];
     bs: QboReport[];
@@ -105,7 +105,7 @@ export function QboSyncDialog({
     if (!plan) return;
     const { pnl, bs, coa } = collectedRef.current;
     // Transform ONCE over all accumulated chunks (pure, client-side).
-    const result = transformQboData({ coa, pnlReports: pnl, bsReports: bs });
+    const result = transformQboData({ realmId: plan.realmId, coa, pnlReports: pnl, bsReports: bs });
     closeAndReset();
     onComplete({
       companyName: plan.companyName,
@@ -167,7 +167,7 @@ export function QboSyncDialog({
           else setStep({ kind: 'error', message: plan.message });
           return;
         }
-        planRef.current = { companyName: plan.companyName, chunks: plan.chunks };
+        planRef.current = { companyName: plan.companyName, realmId: plan.realmId, chunks: plan.chunks };
       }
       await runChunks();
     } finally {
