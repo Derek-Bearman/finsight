@@ -88,6 +88,7 @@ const env: QboEnv = {
   stateSecret: 'test-state-secret',
   redirectOrigin: 'https://finsight.example.com',
   mockMode: false,
+  apiEnvironment: 'production',
 };
 
 async function main(): Promise<void> {
