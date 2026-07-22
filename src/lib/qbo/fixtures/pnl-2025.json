@@ -1,0 +1,982 @@
+{
+  "Header": {
+    "Time": "2026-07-22T08:00:00-07:00",
+    "ReportName": "ProfitAndLoss",
+    "StartPeriod": "2025-01-01",
+    "EndPeriod": "2025-06-30",
+    "SummarizeColumnsBy": "Month",
+    "Currency": "USD",
+    "Option": [
+      {
+        "Name": "AccountingMethod",
+        "Value": "Accrual"
+      },
+      {
+        "Name": "NoReportData",
+        "Value": "false"
+      }
+    ]
+  },
+  "Columns": {
+    "Column": [
+      {
+        "ColTitle": "",
+        "ColType": "Account"
+      },
+      {
+        "ColTitle": "Jan 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-01-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-01-31"
+          }
+        ]
+      },
+      {
+        "ColTitle": "Feb 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-02-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-02-28"
+          }
+        ]
+      },
+      {
+        "ColTitle": "Mar 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-03-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-03-31"
+          }
+        ]
+      },
+      {
+        "ColTitle": "Apr 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-04-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-04-30"
+          }
+        ]
+      },
+      {
+        "ColTitle": "May 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-05-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-05-31"
+          }
+        ]
+      },
+      {
+        "ColTitle": "Jun 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-06-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-06-30"
+          }
+        ]
+      },
+      {
+        "ColTitle": "Total",
+        "ColType": "Money"
+      }
+    ]
+  },
+  "Rows": {
+    "Row": [
+      {
+        "type": "Section",
+        "group": "Income",
+        "Header": {
+          "ColData": [
+            {
+              "value": "Income"
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            }
+          ]
+        },
+        "Rows": {
+          "Row": [
+            {
+              "ColData": [
+                {
+                  "value": "Retail Sales",
+                  "id": "10"
+                },
+                {
+                  "value": "36500.00"
+                },
+                {
+                  "value": "37000.00"
+                },
+                {
+                  "value": "37500.00"
+                },
+                {
+                  "value": "38000.00"
+                },
+                {
+                  "value": "38500.00"
+                },
+                {
+                  "value": "39000.00"
+                },
+                {
+                  "value": "226500.00"
+                }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Wholesale Sales",
+                  "id": "11"
+                },
+                {
+                  "value": "15250.00"
+                },
+                {
+                  "value": "15500.00"
+                },
+                {
+                  "value": "15750.00"
+                },
+                {
+                  "value": "16000.00"
+                },
+                {
+                  "value": "16250.00"
+                },
+                {
+                  "value": "16500.00"
+                },
+                {
+                  "value": "95250.00"
+                }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Shipping Income",
+                  "id": "12"
+                },
+                {
+                  "value": "870.00"
+                },
+                {
+                  "value": "880.00"
+                },
+                {
+                  "value": "890.00"
+                },
+                {
+                  "value": "900.00"
+                },
+                {
+                  "value": "910.00"
+                },
+                {
+                  "value": "920.00"
+                },
+                {
+                  "value": "5370.00"
+                }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Total Income",
+                  "id": "13"
+                },
+                {
+                  "value": "250.00"
+                },
+                {
+                  "value": "250.00"
+                },
+                {
+                  "value": "250.00"
+                },
+                {
+                  "value": "250.00"
+                },
+                {
+                  "value": "250.00"
+                },
+                {
+                  "value": "250.00"
+                },
+                {
+                  "value": "1500.00"
+                }
+              ],
+              "type": "Data"
+            }
+          ]
+        },
+        "Summary": {
+          "ColData": [
+            {
+              "value": "Total Income"
+            },
+            {
+              "value": "52870.00"
+            },
+            {
+              "value": "53630.00"
+            },
+            {
+              "value": "54390.00"
+            },
+            {
+              "value": "55150.00"
+            },
+            {
+              "value": "55910.00"
+            },
+            {
+              "value": "56670.00"
+            },
+            {
+              "value": "328620.00"
+            }
+          ]
+        }
+      },
+      {
+        "type": "Section",
+        "group": "COGS",
+        "Header": {
+          "ColData": [
+            {
+              "value": "Cost of Goods Sold"
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            }
+          ]
+        },
+        "Rows": {
+          "Row": [
+            {
+              "ColData": [
+                {
+                  "value": "Green Coffee Purchases",
+                  "id": "20"
+                },
+                {
+                  "value": "13600.00"
+                },
+                {
+                  "value": "13800.00"
+                },
+                {
+                  "value": "14000.00"
+                },
+                {
+                  "value": "14200.00"
+                },
+                {
+                  "value": "14400.00"
+                },
+                {
+                  "value": "14600.00"
+                },
+                {
+                  "value": "84600.00"
+                }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Packaging Supplies",
+                  "id": "21"
+                },
+                {
+                  "value": "1825.00"
+                },
+                {
+                  "value": "1850.00"
+                },
+                {
+                  "value": "1875.00"
+                },
+                {
+                  "value": "1900.00"
+                },
+                {
+                  "value": "1925.00"
+                },
+                {
+                  "value": "1950.00"
+                },
+                {
+                  "value": "11325.00"
+                }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Freight In",
+                  "id": "22"
+                },
+                {
+                  "value": "1095.00"
+                },
+                {
+                  "value": "1110.00"
+                },
+                {
+                  "value": "1125.00"
+                },
+                {
+                  "value": "1140.00"
+                },
+                {
+                  "value": "1155.00"
+                },
+                {
+                  "value": "1170.00"
+                },
+                {
+                  "value": "6795.00"
+                }
+              ],
+              "type": "Data"
+            }
+          ]
+        },
+        "Summary": {
+          "ColData": [
+            {
+              "value": "Total Cost of Goods Sold"
+            },
+            {
+              "value": "16520.00"
+            },
+            {
+              "value": "16760.00"
+            },
+            {
+              "value": "17000.00"
+            },
+            {
+              "value": "17240.00"
+            },
+            {
+              "value": "17480.00"
+            },
+            {
+              "value": "17720.00"
+            },
+            {
+              "value": "102720.00"
+            }
+          ]
+        }
+      },
+      {
+        "type": "Section",
+        "group": "GrossProfit",
+        "Summary": {
+          "ColData": [
+            {
+              "value": "Gross Profit"
+            },
+            {
+              "value": "36350.00"
+            },
+            {
+              "value": "36870.00"
+            },
+            {
+              "value": "37390.00"
+            },
+            {
+              "value": "37910.00"
+            },
+            {
+              "value": "38430.00"
+            },
+            {
+              "value": "38950.00"
+            },
+            {
+              "value": "225900.00"
+            }
+          ]
+        }
+      },
+      {
+        "type": "Section",
+        "group": "Expenses",
+        "Header": {
+          "ColData": [
+            {
+              "value": "Expenses"
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            }
+          ]
+        },
+        "Rows": {
+          "Row": [
+            {
+              "type": "Section",
+              "Header": {
+                "ColData": [
+                  {
+                    "value": "Payroll",
+                    "id": "30"
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  }
+                ]
+              },
+              "Rows": {
+                "Row": [
+                  {
+                    "ColData": [
+                      {
+                        "value": "Payroll",
+                        "id": "30"
+                      },
+                      {
+                        "value": "650.00"
+                      },
+                      {
+                        "value": "650.00"
+                      },
+                      {
+                        "value": "650.00"
+                      },
+                      {
+                        "value": "650.00"
+                      },
+                      {
+                        "value": "650.00"
+                      },
+                      {
+                        "value": "650.00"
+                      },
+                      {
+                        "value": "3900.00"
+                      }
+                    ],
+                    "type": "Data"
+                  },
+                  {
+                    "ColData": [
+                      {
+                        "value": "Wages",
+                        "id": "31"
+                      },
+                      {
+                        "value": "10800.00"
+                      },
+                      {
+                        "value": "10900.00"
+                      },
+                      {
+                        "value": "11000.00"
+                      },
+                      {
+                        "value": "11100.00"
+                      },
+                      {
+                        "value": "11200.00"
+                      },
+                      {
+                        "value": "11300.00"
+                      },
+                      {
+                        "value": "66300.00"
+                      }
+                    ],
+                    "type": "Data"
+                  },
+                  {
+                    "ColData": [
+                      {
+                        "value": "Payroll Taxes",
+                        "id": "32"
+                      },
+                      {
+                        "value": "1080.00"
+                      },
+                      {
+                        "value": "1090.00"
+                      },
+                      {
+                        "value": "1100.00"
+                      },
+                      {
+                        "value": "1110.00"
+                      },
+                      {
+                        "value": "1120.00"
+                      },
+                      {
+                        "value": "1130.00"
+                      },
+                      {
+                        "value": "6630.00"
+                      }
+                    ],
+                    "type": "Data"
+                  }
+                ]
+              },
+              "Summary": {
+                "ColData": [
+                  {
+                    "value": "Total Payroll"
+                  },
+                  {
+                    "value": "12530.00"
+                  },
+                  {
+                    "value": "12640.00"
+                  },
+                  {
+                    "value": "12750.00"
+                  },
+                  {
+                    "value": "12860.00"
+                  },
+                  {
+                    "value": "12970.00"
+                  },
+                  {
+                    "value": "13080.00"
+                  },
+                  {
+                    "value": "76830.00"
+                  }
+                ]
+              }
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Rent",
+                  "id": "33"
+                },
+                {
+                  "value": "3400.00"
+                },
+                {
+                  "value": "3400.00"
+                },
+                {
+                  "value": "3400.00"
+                },
+                {
+                  "value": "3400.00"
+                },
+                {
+                  "value": "3400.00"
+                },
+                {
+                  "value": "3400.00"
+                },
+                {
+                  "value": "20400.00"
+                }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Utilities",
+                  "id": "34"
+                },
+                {
+                  "value": "478.00"
+                },
+                {
+                  "value": "486.00"
+                },
+                {
+                  "value": "494.00"
+                },
+                {
+                  "value": "502.00"
+                },
+                {
+                  "value": "510.00"
+                },
+                {
+                  "value": "518.00"
+                },
+                {
+                  "value": "2988.00"
+                }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Marketing",
+                  "id": "35"
+                },
+                {
+                  "value": "2000.00"
+                },
+                {
+                  "value": "2000.00"
+                },
+                {
+                  "value": "2000.00"
+                },
+                {
+                  "value": "2000.00"
+                },
+                {
+                  "value": "2000.00"
+                },
+                {
+                  "value": "2000.00"
+                },
+                {
+                  "value": "12000.00"
+                }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Insurance",
+                  "id": "36"
+                },
+                {
+                  "value": "640.00"
+                },
+                {
+                  "value": "640.00"
+                },
+                {
+                  "value": "640.00"
+                },
+                {
+                  "value": "640.00"
+                },
+                {
+                  "value": "640.00"
+                },
+                {
+                  "value": "640.00"
+                },
+                {
+                  "value": "3840.00"
+                }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Software Subscriptions",
+                  "id": "37"
+                },
+                {
+                  "value": "520.00"
+                },
+                {
+                  "value": "520.00"
+                },
+                {
+                  "value": "520.00"
+                },
+                {
+                  "value": "520.00"
+                },
+                {
+                  "value": "520.00"
+                },
+                {
+                  "value": "520.00"
+                },
+                {
+                  "value": "3120.00"
+                }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Office Supplies",
+                  "id": "38"
+                },
+                {
+                  "value": "285.00"
+                },
+                {
+                  "value": "290.00"
+                },
+                {
+                  "value": "295.00"
+                },
+                {
+                  "value": "300.00"
+                },
+                {
+                  "value": "305.00"
+                },
+                {
+                  "value": "310.00"
+                },
+                {
+                  "value": "1785.00"
+                }
+              ],
+              "type": "Data"
+            },
+            {
+              "ColData": [
+                {
+                  "value": "Merchant Fees",
+                  "id": "99"
+                },
+                {
+                  "value": "362.00"
+                },
+                {
+                  "value": "374.00"
+                },
+                {
+                  "value": "386.00"
+                },
+                {
+                  "value": "398.00"
+                },
+                {
+                  "value": "410.00"
+                },
+                {
+                  "value": "422.00"
+                },
+                {
+                  "value": "2352.00"
+                }
+              ],
+              "type": "Data"
+            }
+          ]
+        },
+        "Summary": {
+          "ColData": [
+            {
+              "value": "Total Expenses"
+            },
+            {
+              "value": "20215.00"
+            },
+            {
+              "value": "20350.00"
+            },
+            {
+              "value": "20485.00"
+            },
+            {
+              "value": "20620.00"
+            },
+            {
+              "value": "20755.00"
+            },
+            {
+              "value": "20890.00"
+            },
+            {
+              "value": "123315.00"
+            }
+          ]
+        }
+      },
+      {
+        "type": "Section",
+        "group": "NetOperatingIncome",
+        "Summary": {
+          "ColData": [
+            {
+              "value": "Net Operating Income"
+            },
+            {
+              "value": "16135.00"
+            },
+            {
+              "value": "16520.00"
+            },
+            {
+              "value": "16905.00"
+            },
+            {
+              "value": "17290.00"
+            },
+            {
+              "value": "17675.00"
+            },
+            {
+              "value": "18060.00"
+            },
+            {
+              "value": "102585.00"
+            }
+          ]
+        }
+      },
+      {
+        "type": "Section",
+        "group": "NetIncome",
+        "Summary": {
+          "ColData": [
+            {
+              "value": "Net Income"
+            },
+            {
+              "value": "16135.00"
+            },
+            {
+              "value": "16520.00"
+            },
+            {
+              "value": "16905.00"
+            },
+            {
+              "value": "17290.00"
+            },
+            {
+              "value": "17675.00"
+            },
+            {
+              "value": "18060.00"
+            },
+            {
+              "value": "102585.00"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

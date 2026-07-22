@@ -1,0 +1,1278 @@
+{
+  "Header": {
+    "Time": "2026-07-22T08:00:00-07:00",
+    "ReportName": "BalanceSheet",
+    "StartPeriod": "2025-01-01",
+    "EndPeriod": "2025-06-30",
+    "SummarizeColumnsBy": "Month",
+    "Currency": "USD",
+    "Option": [
+      {
+        "Name": "AccountingMethod",
+        "Value": "Accrual"
+      },
+      {
+        "Name": "NoReportData",
+        "Value": "false"
+      }
+    ]
+  },
+  "Columns": {
+    "Column": [
+      {
+        "ColTitle": "",
+        "ColType": "Account"
+      },
+      {
+        "ColTitle": "Jan 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-01-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-01-31"
+          }
+        ]
+      },
+      {
+        "ColTitle": "Feb 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-02-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-02-28"
+          }
+        ]
+      },
+      {
+        "ColTitle": "Mar 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-03-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-03-31"
+          }
+        ]
+      },
+      {
+        "ColTitle": "Apr 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-04-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-04-30"
+          }
+        ]
+      },
+      {
+        "ColTitle": "May 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-05-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-05-31"
+          }
+        ]
+      },
+      {
+        "ColTitle": "Jun 2025",
+        "ColType": "Money",
+        "MetaData": [
+          {
+            "Name": "StartDate",
+            "Value": "2025-06-01"
+          },
+          {
+            "Name": "EndDate",
+            "Value": "2025-06-30"
+          }
+        ]
+      }
+    ]
+  },
+  "Rows": {
+    "Row": [
+      {
+        "type": "Section",
+        "group": "TotalAssets",
+        "Header": {
+          "ColData": [
+            {
+              "value": "ASSETS"
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            }
+          ]
+        },
+        "Rows": {
+          "Row": [
+            {
+              "type": "Section",
+              "group": "CurrentAssets",
+              "Header": {
+                "ColData": [
+                  {
+                    "value": "Current Assets"
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  }
+                ]
+              },
+              "Rows": {
+                "Row": [
+                  {
+                    "type": "Section",
+                    "group": "BankAccounts",
+                    "Header": {
+                      "ColData": [
+                        {
+                          "value": "Bank Accounts"
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        }
+                      ]
+                    },
+                    "Rows": {
+                      "Row": [
+                        {
+                          "ColData": [
+                            {
+                              "value": "Checking",
+                              "id": "40"
+                            },
+                            {
+                              "value": "59500.00"
+                            },
+                            {
+                              "value": "61000.00"
+                            },
+                            {
+                              "value": "62500.00"
+                            },
+                            {
+                              "value": "64000.00"
+                            },
+                            {
+                              "value": "65500.00"
+                            },
+                            {
+                              "value": "67000.00"
+                            }
+                          ],
+                          "type": "Data"
+                        },
+                        {
+                          "ColData": [
+                            {
+                              "value": "Savings",
+                              "id": "41"
+                            },
+                            {
+                              "value": "18250.00"
+                            },
+                            {
+                              "value": "18500.00"
+                            },
+                            {
+                              "value": "18750.00"
+                            },
+                            {
+                              "value": "19000.00"
+                            },
+                            {
+                              "value": "19250.00"
+                            },
+                            {
+                              "value": "19500.00"
+                            }
+                          ],
+                          "type": "Data"
+                        }
+                      ]
+                    },
+                    "Summary": {
+                      "ColData": [
+                        {
+                          "value": "Total Bank Accounts"
+                        },
+                        {
+                          "value": "77750.00"
+                        },
+                        {
+                          "value": "79500.00"
+                        },
+                        {
+                          "value": "81250.00"
+                        },
+                        {
+                          "value": "83000.00"
+                        },
+                        {
+                          "value": "84750.00"
+                        },
+                        {
+                          "value": "86500.00"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "Section",
+                    "group": "AR",
+                    "Header": {
+                      "ColData": [
+                        {
+                          "value": "Accounts Receivable"
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        }
+                      ]
+                    },
+                    "Rows": {
+                      "Row": [
+                        {
+                          "ColData": [
+                            {
+                              "value": "Accounts Receivable",
+                              "id": "42"
+                            },
+                            {
+                              "value": "12900.00"
+                            },
+                            {
+                              "value": "13200.00"
+                            },
+                            {
+                              "value": "13500.00"
+                            },
+                            {
+                              "value": "13800.00"
+                            },
+                            {
+                              "value": "14100.00"
+                            },
+                            {
+                              "value": "14400.00"
+                            }
+                          ],
+                          "type": "Data"
+                        }
+                      ]
+                    },
+                    "Summary": {
+                      "ColData": [
+                        {
+                          "value": "Total Accounts Receivable"
+                        },
+                        {
+                          "value": "12900.00"
+                        },
+                        {
+                          "value": "13200.00"
+                        },
+                        {
+                          "value": "13500.00"
+                        },
+                        {
+                          "value": "13800.00"
+                        },
+                        {
+                          "value": "14100.00"
+                        },
+                        {
+                          "value": "14400.00"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "Section",
+                    "group": "OtherCurrentAssets",
+                    "Header": {
+                      "ColData": [
+                        {
+                          "value": "Other Current Assets"
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        }
+                      ]
+                    },
+                    "Rows": {
+                      "Row": [
+                        {
+                          "ColData": [
+                            {
+                              "value": "Inventory",
+                              "id": "43"
+                            },
+                            {
+                              "value": "27200.00"
+                            },
+                            {
+                              "value": "27600.00"
+                            },
+                            {
+                              "value": "28000.00"
+                            },
+                            {
+                              "value": "28400.00"
+                            },
+                            {
+                              "value": "28800.00"
+                            },
+                            {
+                              "value": "29200.00"
+                            }
+                          ],
+                          "type": "Data"
+                        }
+                      ]
+                    },
+                    "Summary": {
+                      "ColData": [
+                        {
+                          "value": "Total Other Current Assets"
+                        },
+                        {
+                          "value": "27200.00"
+                        },
+                        {
+                          "value": "27600.00"
+                        },
+                        {
+                          "value": "28000.00"
+                        },
+                        {
+                          "value": "28400.00"
+                        },
+                        {
+                          "value": "28800.00"
+                        },
+                        {
+                          "value": "29200.00"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              "Summary": {
+                "ColData": [
+                  {
+                    "value": "Total Current Assets"
+                  },
+                  {
+                    "value": "117850.00"
+                  },
+                  {
+                    "value": "120300.00"
+                  },
+                  {
+                    "value": "122750.00"
+                  },
+                  {
+                    "value": "125200.00"
+                  },
+                  {
+                    "value": "127650.00"
+                  },
+                  {
+                    "value": "130100.00"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Section",
+              "group": "FixedAssets",
+              "Header": {
+                "ColData": [
+                  {
+                    "value": "Fixed Assets"
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  }
+                ]
+              },
+              "Rows": {
+                "Row": [
+                  {
+                    "ColData": [
+                      {
+                        "value": "Roasting Equipment",
+                        "id": "44"
+                      },
+                      {
+                        "value": "85000.00"
+                      },
+                      {
+                        "value": "85000.00"
+                      },
+                      {
+                        "value": "85000.00"
+                      },
+                      {
+                        "value": "85000.00"
+                      },
+                      {
+                        "value": "85000.00"
+                      },
+                      {
+                        "value": "85000.00"
+                      }
+                    ],
+                    "type": "Data"
+                  },
+                  {
+                    "ColData": [
+                      {
+                        "value": "Accumulated Depreciation",
+                        "id": "45"
+                      },
+                      {
+                        "value": "-21100.00"
+                      },
+                      {
+                        "value": "-21800.00"
+                      },
+                      {
+                        "value": "-22500.00"
+                      },
+                      {
+                        "value": "-23200.00"
+                      },
+                      {
+                        "value": "-23900.00"
+                      },
+                      {
+                        "value": "-24600.00"
+                      }
+                    ],
+                    "type": "Data"
+                  }
+                ]
+              },
+              "Summary": {
+                "ColData": [
+                  {
+                    "value": "Total Fixed Assets"
+                  },
+                  {
+                    "value": "63900.00"
+                  },
+                  {
+                    "value": "63200.00"
+                  },
+                  {
+                    "value": "62500.00"
+                  },
+                  {
+                    "value": "61800.00"
+                  },
+                  {
+                    "value": "61100.00"
+                  },
+                  {
+                    "value": "60400.00"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "Summary": {
+          "ColData": [
+            {
+              "value": "TOTAL ASSETS"
+            },
+            {
+              "value": "181750.00"
+            },
+            {
+              "value": "183500.00"
+            },
+            {
+              "value": "185250.00"
+            },
+            {
+              "value": "187000.00"
+            },
+            {
+              "value": "188750.00"
+            },
+            {
+              "value": "190500.00"
+            }
+          ]
+        }
+      },
+      {
+        "type": "Section",
+        "group": "TotalLiabilitiesAndEquity",
+        "Header": {
+          "ColData": [
+            {
+              "value": "LIABILITIES AND EQUITY"
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            },
+            {
+              "value": ""
+            }
+          ]
+        },
+        "Rows": {
+          "Row": [
+            {
+              "type": "Section",
+              "group": "Liabilities",
+              "Header": {
+                "ColData": [
+                  {
+                    "value": "Liabilities"
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  }
+                ]
+              },
+              "Rows": {
+                "Row": [
+                  {
+                    "type": "Section",
+                    "group": "CurrentLiabilities",
+                    "Header": {
+                      "ColData": [
+                        {
+                          "value": "Current Liabilities"
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        }
+                      ]
+                    },
+                    "Rows": {
+                      "Row": [
+                        {
+                          "type": "Section",
+                          "group": "AP",
+                          "Header": {
+                            "ColData": [
+                              {
+                                "value": "Accounts Payable"
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              }
+                            ]
+                          },
+                          "Rows": {
+                            "Row": [
+                              {
+                                "ColData": [
+                                  {
+                                    "value": "Accounts Payable",
+                                    "id": "50"
+                                  },
+                                  {
+                                    "value": "8950.00"
+                                  },
+                                  {
+                                    "value": "9100.00"
+                                  },
+                                  {
+                                    "value": "9250.00"
+                                  },
+                                  {
+                                    "value": "9400.00"
+                                  },
+                                  {
+                                    "value": "9550.00"
+                                  },
+                                  {
+                                    "value": "9700.00"
+                                  }
+                                ],
+                                "type": "Data"
+                              }
+                            ]
+                          },
+                          "Summary": {
+                            "ColData": [
+                              {
+                                "value": "Total Accounts Payable"
+                              },
+                              {
+                                "value": "8950.00"
+                              },
+                              {
+                                "value": "9100.00"
+                              },
+                              {
+                                "value": "9250.00"
+                              },
+                              {
+                                "value": "9400.00"
+                              },
+                              {
+                                "value": "9550.00"
+                              },
+                              {
+                                "value": "9700.00"
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "type": "Section",
+                          "group": "CreditCards",
+                          "Header": {
+                            "ColData": [
+                              {
+                                "value": "Credit Cards"
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              }
+                            ]
+                          },
+                          "Rows": {
+                            "Row": [
+                              {
+                                "ColData": [
+                                  {
+                                    "value": "Visa Credit Card",
+                                    "id": "51"
+                                  },
+                                  {
+                                    "value": "3180.00"
+                                  },
+                                  {
+                                    "value": "3240.00"
+                                  },
+                                  {
+                                    "value": "3300.00"
+                                  },
+                                  {
+                                    "value": "3360.00"
+                                  },
+                                  {
+                                    "value": "3420.00"
+                                  },
+                                  {
+                                    "value": "3480.00"
+                                  }
+                                ],
+                                "type": "Data"
+                              }
+                            ]
+                          },
+                          "Summary": {
+                            "ColData": [
+                              {
+                                "value": "Total Credit Cards"
+                              },
+                              {
+                                "value": "3180.00"
+                              },
+                              {
+                                "value": "3240.00"
+                              },
+                              {
+                                "value": "3300.00"
+                              },
+                              {
+                                "value": "3360.00"
+                              },
+                              {
+                                "value": "3420.00"
+                              },
+                              {
+                                "value": "3480.00"
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "type": "Section",
+                          "group": "OtherCurrentLiabilities",
+                          "Header": {
+                            "ColData": [
+                              {
+                                "value": "Other Current Liabilities"
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              },
+                              {
+                                "value": ""
+                              }
+                            ]
+                          },
+                          "Rows": {
+                            "Row": [
+                              {
+                                "ColData": [
+                                  {
+                                    "value": "Payroll Liabilities",
+                                    "id": "52"
+                                  },
+                                  {
+                                    "value": "2160.00"
+                                  },
+                                  {
+                                    "value": "2180.00"
+                                  },
+                                  {
+                                    "value": "2200.00"
+                                  },
+                                  {
+                                    "value": "2220.00"
+                                  },
+                                  {
+                                    "value": "2240.00"
+                                  },
+                                  {
+                                    "value": "2260.00"
+                                  }
+                                ],
+                                "type": "Data"
+                              }
+                            ]
+                          },
+                          "Summary": {
+                            "ColData": [
+                              {
+                                "value": "Total Other Current Liabilities"
+                              },
+                              {
+                                "value": "2160.00"
+                              },
+                              {
+                                "value": "2180.00"
+                              },
+                              {
+                                "value": "2200.00"
+                              },
+                              {
+                                "value": "2220.00"
+                              },
+                              {
+                                "value": "2240.00"
+                              },
+                              {
+                                "value": "2260.00"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    "Summary": {
+                      "ColData": [
+                        {
+                          "value": "Total Current Liabilities"
+                        },
+                        {
+                          "value": "14290.00"
+                        },
+                        {
+                          "value": "14520.00"
+                        },
+                        {
+                          "value": "14750.00"
+                        },
+                        {
+                          "value": "14980.00"
+                        },
+                        {
+                          "value": "15210.00"
+                        },
+                        {
+                          "value": "15440.00"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "Section",
+                    "group": "LongTermLiabilities",
+                    "Header": {
+                      "ColData": [
+                        {
+                          "value": "Long-Term Liabilities"
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        },
+                        {
+                          "value": ""
+                        }
+                      ]
+                    },
+                    "Rows": {
+                      "Row": [
+                        {
+                          "ColData": [
+                            {
+                              "value": "SBA Loan",
+                              "id": "53"
+                            },
+                            {
+                              "value": "44400.00"
+                            },
+                            {
+                              "value": "43200.00"
+                            },
+                            {
+                              "value": "42000.00"
+                            },
+                            {
+                              "value": "40800.00"
+                            },
+                            {
+                              "value": "39600.00"
+                            },
+                            {
+                              "value": "38400.00"
+                            }
+                          ],
+                          "type": "Data"
+                        }
+                      ]
+                    },
+                    "Summary": {
+                      "ColData": [
+                        {
+                          "value": "Total Long-Term Liabilities"
+                        },
+                        {
+                          "value": "44400.00"
+                        },
+                        {
+                          "value": "43200.00"
+                        },
+                        {
+                          "value": "42000.00"
+                        },
+                        {
+                          "value": "40800.00"
+                        },
+                        {
+                          "value": "39600.00"
+                        },
+                        {
+                          "value": "38400.00"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              "Summary": {
+                "ColData": [
+                  {
+                    "value": "Total Liabilities"
+                  },
+                  {
+                    "value": "58690.00"
+                  },
+                  {
+                    "value": "57720.00"
+                  },
+                  {
+                    "value": "56750.00"
+                  },
+                  {
+                    "value": "55780.00"
+                  },
+                  {
+                    "value": "54810.00"
+                  },
+                  {
+                    "value": "53840.00"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Section",
+              "group": "Equity",
+              "Header": {
+                "ColData": [
+                  {
+                    "value": "Equity"
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  },
+                  {
+                    "value": ""
+                  }
+                ]
+              },
+              "Rows": {
+                "Row": [
+                  {
+                    "ColData": [
+                      {
+                        "value": "Owner's Equity",
+                        "id": "60"
+                      },
+                      {
+                        "value": "50000.00"
+                      },
+                      {
+                        "value": "50000.00"
+                      },
+                      {
+                        "value": "50000.00"
+                      },
+                      {
+                        "value": "50000.00"
+                      },
+                      {
+                        "value": "50000.00"
+                      },
+                      {
+                        "value": "50000.00"
+                      }
+                    ],
+                    "type": "Data"
+                  },
+                  {
+                    "ColData": [
+                      {
+                        "value": "Retained Earnings",
+                        "id": "61"
+                      },
+                      {
+                        "value": "30000.00"
+                      },
+                      {
+                        "value": "30000.00"
+                      },
+                      {
+                        "value": "30000.00"
+                      },
+                      {
+                        "value": "30000.00"
+                      },
+                      {
+                        "value": "30000.00"
+                      },
+                      {
+                        "value": "30000.00"
+                      }
+                    ],
+                    "type": "Data"
+                  },
+                  {
+                    "ColData": [
+                      {
+                        "value": "Net Income"
+                      },
+                      {
+                        "value": "43060.00"
+                      },
+                      {
+                        "value": "45780.00"
+                      },
+                      {
+                        "value": "48500.00"
+                      },
+                      {
+                        "value": "51220.00"
+                      },
+                      {
+                        "value": "53940.00"
+                      },
+                      {
+                        "value": "56660.00"
+                      }
+                    ],
+                    "type": "Data"
+                  }
+                ]
+              },
+              "Summary": {
+                "ColData": [
+                  {
+                    "value": "Total Equity"
+                  },
+                  {
+                    "value": "123060.00"
+                  },
+                  {
+                    "value": "125780.00"
+                  },
+                  {
+                    "value": "128500.00"
+                  },
+                  {
+                    "value": "131220.00"
+                  },
+                  {
+                    "value": "133940.00"
+                  },
+                  {
+                    "value": "136660.00"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "Summary": {
+          "ColData": [
+            {
+              "value": "TOTAL LIABILITIES AND EQUITY"
+            },
+            {
+              "value": "181750.00"
+            },
+            {
+              "value": "183500.00"
+            },
+            {
+              "value": "185250.00"
+            },
+            {
+              "value": "187000.00"
+            },
+            {
+              "value": "188750.00"
+            },
+            {
+              "value": "190500.00"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
