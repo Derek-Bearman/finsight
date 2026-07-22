@@ -25,9 +25,11 @@ import {
   planQboSync,
   runQboSyncChunk,
   type QboPlanResult,
-  type QboSyncChunk,
   type QboSyncChunkResult,
 } from '@/lib/data/qbo-actions';
+// Not from qbo-actions: a 'use server' module can't re-export types (see the
+// note there) — the chunk shape lives in the pure planning module.
+import type { QboSyncChunk } from '@/lib/qbo/sync';
 import { transformQboData } from '@/lib/qbo/transform';
 import {
   Dialog,

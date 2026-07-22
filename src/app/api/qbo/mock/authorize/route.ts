@@ -16,6 +16,9 @@ export async function GET(request: NextRequest): Promise<Response> {
   const redirectUri = params.get('redirect_uri');
   const state = params.get('state') ?? '';
   if (!redirectUri) return new Response('missing redirect_uri', { status: 400 });
+  if (!URL.canParse(redirectUri)) {
+    return new Response('invalid redirect_uri', { status: 400 });
+  }
 
   return new Response(authorizePageHtml(redirectUri, state), {
     headers: { 'Content-Type': 'text/html; charset=utf-8' },

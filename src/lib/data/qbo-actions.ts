@@ -44,7 +44,11 @@ import {
 import { planSyncChunks, type QboSyncChunk } from '@/lib/qbo/sync';
 import type { QboAccount, QboReport } from '@/lib/qbo/qbo-types';
 
-export type { QboSyncChunk };
+// NOTE: no `export type { QboSyncChunk }` here — a 'use server' module may only
+// export async functions in this Next version; even a type re-export of an
+// imported binding leaves a runtime export in the server-actions loader and
+// crashes EVERY action on the page (ReferenceError at module evaluation).
+// Import the chunk type from '@/lib/qbo/sync' instead.
 
 // ─────────────────────────────────────────────
 // Result shapes
