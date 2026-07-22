@@ -7,9 +7,34 @@ Work top to bottom; each section says when to do it.
 Companion doc: `QBO_INTEGRATION_PLAN.md` (the technical spec). You never need
 it to follow this runbook.
 
+> **STATUS 2026-07-22 (evening) — sections A and most of B are DONE** (Derek
+> created the account + app; Claude drove the rest in-browser):
+> - ✅ Dev keys in `.env.development.local`, `QBO_ENVIRONMENT=sandbox`,
+>   `FINSIGHT_QBO_MOCK=false` — **real-sandbox E2E VERIFIED end-to-end**
+>   (real Intuit OAuth consent → token exchange → COA + chunked Reports pulls
+>   → 52 realm-qualified accounts / 7 months of "Sandbox Company US f215"
+>   rendering in Statements → encrypted tokens + sync stamp in the DB).
+> - ✅ App details 100% on the production task list: App URLs (host/launch/
+>   disconnect/connect), EULA + privacy URLs, category **Business Insights**,
+>   Geolocation **United States**, Regulated industries **None of the above**,
+>   Accepted connections narrowed to **United States** (widen later if you
+>   want non-US customers), dev redirect URI present.
+> - **LEFT FOR YOU, in order:** (1) section B's **Compliance questionnaire**
+>   (~40 min, one-shot — use the drafted answers below); (2) after it
+>   approves, add the **production redirect URI**
+>   `https://finsight.arktosmarketing.com/api/qbo/callback` under Settings →
+>   Redirect URIs → Production (it's locked until production keys unlock);
+>   (3) section C deploy-day steps.
+> - **Portal UI drift note:** the portal now lives under Workspaces → Arktos
+>   Tools → FinSight. The "App details" items are the tabs under **Settings**
+>   (App URLs / App terms of service / App categories / Geolocation /
+>   Redirect URIs / Accepted connections / Regulated industries), and the
+>   production unlock is tracked as task cards on **Keys and credentials →
+>   Production**. Section B's field names below map 1:1 onto those tabs.
+
 ---
 
-## A. NOW: Intuit developer account + dev keys (~15 min)
+## A. NOW: Intuit developer account + dev keys (~15 min) — ✅ DONE 2026-07-22
 
 Do this whenever. Nothing here touches the live app.
 
