@@ -37,6 +37,13 @@ export interface Period {
 
 export interface Account {
   id: string;
+  /**
+   * Stable id in an external system of record (QuickBooks Online Account.Id).
+   * Set only by API-driven imports; CSV imports leave it undefined. The dataset
+   * matcher treats it as the highest-priority identity — it survives renames
+   * and account-number changes, making re-sync idempotent.
+   */
+  externalId?: string;
   number?: string;
   name: string;
   type: AccountType;

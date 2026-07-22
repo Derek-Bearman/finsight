@@ -181,6 +181,85 @@ export type Database = {
           },
         ]
       }
+      qbo_connections: {
+        Row: {
+          access_token_enc: string | null
+          access_token_expires_at: string | null
+          company_name: string | null
+          connected_by: string | null
+          created_at: string
+          firm_id: string
+          id: string
+          last_sync_error: string | null
+          last_synced_at: string | null
+          realm_id: string
+          refresh_token_enc: string | null
+          refresh_token_expires_at: string | null
+          refresh_token_hard_expires_at: string | null
+          status: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          access_token_enc?: string | null
+          access_token_expires_at?: string | null
+          company_name?: string | null
+          connected_by?: string | null
+          created_at?: string
+          firm_id: string
+          id?: string
+          last_sync_error?: string | null
+          last_synced_at?: string | null
+          realm_id: string
+          refresh_token_enc?: string | null
+          refresh_token_expires_at?: string | null
+          refresh_token_hard_expires_at?: string | null
+          status?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          access_token_enc?: string | null
+          access_token_expires_at?: string | null
+          company_name?: string | null
+          connected_by?: string | null
+          created_at?: string
+          firm_id?: string
+          id?: string
+          last_sync_error?: string | null
+          last_synced_at?: string | null
+          realm_id?: string
+          refresh_token_enc?: string | null
+          refresh_token_expires_at?: string | null
+          refresh_token_hard_expires_at?: string | null
+          status?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qbo_connections_firm_id_fkey"
+            columns: ["firm_id"]
+            isOneToOne: false
+            referencedRelation: "firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "qbo_connections_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "qbo_connections_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces_metadata"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspaces: {
         Row: {
           created_at: string
