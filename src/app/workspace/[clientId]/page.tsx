@@ -101,6 +101,18 @@ const TABS: { id: Tab; label: string; phase: string | null }[] = [
   { id: 'operational', label: 'Operational', phase: null },
 ];
 
+// ── QBO OAuth return handling ────────────────────────────────────────────────
+
+/** Maps /api/qbo/{connect,callback} ?qbo_error reasons to human copy. Any
+ *  unknown reason falls back to the generic failure line. */
+const QBO_ERROR_MESSAGES: Record<string, string> = {
+  denied: 'QuickBooks connection was cancelled.',
+  invalid_state: 'The connection link expired — try again.',
+  forbidden: 'Only firm owners and admins can connect QuickBooks.',
+  billing: 'Your plan is read-only right now.',
+  not_configured: "QuickBooks isn't configured on this server.",
+};
+
 // ── Horizon months map ─────────────────────────────────────────────────────────
 
 const HORIZON_MONTHS: Record<HorizonKey, number> = {
@@ -1585,6 +1597,37 @@ export default function WorkspacePage({ params }: PageProps) {
     const t = new URLSearchParams(window.location.search).get('tab');
     if (t && TABS.some((x) => x.id === t)) setActiveTab(t as Tab);
   }, []);
+  const [qboAutoSync, setQboAutoSync] = useState(false);
+  const [qboErrorToast, setQboErrorToast] = useState<string | null>(null);
+  // QBO OAuth return: /api/qbo/callback (and /connect failures) 302 back here
+  // with ?qbo=connected or ?qbo_error=<reason>. Success jumps straight to the
+  // Statements tab and auto-opens the sync dialog (connect → land → backfill);
+  // errors surface as a toast. Handled once on mount, then stripped via
+  // replaceState so a refresh doesn't re-fire — same pattern as ?tab= above.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get('qbo') === 'connected';
+    const qboError = params.get('qbo_error');
+    if (!connected && qboError === null) return;
+    if (connected) {
+      setActiveTab('statements');
+      setQboAutoSync(true);
+    }
+    if (qboError !== null) {
+      setQboErrorToast(
+        QBO_ERROR_MESSAGES[qboError] ?? 'QuickBooks connection failed — try again.'
+      );
+      setTimeout(() => setQboErrorToast(null), 6000);
+    }
+    params.delete('qbo');
+    params.delete('qbo_error');
+    const qs = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash
+    );
+  }, []);
   const [hydrated, setHydrated] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showTargets, setShowTargets] = useState(false);
@@ -1833,6 +1876,23 @@ export default function WorkspacePage({ params }: PageProps) {
         </div>
       )}
 
+      {/* QBO connect-error toast — same house pattern, error tone */}
+      {qboErrorToast && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-lg border px-5 py-3 shadow-lg text-sm font-medium"
+          style={{
+            background: 'hsl(var(--card))',
+            borderColor: 'hsl(0 72% 51% / 0.4)',
+            color: 'hsl(0 72% 41%)',
+          }}
+          role="status"
+          aria-live="polite"
+          data-testid="qbo-error-toast"
+        >
+          {qboErrorToast}
+        </div>
+      )}
+
       {/* Tabs */}
       <div
         className="border-b"
@@ -1886,7 +1946,7 @@ export default function WorkspacePage({ params }: PageProps) {
         )}
         {activeTab === 'statements' && (
           <ReadOnlyGuard>
-            <StatementsView clientId={clientId} embedded />
+            <StatementsView clientId={clientId} embedded qboAutoSync={qboAutoSync} />
           </ReadOnlyGuard>
         )}
         {activeTab === 'mapping' && (

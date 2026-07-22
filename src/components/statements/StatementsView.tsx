@@ -9,7 +9,7 @@
  */
 
 import { useMemo, useRef, useState } from 'react';
-import type { Account, AccountValue, Period, StatementType } from '@/types';
+import type { Account, AccountValue, Period } from '@/types';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { getProfile } from '@/lib/profiles';
 import { parseImportFile } from '@/lib/data/import-pipeline';
@@ -20,9 +20,16 @@ import {
   activeDatasetId,
   periodKey,
   periodLabelShort,
+  mergeOverwrite,
   type ImportDiff,
 } from '@/lib/data/datasets';
-import { commitMergeNewPeriods, commitReplaceAsNewDataset } from '@/lib/data/dataset-commit';
+import {
+  commitMergeNewPeriods,
+  commitOverwriteMerge,
+  commitReplaceAsNewDataset,
+} from '@/lib/data/dataset-commit';
+import { completeQboSync } from '@/lib/data/qbo-actions';
+import { QboControls, type QboSyncData } from '@/components/qbo/QboControls';
 import { formatCurrency } from '@/lib/utils/format';
 
 type Granularity = 'monthly' | 'quarterly' | 'annual';
@@ -284,7 +291,14 @@ function buildBalanceSheetRows(accounts: Account[], values: AccountValue[], buck
 
 interface PendingImport {
   fileName: string;
-  statementType: 'pnl' | 'balance_sheet';
+  /** File imports carry the picked type; a QBO sync is a combined P&L +
+   *  Balance Sheet batch and has none. */
+  statementType?: 'pnl' | 'balance_sheet';
+  /** undefined ⇒ file import (legacy behavior, byte-identical);
+   *  'qbo' ⇒ QuickBooks sync review with QBO-specific commit actions. */
+  source?: 'file' | 'qbo';
+  /** QBO company name (source === 'qbo' only). */
+  companyName?: string;
   accounts: Account[];
   values: AccountValue[];
   diff: ImportDiff;
@@ -320,7 +334,17 @@ function mergeAdditionsLabel(diff: ImportDiff): string {
 
 // ── Main view ────────────────────────────────────────────────────────────────
 
-export function StatementsView({ clientId, embedded = false }: { clientId: string; embedded?: boolean }) {
+export function StatementsView({
+  clientId,
+  embedded = false,
+  qboAutoSync = false,
+}: {
+  clientId: string;
+  embedded?: boolean;
+  /** Set once by the workspace page on a ?qbo=connected landing so the sync
+   *  dialog auto-opens right after the first connect. */
+  qboAutoSync?: boolean;
+}) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
 
@@ -331,6 +355,8 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
   const [parseError, setParseError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [qboConnected, setQboConnected] = useState(false);
+  const [qboRefreshKey, setQboRefreshKey] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const buckets = useMemo(() => (workspace ? bucketPeriods(workspace.values, gran) : []), [workspace?.values, gran]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -422,12 +448,70 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
   // lives in lib/data/dataset-commit — shared with the QBO sync flow. These
   // handlers only wire the pure patch to the store and drive the UI/toasts.
 
+  /** Fire-and-forget after ANY QBO commit: stamps last_synced_at server-side,
+   *  then bumps the chip so "Synced just now" shows. Never throws. */
+  function stampQboSyncComplete() {
+    void completeQboSync(clientId)
+      .catch(() => undefined)
+      .then(() => setQboRefreshKey((k) => k + 1));
+  }
+
+  /** Sync dialog finished — diff the combined batch against the working set
+   *  and hand it to the SAME review surface the file import uses. */
+  function handleQboData(r: QboSyncData) {
+    if (!workspace) return;
+    setImporting(false);
+    setParseError(null);
+    const diff = diffImport(workspace.accounts, workspace.values, r.accounts, r.values);
+    setPending({
+      fileName: `QuickBooks — ${r.companyName}`,
+      source: 'qbo',
+      companyName: r.companyName,
+      accounts: r.accounts,
+      values: r.values,
+      diff,
+      warnings: r.warnings,
+    });
+  }
+
+  /** 'identical' verdict: nothing to commit — record the sync and close. */
+  function handleQboUpToDate() {
+    setPending(null);
+    stampQboSyncComplete();
+  }
+
+  /** 'conflicts' primary action: restatement-capable overwrite merge into the
+   *  active dataset (changed cells + new periods + new accounts), preserving
+   *  user classifications. The commit patch carries no counts, so the same
+   *  pure mergeOverwrite runs once more on identical inputs purely to report
+   *  honestly what the commit did. */
+  function handleApplyQboUpdates() {
+    if (!workspace || !pending || pending.source !== 'qbo') return;
+    const incoming = { accounts: pending.accounts, values: pending.values };
+    const counts = mergeOverwrite(
+      workspace.accounts,
+      workspace.values,
+      incoming.accounts,
+      incoming.values
+    );
+    const patch = commitOverwriteMerge(workspace, incoming, pending.fileName);
+    updateWorkspace(clientId, patch);
+    setPending(null);
+    stampQboSyncComplete();
+    const cells = `${counts.changedCells} cell${counts.changedCells === 1 ? '' : 's'}`;
+    const periods = `${counts.addedPeriods} period${counts.addedPeriods === 1 ? '' : 's'}`;
+    const accts = `${counts.addedAccounts} account${counts.addedAccounts === 1 ? '' : 's'}`;
+    showToast(`Updated ${cells} · added ${periods} · ${accts}`);
+  }
+
   function handleMergeNewPeriods() {
     if (!workspace || !pending) return;
+    const wasQbo = pending.source === 'qbo';
     const patch = commitMergeNewPeriods(workspace, { accounts: pending.accounts, values: pending.values });
     updateWorkspace(clientId, patch);
     setPending(null);
     setImporting(false);
+    if (wasQbo) stampQboSyncComplete();
     // Report what the merge actually added (not the reviewed diff's counts),
     // so the toast can never overstate the commit.
     const activeLabel = patch.datasets.find((d) => d.id === patch.activeDatasetId)!.label;
@@ -444,7 +528,12 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
 
   function handleReplaceAsNewDataset() {
     if (!workspace || !pending) return;
-    const label = `${pending.statementType === 'pnl' ? 'P&L' : 'Balance Sheet'} · ${pending.fileName}`;
+    const wasQbo = pending.source === 'qbo';
+    // QBO batches combine P&L + BS, so the dataset is labeled by source
+    // company ("QuickBooks — <Company>"), not by statement type.
+    const label = wasQbo
+      ? pending.fileName
+      : `${pending.statementType === 'pnl' ? 'P&L' : 'Balance Sheet'} · ${pending.fileName}`;
     const patch = commitReplaceAsNewDataset(
       workspace,
       { accounts: pending.accounts, values: pending.values },
@@ -453,6 +542,7 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
     updateWorkspace(clientId, patch);
     setPending(null);
     setImporting(false);
+    if (wasQbo) stampQboSyncComplete();
     showToast(`Imported "${label}" as a new dataset`);
   }
 
@@ -491,6 +581,13 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
             ))}
           </div>
         </div>
+        <QboControls
+          clientId={clientId}
+          onSyncData={handleQboData}
+          autoOpenSync={qboAutoSync}
+          refreshKey={qboRefreshKey}
+          onStatusChange={(s) => setQboConnected(s.connected)}
+        />
         <button
           onClick={() => { setImporting((v) => !v); setPending(null); setParseError(null); }}
           className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
@@ -501,35 +598,49 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
         </button>
       </div>
 
-      {/* Import panel */}
-      {importing && (
+      {/* Import panel — file upload flow, or the review of a completed QBO sync */}
+      {(importing || pending?.source === 'qbo') && (
         <div className="rounded-xl border p-4 flex flex-col gap-3" style={{ borderColor: 'hsl(var(--primary) / 0.4)', background: 'hsl(var(--card))' }}>
-          <div className="flex items-center gap-3 flex-wrap">
-            <span className="text-sm font-semibold" style={{ color: 'hsl(var(--foreground))' }}>Import a statement</span>
-            <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: 'hsl(var(--muted))' }}>
-              {([['pnl', 'P&L'], ['balance_sheet', 'Balance Sheet']] as const).map(([t, l]) => (
-                <button key={t} onClick={() => setImportType(t)}
-                  className="px-3 py-1 rounded-md text-xs font-medium transition-colors"
-                  style={{
-                    background: importType === t ? 'hsl(var(--primary))' : 'transparent',
-                    color: importType === t ? 'hsl(var(--primary-foreground))' : 'hsl(var(--muted-foreground))',
-                  }}>
-                  {l}
-                </button>
-              ))}
+          {pending?.source === 'qbo' ? (
+            /* QBO review header — combined P&L + BS batch, no statement-type label */
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-sm font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
+                QuickBooks — {pending.companyName}
+              </span>
+              <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                Combined P&amp;L + Balance Sheet · nothing saves until you choose below
+              </span>
             </div>
-            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,.xlsm" className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f); e.target.value = ''; }} />
-            <button onClick={() => fileRef.current?.click()} disabled={busy}
-              className="rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
-              style={{ background: 'hsl(var(--primary))', color: 'hsl(var(--primary-foreground))' }}>
-              {busy ? 'Reading…' : 'Choose file'}
-            </button>
-          </div>
-          <p className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            Upload a QuickBooks-style {importType === 'pnl' ? 'Profit &amp; Loss' : 'Balance Sheet'} by month. FinSight compares it to the
-            current dataset and shows you exactly what matches and what&apos;s new before saving.
-          </p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-sm font-semibold" style={{ color: 'hsl(var(--foreground))' }}>Import a statement</span>
+                <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: 'hsl(var(--muted))' }}>
+                  {([['pnl', 'P&L'], ['balance_sheet', 'Balance Sheet']] as const).map(([t, l]) => (
+                    <button key={t} onClick={() => setImportType(t)}
+                      className="px-3 py-1 rounded-md text-xs font-medium transition-colors"
+                      style={{
+                        background: importType === t ? 'hsl(var(--primary))' : 'transparent',
+                        color: importType === t ? 'hsl(var(--primary-foreground))' : 'hsl(var(--muted-foreground))',
+                      }}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,.xlsm" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f); e.target.value = ''; }} />
+                <button onClick={() => fileRef.current?.click()} disabled={busy}
+                  className="rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+                  style={{ background: 'hsl(var(--primary))', color: 'hsl(var(--primary-foreground))' }}>
+                  {busy ? 'Reading…' : 'Choose file'}
+                </button>
+              </div>
+              <p className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                Upload a QuickBooks-style {importType === 'pnl' ? 'Profit &amp; Loss' : 'Balance Sheet'} by month. FinSight compares it to the
+                current dataset and shows you exactly what matches and what&apos;s new before saving.
+              </p>
+            </>
+          )}
 
           {parseError && (
             <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: 'hsl(0 72% 51% / 0.4)', background: 'hsl(0 72% 51% / 0.06)', color: 'hsl(0 72% 41%)' }}>
@@ -542,8 +653,23 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
             <div className="flex flex-col gap-3 border-t pt-3" style={{ borderColor: 'hsl(var(--border))' }}>
               <div className="flex items-center gap-3 flex-wrap">
                 <StatusBadge status={pending.diff.status} matchedCells={pending.diff.matchedCells} />
-                <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>{pending.fileName}</span>
+                {pending.source !== 'qbo' && (
+                  <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>{pending.fileName}</span>
+                )}
               </div>
+
+              {pending.source === 'qbo' && pending.warnings.length > 0 && (
+                <details className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                  <summary className="cursor-pointer select-none">
+                    {pending.warnings.length} sync note{pending.warnings.length === 1 ? '' : 's'} from QuickBooks
+                  </summary>
+                  <ul className="mt-1 list-disc pl-4 max-h-32 overflow-y-auto">
+                    {pending.warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                 <div>
@@ -612,32 +738,84 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
               )}
 
               {/* Actions */}
-              <div className="flex items-center gap-2 flex-wrap pt-1">
-                {canAdditiveMerge && pending.diff.changedCells.length === 0 && (
-                  <button onClick={handleMergeNewPeriods} data-testid="import-merge-btn"
-                    className="rounded-lg px-3 py-1.5 text-xs font-semibold"
-                    style={{ background: 'hsl(142 71% 40%)', color: '#fff' }}>
-                    Add {mergeAdditionsLabel(pending.diff)} to current data
+              {pending.source === 'qbo' ? (
+                /* QBO review actions — branch on the diff verdict. Every
+                 * commit path also stamps last_synced_at via completeQboSync. */
+                <div className="flex items-center gap-2 flex-wrap pt-1">
+                  {pending.diff.status === 'identical' ? (
+                    <>
+                      <span className="text-xs font-medium" style={{ color: 'hsl(142 71% 35%)' }}>
+                        Already up to date
+                      </span>
+                      <button onClick={handleQboUpToDate} data-testid="qbo-review-close-btn"
+                        className="rounded-lg border px-3 py-1.5 text-xs font-semibold cursor-pointer transition-colors hover:bg-muted"
+                        style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--foreground))' }}>
+                        Close
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {pending.diff.status === 'conflicts' && (
+                        <button onClick={handleApplyQboUpdates} data-testid="qbo-apply-updates-btn"
+                          className="rounded-lg px-3 py-1.5 text-xs font-semibold cursor-pointer"
+                          style={{ background: 'hsl(var(--primary))', color: 'hsl(var(--primary-foreground))' }}>
+                          Apply QuickBooks updates
+                        </button>
+                      )}
+                      {canAdditiveMerge && (
+                        <button onClick={handleMergeNewPeriods} data-testid="import-merge-btn"
+                          className="rounded-lg px-3 py-1.5 text-xs font-semibold cursor-pointer"
+                          style={
+                            pending.diff.status === 'conflicts'
+                              ? { background: 'transparent', border: '1px solid hsl(142 71% 40% / 0.5)', color: 'hsl(142 71% 30%)' }
+                              : { background: 'hsl(142 71% 40%)', color: '#fff' }
+                          }>
+                          {pending.diff.status === 'conflicts'
+                            ? `Add ${mergeAdditionsLabel(pending.diff)} only (keep existing values)`
+                            : `Add ${mergeAdditionsLabel(pending.diff)} to current data`}
+                        </button>
+                      )}
+                      <button onClick={handleReplaceAsNewDataset} data-testid="import-replace-btn"
+                        className="rounded-lg border px-3 py-1.5 text-xs font-semibold cursor-pointer transition-colors hover:bg-muted"
+                        style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--foreground))' }}>
+                        Import as new dataset
+                      </button>
+                      <button onClick={() => setPending(null)}
+                        className="rounded-lg px-3 py-1.5 text-xs font-medium cursor-pointer"
+                        style={{ color: 'hsl(var(--muted-foreground))' }}>
+                        Discard
+                      </button>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap pt-1">
+                  {canAdditiveMerge && pending.diff.changedCells.length === 0 && (
+                    <button onClick={handleMergeNewPeriods} data-testid="import-merge-btn"
+                      className="rounded-lg px-3 py-1.5 text-xs font-semibold"
+                      style={{ background: 'hsl(142 71% 40%)', color: '#fff' }}>
+                      Add {mergeAdditionsLabel(pending.diff)} to current data
+                    </button>
+                  )}
+                  {canAdditiveMerge && pending.diff.changedCells.length > 0 && (
+                    <button onClick={handleMergeNewPeriods}
+                      className="rounded-lg px-3 py-1.5 text-xs font-semibold"
+                      style={{ background: 'hsl(142 71% 40%)', color: '#fff' }}>
+                      Add {mergeAdditionsLabel(pending.diff)} only (keep existing values)
+                    </button>
+                  )}
+                  <button onClick={handleReplaceAsNewDataset} data-testid="import-replace-btn"
+                    className="rounded-lg border px-3 py-1.5 text-xs font-semibold"
+                    style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--foreground))' }}>
+                    Import as a new dataset
                   </button>
-                )}
-                {canAdditiveMerge && pending.diff.changedCells.length > 0 && (
-                  <button onClick={handleMergeNewPeriods}
-                    className="rounded-lg px-3 py-1.5 text-xs font-semibold"
-                    style={{ background: 'hsl(142 71% 40%)', color: '#fff' }}>
-                    Add {mergeAdditionsLabel(pending.diff)} only (keep existing values)
+                  <button onClick={() => setPending(null)}
+                    className="rounded-lg px-3 py-1.5 text-xs font-medium"
+                    style={{ color: 'hsl(var(--muted-foreground))' }}>
+                    Discard
                   </button>
-                )}
-                <button onClick={handleReplaceAsNewDataset} data-testid="import-replace-btn"
-                  className="rounded-lg border px-3 py-1.5 text-xs font-semibold"
-                  style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--foreground))' }}>
-                  Import as a new dataset
-                </button>
-                <button onClick={() => setPending(null)}
-                  className="rounded-lg px-3 py-1.5 text-xs font-medium"
-                  style={{ color: 'hsl(var(--muted-foreground))' }}>
-                  Discard
-                </button>
-              </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -649,6 +827,12 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
           <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
             No financial data yet — import a P&amp;L or balance sheet to see the statements.
           </p>
+          {qboConnected && workspace.accounts.length === 0 && (
+            <p className="text-sm mt-1" style={{ color: 'hsl(var(--muted-foreground))' }}>
+              …or use <span style={{ color: 'hsl(var(--foreground))', fontWeight: 600 }}>Sync</span> from
+              QuickBooks in the toolbar above to pull the books in directly.
+            </p>
+          )}
         </div>
       ) : (
         <>
