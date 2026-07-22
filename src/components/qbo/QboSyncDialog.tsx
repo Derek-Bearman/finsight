@@ -18,7 +18,7 @@
  * request resolves into the void.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Account, AccountValue } from '@/types';
 import type { QboAccount, QboReport } from '@/lib/qbo/qbo-types';
 import {
@@ -86,6 +86,22 @@ export function QboSyncDialog({
   }>({ pnl: [], bs: [], coa: [], nextChunk: 0 });
   const cancelRef = useRef(false);
   const busyRef = useRef(false);
+  /** Start clicked while a cancelled loop was still awaiting its in-flight
+   *  chunk — begin() queues the request here instead of dropping it, and the
+   *  loop's finally block starts fresh once the old chunk settles. */
+  const pendingStartRef = useRef(false);
+
+  // Unmount (history nav, parent re-render dropping the dialog) must cancel
+  // exactly like Cancel — otherwise the chunk loop survives the component
+  // and keeps hitting QuickBooks. Also drop any queued start: nothing may
+  // restart the loop after unmount.
+  useEffect(
+    () => () => {
+      cancelRef.current = true;
+      pendingStartRef.current = false;
+    },
+    []
+  );
 
   /** Every close path funnels here: flag cancellation so an in-flight loop
    *  stops between chunks, reset to a fresh range step for the next open,
@@ -93,6 +109,7 @@ export function QboSyncDialog({
    *  needed — and the next open always starts clean.) */
   function closeAndReset(): void {
     cancelRef.current = true;
+    pendingStartRef.current = false;
     planRef.current = null;
     collectedRef.current = { pnl: [], bs: [], coa: [], nextChunk: 0 };
     setStep({ kind: 'range' });
@@ -149,7 +166,14 @@ export function QboSyncDialog({
   }
 
   async function begin(): Promise<void> {
-    if (busyRef.current) return;
+    if (busyRef.current) {
+      // A cancelled loop is still awaiting its in-flight chunk. Silently
+      // dropping this click would swallow the user's Start — queue it; the
+      // loop's finally block runs it fresh once the old chunk settles. A
+      // NON-cancelled busy loop keeps the plain drop (double-click guard).
+      if (cancelRef.current) pendingStartRef.current = true;
+      return;
+    }
     busyRef.current = true;
     cancelRef.current = false;
     try {
@@ -172,6 +196,12 @@ export function QboSyncDialog({
       await runChunks();
     } finally {
       busyRef.current = false;
+      if (pendingStartRef.current) {
+        // A Start was queued mid-cancel — begin fresh (begin() itself resets
+        // cancelRef; closeAndReset already wiped the plan and collected data).
+        pendingStartRef.current = false;
+        void begin();
+      }
     }
   }
 
@@ -234,7 +264,9 @@ export function QboSyncDialog({
               >
                 {YEARS_BACK_OPTIONS.map((n) => (
                   <option key={n} value={n}>
-                    {n === 1 ? 'Last year' : `Last ${n} years`}
+                    {/* Chunks are CALENDAR years counted back from today, so
+                        n=1 is the current year to date — not "last year". */}
+                    {n === 1 ? 'This year (to date)' : `This year + ${n - 1} prior`}
                   </option>
                 ))}
               </select>

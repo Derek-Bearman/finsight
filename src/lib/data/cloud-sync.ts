@@ -38,6 +38,14 @@ const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 1000;
 /** How often to re-resolve access while it is degraded (read_only/locked). */
 const ACCESS_RECHECK_MS = 30_000;
+/**
+ * Refuse to put a save on the wire when the serialized workspace exceeds this.
+ * Next's server-action body limit is 10mb (next.config.ts —
+ * experimental.serverActions.bodySizeLimit; keep the two in step). ~9MB leaves
+ * headroom for the action envelope around the JSON. Without this guard an
+ * oversized workspace 413s on every attempt and the retry loop spins silently.
+ */
+const MAX_SAVE_BYTES = 9 * 1024 * 1024;
 
 /** id -> the `updatedAt` we last successfully persisted. */
 const syncedAt = new Map<string, string>();
@@ -48,6 +56,9 @@ const conflicted = new Set<string>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const retryCounts = new Map<string, number>();
+/** id -> one-shot callbacks fired after the NEXT successful save (see
+ *  onNextSuccessfulSave). Discarded unfired if the workspace conflicts. */
+const nextSaveCallbacks = new Map<string, Array<() => void>>();
 
 let unsubscribe: (() => void) | null = null;
 let windowListenersInstalled = false;
@@ -117,6 +128,35 @@ async function recheckAccess(): Promise<void> {
     if (!conflicted.has(id)) scheduleSave(id, 0);
   }
   refreshStatus();
+}
+
+/**
+ * Register a callback to run once, after the NEXT save of `workspaceId` is
+ * confirmed persisted. Used for side effects that must not outrun the save —
+ * e.g. stamping qbo last_synced_at only once the committed data actually
+ * exists in Postgres. If the workspace instead enters the conflict state
+ * (a teammate's save won; this data will never persist), the callback is
+ * discarded WITHOUT being invoked. Multiple registrations all fire on the
+ * same successful save, in registration order.
+ */
+export function onNextSuccessfulSave(workspaceId: string, cb: () => void): void {
+  const list = nextSaveCallbacks.get(workspaceId) ?? [];
+  list.push(cb);
+  nextSaveCallbacks.set(workspaceId, list);
+}
+
+/** Pop and invoke the one-shot save callbacks for `id` (success path only). */
+function fireNextSaveCallbacks(id: string): void {
+  const cbs = nextSaveCallbacks.get(id);
+  if (!cbs) return;
+  nextSaveCallbacks.delete(id);
+  for (const cb of cbs) {
+    try {
+      cb();
+    } catch {
+      // A callback must never be able to break the save pipeline.
+    }
+  }
 }
 
 function currentWorkspace(id: string): ClientWorkspace | undefined {
@@ -236,6 +276,22 @@ async function flushSave(id: string): Promise<void> {
     return; // nothing new (an earlier flush already covered this change)
   }
 
+  // Oversized payloads would 413 at the server-action boundary on EVERY
+  // attempt — never a transient failure, so don't feed it to the retry loop.
+  // Fail loudly through the same sticky-error path the chip already renders.
+  const payloadBytes = new TextEncoder().encode(JSON.stringify(ws)).byteLength;
+  if (payloadBytes > MAX_SAVE_BYTES) {
+    console.warn(
+      `[cloud-sync] Workspace ${id} serializes to ${(payloadBytes / 1024 / 1024).toFixed(1)}MB, ` +
+        `over the ${Math.floor(MAX_SAVE_BYTES / 1024 / 1024)}MB save limit ` +
+        `(server-action bodySizeLimit is 10mb in next.config.ts). Save refused.`
+    );
+    errorMessage =
+      'This client’s data is too large to save. Remove unused datasets (Statements → Dataset) to shrink it, then press Retry.';
+    refreshStatus();
+    return;
+  }
+
   const sending = ws.updatedAt;
   inflight.add(id);
   refreshStatus();
@@ -271,6 +327,9 @@ async function flushSave(id: string): Promise<void> {
     if (typeof res.data.cloudVersion === 'number') {
       useWorkspaceStore.getState().bumpCloudVersion(id, res.data.cloudVersion);
     }
+    // The save is confirmed in Postgres — release any one-shot side effects
+    // that were waiting on it (e.g. the QBO last_synced_at stamp).
+    fireNextSaveCallbacks(id);
     // If the user kept editing while the save was on the wire, chase the tail.
     const now = currentWorkspace(id);
     if (now && now.updatedAt !== sending) scheduleSave(id);
@@ -283,6 +342,9 @@ async function flushSave(id: string): Promise<void> {
       // A teammate's save won. Do NOT retry (that would clobber their work);
       // the chip offers a reload, which re-hydrates from Postgres.
       conflicted.add(id);
+      // This data will never persist — waiting side effects must not fire
+      // (stamping "synced" for a commit that was lost would be a lie).
+      nextSaveCallbacks.delete(id);
       break;
 
     case 'read_only':
@@ -354,6 +416,7 @@ export function noteDeleted(id: string): void {
   conflicted.delete(id);
   inflight.delete(id);
   syncedAt.delete(id);
+  nextSaveCallbacks.delete(id);
   refreshStatus();
 }
 

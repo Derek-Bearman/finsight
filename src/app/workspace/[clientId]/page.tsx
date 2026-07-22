@@ -1628,6 +1628,17 @@ export default function WorkspacePage({ params }: PageProps) {
       window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash
     );
   }, []);
+  // qboAutoSync is consumed the first time the user LEAVES the Statements tab.
+  // The tab content unmounts on switch, so QboControls' autoOpenedRef guard is
+  // lost — without clearing the flag, every return to Statements would
+  // auto-open the sync dialog again. Cleared in the tab click handler (an
+  // event, not an effect — react-hooks/set-state-in-effect) because the tab
+  // bar is the only way off the Statements tab; the other setActiveTab call
+  // sites all navigate TO 'statements'.
+  const selectTab = useCallback((t: Tab) => {
+    setActiveTab(t);
+    if (t !== 'statements') setQboAutoSync(false);
+  }, []);
   const [hydrated, setHydrated] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showTargets, setShowTargets] = useState(false);
@@ -1903,7 +1914,7 @@ export default function WorkspacePage({ params }: PageProps) {
             {TABS.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => selectTab(tab.id)}
                 data-testid={`tab-${tab.id}`}
                 className="px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors"
                 style={{

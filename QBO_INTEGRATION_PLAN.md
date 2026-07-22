@@ -226,15 +226,20 @@ wrangler.jsonc var staged in the branch, `https://finsight.arktosmarketing.com`.
 
 ## 5. Phases
 
-- **Q1 — Foundations** ✅ when: migration applied + RLS-proven; types
-  (`Account.externalId`); crypto/state/oauth/config; matcher tier; mergeOverwrite;
-  dataset-commit extraction (existing checks stay green).
-- **Q2 — Data path**: api.ts, transform.ts, sync.ts, fixtures, qbo.check.ts.
-- **Q3 — Routes + actions + UI**: connect/callback/mock routes, qbo-actions,
-  components, middleware PUBLIC_PATHS entry, wiring into workspace page.
-- **Q4 — Verification**: tsc + next build + cf:build (NO deploy), all check suites,
-  click-test the full mock flow in the preview browser, adversarial review workflow,
-  fix + re-verify. Legal pages (/legal/privacy + /legal/terms) + runbook + docs.
+- **Q1 — Foundations** ✅ DONE 2026-07-22: migration applied + RLS-proven 10/10;
+  `Account.externalId`; crypto/state/oauth/config (+ sandbox host switch via
+  QBO_ENVIRONMENT); matcher tier; mergeOverwrite; dataset-commit extraction
+  (parity-proven; all suites green).
+- **Q2 — Data path** ✅ DONE 2026-07-22: api.ts, transform.ts, sync.ts, fixtures,
+  101-check qbo-transform suite.
+- **Q3 — Routes + actions + UI** ✅ DONE 2026-07-22: connect/callback/mock routes,
+  qbo-actions, connections store, QboControls/QboSyncDialog, StatementsView review
+  integration, ?qbo params.
+- **Q4 — Verification** ✅ DONE 2026-07-22: tsc + next build + cf:build + deploy
+  --dry-run (NO deploy), 11 check suites green, full mock flow click-verified
+  (connect → backfill → commit → idempotent re-sync → disconnect), adversarial
+  review workflow run + confirmed findings fixed. Legal pages + runbook shipped.
+  Found+fixed en route: 'use server' type re-export 500'd every page action.
 - **Q5 (deferred, post-Derek):** real sandbox E2E once dev keys exist; production
   keys; nightly token-refresh/auto-sync Worker; entity-webhook change detection
   (CloudEvents); QBO App Store listing decision.

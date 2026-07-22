@@ -29,6 +29,7 @@ import {
   commitReplaceAsNewDataset,
 } from '@/lib/data/dataset-commit';
 import { completeQboSync } from '@/lib/data/qbo-actions';
+import { onNextSuccessfulSave } from '@/lib/data/cloud-sync';
 import { QboControls, type QboSyncData } from '@/components/qbo/QboControls';
 import { formatCurrency } from '@/lib/utils/format';
 
@@ -448,12 +449,26 @@ export function StatementsView({
   // lives in lib/data/dataset-commit — shared with the QBO sync flow. These
   // handlers only wire the pure patch to the store and drive the UI/toasts.
 
-  /** Fire-and-forget after ANY QBO commit: stamps last_synced_at server-side,
-   *  then bumps the chip so "Synced just now" shows. Never throws. */
+  /** The stamp itself: last_synced_at server-side, then bump the chip so
+   *  "Synced just now" shows. Never throws. Only called directly when NO data
+   *  changed (the 'identical' verdict) — commits go via the deferred variant. */
   function stampQboSyncComplete() {
     void completeQboSync(clientId)
       .catch(() => undefined)
       .then(() => setQboRefreshKey((k) => k + 1));
+  }
+
+  /** After a QBO commit that CHANGED workspace data: defer the stamp until the
+   *  debounced cloud save confirms the commit persisted. If that save loses an
+   *  optimistic-concurrency conflict the callback is discarded, so the chip
+   *  never claims "Synced just now" about data that was never saved. Local
+   *  (non-cloud) mode has no save pipeline — stamp immediately. */
+  function stampQboSyncAfterSave() {
+    if (!useWorkspaceStore.getState().cloudMode) {
+      stampQboSyncComplete();
+      return;
+    }
+    onNextSuccessfulSave(clientId, () => stampQboSyncComplete());
   }
 
   /** Sync dialog finished — diff the combined batch against the working set
@@ -497,7 +512,7 @@ export function StatementsView({
     const patch = commitOverwriteMerge(workspace, incoming, pending.fileName);
     updateWorkspace(clientId, patch);
     setPending(null);
-    stampQboSyncComplete();
+    stampQboSyncAfterSave();
     const cells = `${counts.changedCells} cell${counts.changedCells === 1 ? '' : 's'}`;
     const periods = `${counts.addedPeriods} period${counts.addedPeriods === 1 ? '' : 's'}`;
     const accts = `${counts.addedAccounts} account${counts.addedAccounts === 1 ? '' : 's'}`;
@@ -511,7 +526,7 @@ export function StatementsView({
     updateWorkspace(clientId, patch);
     setPending(null);
     setImporting(false);
-    if (wasQbo) stampQboSyncComplete();
+    if (wasQbo) stampQboSyncAfterSave();
     // Report what the merge actually added (not the reviewed diff's counts),
     // so the toast can never overstate the commit.
     const activeLabel = patch.datasets.find((d) => d.id === patch.activeDatasetId)!.label;
@@ -542,7 +557,7 @@ export function StatementsView({
     updateWorkspace(clientId, patch);
     setPending(null);
     setImporting(false);
-    if (wasQbo) stampQboSyncComplete();
+    if (wasQbo) stampQboSyncAfterSave();
     showToast(`Imported "${label}" as a new dataset`);
   }
 
@@ -589,7 +604,15 @@ export function StatementsView({
           onStatusChange={(s) => setQboConnected(s.connected)}
         />
         <button
-          onClick={() => { setImporting((v) => !v); setPending(null); setParseError(null); }}
+          onClick={() => {
+            // Opening the file importer drops an in-progress QBO review — say
+            // so (mirrors the handleSelectDataset discard toast) instead of
+            // silently eating the sync the user just ran.
+            if (pending?.source === 'qbo') showToast('QuickBooks review discarded — re-run Sync to rebuild it');
+            setImporting((v) => !v);
+            setPending(null);
+            setParseError(null);
+          }}
           className="rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
           style={{ borderColor: 'hsl(var(--primary))', color: 'hsl(var(--primary))' }}
           data-testid="statements-import-btn"

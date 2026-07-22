@@ -1,7 +1,48 @@
 # FinSight — Session Notes
 
-**Last updated:** 2026-07-19
+**Last updated:** 2026-07-22
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
+
+> **2026-07-22 — QuickBooks Online integration BUILT on branch
+> `feature/qbo-integration` (NOT deployed — live app untouched by design).**
+> Full direct-QBO import: per-client OAuth connect (one QBO company per
+> workspace — Intuit has NO bulk/firm-level consent, verified), multi-year
+> monthly P&L+BS backfill via the Reports API chunked one year per call,
+> authoritative account classification from QBO (bypasses the keyword
+> classifier via isManuallyClassified), idempotent re-sync keyed on a new
+> `Account.externalId` (+ matcher tier + `mergeOverwrite` for prior-period
+> restatements), all riding the existing dataset diff/review/commit flow
+> (commit logic extracted to `lib/data/dataset-commit.ts`, shared by
+> StatementsView and the sync).
+>
+> **Read `QBO_INTEGRATION_PLAN.md` first** (verified platform facts + locked
+> architecture), then `DEREK_QBO_RUNBOOK.md` (every human-only step, incl.
+> pre-drafted Intuit assessment answers). DB: additive `qbo_connections`
+> migration applied to prod Supabase (invisible to the live app), RLS +
+> column-grants proven 10/10 by impersonation — token ciphertext columns are
+> structurally unreadable by `authenticated`; tokens are AES-256-GCM
+> (`lib/qbo/crypto.ts`, key = future wrangler secret QBO_TOKEN_KEY).
+> **Full mock-Intuit flow click-verified end-to-end** in dev (connect →
+> company picker → callback → auto-open backfill → 18mo/30-account review →
+> commit → statements render → re-sync "Already up to date" → disconnect w/
+> revoke+delete+audit): `FINSIGHT_QBO_MOCK=true` serves a fake Intuit at
+> `/api/qbo/mock/*` (404s in prod), fixtures in `lib/qbo/fixtures/`.
+> Check suites grew to 11 (qbo-oauth, qbo-transform 101 checks, qbo-server,
+> dataset-commit + extended datasets).
+>
+> **Gotcha burned in this build:** a `'use server'` module must export ONLY
+> async functions in this Next version — even `export type { X }` of an
+> imported binding leaves a runtime export in the server-actions loader and
+> 500s EVERY action on the page (ReferenceError at module eval). Types live
+> in `lib/qbo/sync.ts` instead.
+>
+> **NOT done (needs Derek — see runbook):** Intuit developer account + dev
+> keys (→ real-sandbox E2E), production keys via the ~40-min one-shot
+> assessment, the 4 wrangler secrets AT DEPLOY TIME ONLY (setting a secret
+> cuts a new Worker deployment — never do it early), merge + deploy.
+> Deferred by design: nightly auto-sync/token-refresh cron (client-driven
+> sync avoids the workspace-blob write race for v1), webhooks (Intuit is
+> mid-CloudEvents migration), QBO App Store listing (needs Intuit SSO).
 
 > **2026-07-19 — Session-loss bug FIXED: bounced to /login ~1hr after
 > sign-in, on every navigation.** Same bug as CallGauge (its commit
