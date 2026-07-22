@@ -24,7 +24,7 @@ import { sanitizeNext } from '@/lib/safe-next';
 // Public routes — anyone can hit these whether logged in or not.
 // The Stripe webhook MUST be public: Stripe posts to it with no session, so it
 // can't be redirected to /login (signature verification is its auth).
-const PUBLIC_PATHS = ['/login', '/auth/callback', '/auth/signout', '/api/stripe/webhook'];
+const PUBLIC_PATHS = ['/login', '/auth/callback', '/auth/signout', '/api/stripe/webhook', '/legal'];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'));

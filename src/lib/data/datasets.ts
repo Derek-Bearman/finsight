@@ -26,6 +26,9 @@ function normName(name: string): string {
   return name.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+function externalKey(a: Account): string | null {
+  return a.externalId && a.externalId.trim() ? `x:${a.externalId.trim()}` : null;
+}
 function numberKey(a: Account): string | null {
   return a.number && a.number.trim() ? `#${a.number.trim()}` : null;
 }
@@ -33,19 +36,41 @@ function nameKey(a: Account): string {
   return `n:${normName(a.name)}`;
 }
 
+/**
+ * True when BOTH sides carry an externalId and they disagree. Two accounts
+ * known to be different records in the external system of record must never
+ * merge, whatever their number or name says. One side missing an externalId
+ * is NOT a conflict — that's the CSV-then-QBO adoption path.
+ */
+function externalIdConflict(inc: Account, cand: Account): boolean {
+  const ik = externalKey(inc);
+  const ck = externalKey(cand);
+  return ik !== null && ck !== null && ik !== ck;
+}
+
 interface AccountMatcher {
-  /** Match an incoming account to an existing one (number first, then name)
-   *  and claim it, so each existing account is matched at most once. */
+  /** Match an incoming account to an existing one (externalId first, then
+   *  number, then name) and claim it, so each existing account is matched at
+   *  most once. */
   match(inc: Account): Account | undefined;
   /** Register a newly-adopted account as a candidate for later incoming rows. */
   add(a: Account): void;
 }
 
 /**
- * Build a dual index of existing accounts keyed by BOTH account number and
- * normalized name, and a resolver that matches an incoming account by number
- * first, then name. This makes matching robust when one side has account
+ * Build a triple index of existing accounts keyed by externalId, account
+ * number, AND normalized name, and a resolver that matches an incoming
+ * account by externalId first (the external system's stable id — survives
+ * renames and renumbering, making API re-sync idempotent), then number, then
+ * name. Number/name tiers keep matching robust when one side has account
  * numbers and the other only names (common across QBO export settings).
+ *
+ * externalId guards on the lower tiers:
+ *  - both sides carry DIFFERENT externalIds → never match by number or name
+ *    (they are provably different records in the source system);
+ *  - incoming carries one, existing doesn't → number/name match still applies
+ *    (the merge functions then adopt the incoming externalId — how a
+ *    CSV-imported workspace links up on its first QBO sync).
  *
  * The matcher CONSUMES matches: duplicate same-name accounts (e.g. two
  * numberless 'Other' leaves from a QBO export) pair positionally — the Nth
@@ -54,10 +79,13 @@ interface AccountMatcher {
  * identical re-imports and stacked twins' values onto one account on merge.
  */
 function buildMatcher(existing: Account[]): AccountMatcher {
+  const byExternalId = new Map<string, Account[]>();
   const byNumber = new Map<string, Account[]>();
   const byName = new Map<string, Account[]>();
   const claimed = new Set<Account>();
   const add = (a: Account) => {
+    const xk = externalKey(a);
+    if (xk) byExternalId.set(xk, [...(byExternalId.get(xk) ?? []), a]);
     const nk = numberKey(a);
     if (nk) byNumber.set(nk, [...(byNumber.get(nk) ?? []), a]);
     const nm = nameKey(a);
@@ -67,9 +95,19 @@ function buildMatcher(existing: Account[]): AccountMatcher {
   return {
     add,
     match(inc: Account): Account | undefined {
+      const xk = externalKey(inc);
+      if (xk) {
+        const byExt = (byExternalId.get(xk) ?? []).find((a) => !claimed.has(a));
+        if (byExt) {
+          claimed.add(byExt);
+          return byExt;
+        }
+      }
       const nk = numberKey(inc);
       if (nk) {
-        const byNum = (byNumber.get(nk) ?? []).find((a) => !claimed.has(a));
+        const byNum = (byNumber.get(nk) ?? []).find(
+          (a) => !claimed.has(a) && !externalIdConflict(inc, a)
+        );
         if (byNum) {
           claimed.add(byNum);
           return byNum;
@@ -77,6 +115,7 @@ function buildMatcher(existing: Account[]): AccountMatcher {
       }
       for (const cand of byName.get(nameKey(inc)) ?? []) {
         if (claimed.has(cand)) continue;
+        if (externalIdConflict(inc, cand)) continue;
         // If BOTH sides carry a number and they disagree, these are different
         // accounts that happen to share a name ('Other' #6000 vs 'Other' #7000) —
         // don't name-merge them. The one-side-missing-number case still matches.
@@ -90,6 +129,17 @@ function buildMatcher(existing: Account[]): AccountMatcher {
       return undefined;
     },
   };
+}
+
+/**
+ * When an incoming account carries an externalId and its matched existing
+ * account has none, the existing account ADOPTS the incoming id — this is how
+ * a CSV-imported workspace links each account to QuickBooks on the first API
+ * sync. Every other case returns the existing account object unchanged (the
+ * matcher guarantees both-sides-present externalIds always agree).
+ */
+function withAdoptedExternalId(exist: Account, inc: Account): Account {
+  return inc.externalId && !exist.externalId ? { ...exist, externalId: inc.externalId } : exist;
 }
 
 const PNL_TYPES = new Set<Account['type']>(['revenue', 'cogs', 'expense']);
@@ -282,6 +332,13 @@ export function mergeNewPeriods(
     const exist = matcher.match(inc);
     if (exist) {
       idRemap.set(inc.id, exist.id);
+      // First-sync linkage: a matched account with no externalId adopts the
+      // incoming one so the NEXT sync matches on the stable id tier.
+      const adopted = withAdoptedExternalId(exist, inc);
+      if (adopted !== exist) {
+        const idx = accounts.findIndex((a) => a.id === exist.id);
+        if (idx >= 0) accounts[idx] = adopted;
+      }
     } else {
       accounts.push(inc);
       matcher.add(inc);
@@ -303,4 +360,118 @@ export function mergeNewPeriods(
   }
 
   return { accounts, values };
+}
+
+/**
+ * Restatement-capable merge for authoritative re-syncs (QBO): matched
+ * accounts get overlapping cells OVERWRITTEN with incoming values, new
+ * periods and brand-new accounts come in with full history, and account
+ * metadata (`name` / `number` / `externalId`) refreshes from incoming —
+ * while the user's classification work (type, costBehavior, isExcluded,
+ * isManuallyClassified, …) is preserved untouched. Existing accounts absent
+ * from the incoming batch are left completely alone: a QBO report omits
+ * accounts with no activity in the requested range, so absence is NOT
+ * deletion.
+ *
+ * A cell is only overwritten where incoming actually provides a value for
+ * that account×period — existing cells the batch doesn't mention survive.
+ * `changedCells` counts overlapping-period cells on matched accounts whose
+ * value moved beyond rounding (mirrors diffImport, so the review numbers and
+ * the commit report agree); new periods and new accounts are additions, not
+ * restatements, and are reported via `addedPeriods` / `addedAccounts`.
+ */
+export function mergeOverwrite(
+  existingAccounts: Account[],
+  existingValues: AccountValue[],
+  incomingAccounts: Account[],
+  incomingValues: AccountValue[]
+): {
+  accounts: Account[];
+  values: AccountValue[];
+  changedCells: number;
+  addedPeriods: number;
+  addedAccounts: number;
+} {
+  const existPeriods = new Set(existingValues.map((v) => periodKey(v.period)));
+  const incPeriods = new Set(incomingValues.map((v) => periodKey(v.period)));
+  let addedPeriods = 0;
+  for (const pk of incPeriods) if (!existPeriods.has(pk)) addedPeriods++;
+
+  // name always follows the source of record; number/externalId refresh only
+  // when incoming provides one — a numberless CSV overwrite must not strip
+  // the account numbers (or the QBO linkage) that future matching depends on.
+  const refreshMetadata = (exist: Account, inc: Account): Account => {
+    const number = inc.number && inc.number.trim() ? inc.number : exist.number;
+    const externalId = inc.externalId && inc.externalId.trim() ? inc.externalId : exist.externalId;
+    if (inc.name === exist.name && number === exist.number && externalId === exist.externalId) {
+      return exist; // nothing moved — keep object identity stable
+    }
+    return { ...exist, name: inc.name, number, externalId };
+  };
+
+  // Same remap/adopt walk as mergeNewPeriods (see its comments for why
+  // adopted accounts register on the matcher instead of rebuilding it).
+  const matcher = buildMatcher(existingAccounts);
+  const idRemap = new Map<string, string>();
+  const newAccountIds = new Set<string>();
+  const refreshedById = new Map<string, Account>();
+  const adopted: Account[] = [];
+  for (const inc of incomingAccounts) {
+    const exist = matcher.match(inc);
+    if (exist) {
+      idRemap.set(inc.id, exist.id);
+      const refreshed = refreshMetadata(exist, inc);
+      if (refreshed !== exist) refreshedById.set(exist.id, refreshed);
+    } else {
+      matcher.add(inc);
+      idRemap.set(inc.id, inc.id);
+      newAccountIds.add(inc.id);
+      adopted.push(inc);
+    }
+  }
+  const accounts = [
+    ...existingAccounts.map((a) => refreshedById.get(a.id) ?? a),
+    ...adopted,
+  ];
+
+  const cellKey = (accountId: string, pk: string) => `${accountId}|${pk}`;
+
+  // Sum existing amounts per cell for change counting (duplicate rows for one
+  // account×period sum together, mirroring diffImport).
+  const existSumByCell = new Map<string, number>();
+  for (const v of existingValues) {
+    const k = cellKey(v.accountId, periodKey(v.period));
+    existSumByCell.set(k, (existSumByCell.get(k) ?? 0) + v.amount);
+  }
+
+  // Remap incoming rows onto their target accounts and group per cell — an
+  // overwrite replaces the whole cell (all its duplicate rows) at once.
+  const incRowsByCell = new Map<string, AccountValue[]>();
+  for (const v of incomingValues) {
+    const targetId = idRemap.get(v.accountId) ?? v.accountId;
+    const k = cellKey(targetId, periodKey(v.period));
+    const row = v.accountId === targetId ? v : { ...v, accountId: targetId };
+    const rows = incRowsByCell.get(k);
+    if (rows) rows.push(row);
+    else incRowsByCell.set(k, [row]);
+  }
+
+  // Existing rows survive unless incoming provides that exact cell.
+  const values: AccountValue[] = existingValues.filter(
+    (v) => !incRowsByCell.has(cellKey(v.accountId, periodKey(v.period)))
+  );
+
+  let changedCells = 0;
+  for (const [k, rows] of incRowsByCell) {
+    values.push(...rows);
+    const targetId = rows[0]!.accountId;
+    if (newAccountIds.has(targetId)) continue; // adopted account backfill
+    const pk = periodKey(rows[0]!.period);
+    if (!existPeriods.has(pk)) continue; // new period, not a restatement
+    const newSum = rows.reduce((s, r) => s + r.amount, 0);
+    const oldSum = existSumByCell.get(k) ?? 0;
+    if (Math.abs(newSum - oldSum) > EPSILON) changedCells++;
+  }
+
+  return { accounts, values, changedCells, addedPeriods, addedAccounts: adopted.length };
 }

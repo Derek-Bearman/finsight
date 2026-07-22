@@ -3,11 +3,12 @@
  *   npx tsx scripts/checks/datasets.check.ts
  *
  * Covers the accountant's "same history + new month" scenario, value
- * conflicts, new accounts, and the non-destructive merge.
+ * conflicts, new accounts, the non-destructive merge, the externalId
+ * (QBO Account.Id) matcher tier, and the restatement-capable mergeOverwrite.
  */
 
 import type { Account, AccountValue } from '../../src/types';
-import { diffImport, mergeNewPeriods, isAdditiveStatementMerge } from '../../src/lib/data/datasets';
+import { diffImport, mergeNewPeriods, mergeOverwrite, isAdditiveStatementMerge } from '../../src/lib/data/datasets';
 
 let failures = 0;
 function check(cond: boolean, label: string): void {
@@ -257,6 +258,211 @@ for (let m = 1; m <= 6; m++) {
   check(!isAdditiveStatementMerge(ea, ia), 'cross-statement name collision should disqualify the additive merge');
   // Same-side matches (a normal P&L re-import) still qualify.
   check(isAdditiveStatementMerge(ea, [acc('i3', 'Insurance', 'expense')]), 'same-side name match should still qualify');
+}
+
+// ── externalId matcher tier (QBO Account.Id) ─────────────────────────────────
+
+const accX = (
+  id: string,
+  name: string,
+  type: Account['type'],
+  number: string | undefined,
+  externalId: string
+): Account => ({ id, name, type, number, externalId, isManuallyClassified: false });
+
+// ── Scenario 13: externalId match survives a rename AND an account-number
+//    change (the whole point of the tier — idempotent QBO re-sync) ────────────
+{
+  const ea = [accX('e1', 'Sales of Product Income', 'revenue', '4000', 'qbo-101')];
+  const ev: AccountValue[] = [];
+  for (let m = 1; m <= 6; m++) ev.push(val('e1', 2026, m, 100));
+  // Renamed AND renumbered in QBO — only the externalId still agrees.
+  const ia = [accX('i1', 'Product Revenue', 'revenue', '4999', 'qbo-101')];
+  const iv: AccountValue[] = [];
+  for (let m = 1; m <= 7; m++) iv.push(val('i1', 2026, m, 100));
+  const diff = diffImport(ea, ev, ia, iv);
+  check(diff.newAccounts.length === 0, `externalId tier: rename+renumber should still match, got ${diff.newAccounts.length} new`);
+  check(diff.matchedCells === 6 && diff.status === 'extends', `externalId tier: 6 matched cells + extends, got ${diff.matchedCells}/${diff.status}`);
+
+  const merged = mergeNewPeriods(ea, ev, ia, iv);
+  check(merged.accounts.length === 1, `externalId tier merge: no duplicate account, got ${merged.accounts.length}`);
+  const july = merged.values.find((v) => v.period.month === 7);
+  check(july?.accountId === 'e1' && july.amount === 100, `externalId tier merge: July attaches to existing id, got ${july?.accountId}`);
+
+  const ow = mergeOverwrite(ea, ev, ia, iv);
+  const owAcct = ow.accounts[0]!;
+  check(ow.accounts.length === 1 && owAcct.id === 'e1', `externalId overwrite: still one account, got ${ow.accounts.length}`);
+  check(owAcct.name === 'Product Revenue' && owAcct.number === '4999' && owAcct.externalId === 'qbo-101',
+    `externalId overwrite: metadata should refresh, got ${owAcct.name}/${owAcct.number}/${owAcct.externalId}`);
+}
+
+// ── Scenario 14: adoption — incoming WITH externalId matches existing WITHOUT
+//    (by number, else name) and the merges stamp the externalId on ────────────
+{
+  const ea = [acc('e1', 'Food Sales', 'revenue', '4000'), acc('e2', 'Rent', 'expense')]; // CSV-era, no externalIds
+  const ev = [val('e1', 2026, 1, 100), val('e2', 2026, 1, 50)];
+  const ia = [
+    accX('i1', 'Food Sales', 'revenue', '4000', 'qbo-1'), // adopts via number
+    accX('i2', 'Rent', 'expense', undefined, 'qbo-2'), // adopts via name
+  ];
+  const iv = [val('i1', 2026, 1, 100), val('i1', 2026, 2, 110), val('i2', 2026, 1, 50), val('i2', 2026, 2, 55)];
+  const diff = diffImport(ea, ev, ia, iv);
+  check(diff.newAccounts.length === 0 && diff.matchedCells === 2, `adoption: both should match, got ${diff.newAccounts.length} new / ${diff.matchedCells} matched`);
+
+  const merged = mergeNewPeriods(ea, ev, ia, iv);
+  check(merged.accounts.length === 2, `adoption merge: no duplicates, got ${merged.accounts.length}`);
+  check(merged.accounts.find((a) => a.id === 'e1')?.externalId === 'qbo-1', 'adoption merge: number-matched account should adopt qbo-1');
+  check(merged.accounts.find((a) => a.id === 'e2')?.externalId === 'qbo-2', 'adoption merge: name-matched account should adopt qbo-2');
+  const febRent = merged.values.find((v) => v.accountId === 'e2' && v.period.month === 2);
+  check(febRent?.amount === 55, `adoption merge: Feb Rent attaches to existing account, got ${febRent?.amount}`);
+
+  const ow = mergeOverwrite(ea, ev, ia, iv);
+  check(ow.accounts.find((a) => a.id === 'e1')?.externalId === 'qbo-1', 'adoption overwrite: number-matched account should adopt qbo-1');
+  check(ow.accounts.find((a) => a.id === 'e2')?.externalId === 'qbo-2', 'adoption overwrite: name-matched account should adopt qbo-2');
+}
+
+// ── Scenario 15: conflicting externalIds must NEVER merge, even with the same
+//    number and name — they are provably different QBO accounts ───────────────
+{
+  const ea = [accX('e1', 'Sales', 'revenue', '4000', 'qbo-A')];
+  const ev = [val('e1', 2026, 1, 100)];
+  const ia = [accX('i1', 'Sales', 'revenue', '4000', 'qbo-B')];
+  const iv = [val('i1', 2026, 1, 999), val('i1', 2026, 2, 50)];
+  const diff = diffImport(ea, ev, ia, iv);
+  check(diff.newAccounts.length === 1, `externalId conflict: should be a NEW account, got ${diff.newAccounts.length}`);
+  check(diff.changedCells.length === 0, `externalId conflict: must not compare qbo-A vs qbo-B, got ${diff.changedCells.length} changed`);
+
+  const merged = mergeNewPeriods(ea, ev, ia, iv);
+  check(merged.accounts.length === 2, `externalId conflict merge: keep both, got ${merged.accounts.length}`);
+  check(merged.accounts.find((a) => a.id === 'e1')?.externalId === 'qbo-A', 'externalId conflict merge: existing keeps qbo-A');
+
+  const ow = mergeOverwrite(ea, ev, ia, iv);
+  check(ow.accounts.length === 2 && ow.addedAccounts === 1, `externalId conflict overwrite: adopt as new, got ${ow.accounts.length}/${ow.addedAccounts}`);
+  check(ow.changedCells === 0, `externalId conflict overwrite: no cell counts as changed, got ${ow.changedCells}`);
+  const e1Jan = ow.values.filter((v) => v.accountId === 'e1' && v.period.month === 1);
+  check(e1Jan.length === 1 && e1Jan[0]!.amount === 100, `externalId conflict overwrite: qbo-A's Jan untouched, got ${JSON.stringify(e1Jan.map((v) => v.amount))}`);
+}
+
+// ── Scenario 16: regression — flows WITHOUT externalId are byte-identical to
+//    the pre-externalId engine (Scenario 1 fixtures, exact-output proof) ──────
+{
+  const incAccounts = [acc('i1', 'Food Sales', 'revenue', '4000'), acc('i2', 'Rent', 'expense', '6300')];
+  const incValues: AccountValue[] = [];
+  for (let m = 1; m <= 7; m++) {
+    incValues.push(val('i1', 2026, m, 10000 + m * 100));
+    incValues.push(val('i2', 2026, m, 3000));
+  }
+  const merged = mergeNewPeriods(existAccounts, existValues, incAccounts, incValues);
+  // Account objects pass through UNTOUCHED (same references — no adoption, no
+  // metadata churn, no externalId key materializing anywhere).
+  check(merged.accounts.length === 2 && merged.accounts[0] === existAccounts[0] && merged.accounts[1] === existAccounts[1],
+    'no-externalId regression: existing account objects pass through by reference');
+  // Existing value rows pass through by reference, in order.
+  check(merged.values.slice(0, 12).every((v, i) => v === existValues[i]),
+    'no-externalId regression: existing value rows pass through by reference');
+  // Full output matches the pre-change engine's output, byte for byte.
+  const expected = {
+    accounts: [
+      { id: 'e1', name: 'Food Sales', type: 'revenue', number: '4000', isManuallyClassified: false },
+      { id: 'e2', name: 'Rent', type: 'expense', number: '6300', isManuallyClassified: false },
+    ],
+    values: [
+      ...existValues,
+      { accountId: 'e1', period: { year: 2026, month: 7 }, amount: 10700 },
+      { accountId: 'e2', period: { year: 2026, month: 7 }, amount: 3000 },
+    ],
+  };
+  check(JSON.stringify(merged) === JSON.stringify(expected), 'no-externalId regression: merge output is byte-identical to the pre-externalId engine');
+
+  const diff = diffImport(existAccounts, existValues, incAccounts, incValues);
+  check(diff.status === 'extends' && diff.matchedCells === 12 && diff.changedCells.length === 0 && diff.newAccounts.length === 0,
+    `no-externalId regression: diff unchanged, got ${diff.status}/${diff.matchedCells}/${diff.changedCells.length}/${diff.newAccounts.length}`);
+}
+
+// ── Scenario 17: mergeOverwrite — restated cell overwritten and counted, new
+//    period added, absent account left completely untouched ───────────────────
+{
+  const ea = [acc('e1', 'Sales', 'revenue', '4000'), acc('e2', 'Rent', 'expense', '6300')];
+  const ev = [
+    val('e1', 2026, 1, 100), val('e1', 2026, 2, 200), val('e1', 2026, 3, 300),
+    val('e2', 2026, 1, 50), val('e2', 2026, 2, 50), val('e2', 2026, 3, 50),
+  ];
+  // Incoming restates Feb Sales (200→250), adds April, and OMITS Rent entirely
+  // (a QBO P&L omits zero-activity accounts — absence is not deletion).
+  const ia = [acc('i1', 'Sales', 'revenue', '4000')];
+  const iv = [val('i1', 2026, 1, 100), val('i1', 2026, 2, 250), val('i1', 2026, 3, 300), val('i1', 2026, 4, 400)];
+  const ow = mergeOverwrite(ea, ev, ia, iv);
+  check(ow.changedCells === 1, `overwrite: exactly the restated Feb cell counts, got ${ow.changedCells}`);
+  check(ow.addedPeriods === 1 && ow.addedAccounts === 0, `overwrite: 1 new period / 0 new accounts, got ${ow.addedPeriods}/${ow.addedAccounts}`);
+  const feb = ow.values.filter((v) => v.accountId === 'e1' && v.period.month === 2);
+  check(feb.length === 1 && feb[0]!.amount === 250, `overwrite: Feb Sales should be restated to 250, got ${JSON.stringify(feb.map((v) => v.amount))}`);
+  const apr = ow.values.find((v) => v.accountId === 'e1' && v.period.month === 4);
+  check(apr?.amount === 400, `overwrite: April should be added, got ${apr?.amount}`);
+  // Absent account: object AND all its values pass through by reference.
+  check(ow.accounts.find((a) => a.id === 'e2') === ea[1], 'overwrite: absent account object untouched (same reference)');
+  const rentVals = ow.values.filter((v) => v.accountId === 'e2');
+  check(rentVals.length === 3 && rentVals.every((v) => v.amount === 50), `overwrite: absent account keeps all 3 values, got ${rentVals.length}`);
+  check(ow.values.length === 7, `overwrite: 3 Rent + 4 Sales values, got ${ow.values.length}`);
+}
+
+// ── Scenario 18: mergeOverwrite preserves the user's classification while
+//    refreshing name/number/externalId from the source of record ──────────────
+{
+  const ea: Account[] = [{
+    id: 'e1',
+    name: 'Old Insurance',
+    number: '6000',
+    externalId: 'qbo-9',
+    type: 'expense',
+    costBehavior: 'fixed',
+    mixedFixedPercent: undefined,
+    isManuallyClassified: true,
+    isExcluded: false,
+    classificationSource: 'manual',
+    classificationConfidence: 'high',
+    detectedSection: 'expense',
+  }];
+  const ev = [val('e1', 2026, 1, 500)];
+  // QBO renamed + renumbered the account; the transform layer also classifies
+  // it differently — the user's classification must survive the refresh.
+  const ia: Account[] = [{
+    id: 'i1',
+    name: 'Insurance Expense',
+    number: '6150',
+    externalId: 'qbo-9',
+    type: 'cogs',
+    costBehavior: 'variable',
+    isManuallyClassified: false,
+  }];
+  const iv = [val('i1', 2026, 1, 500)];
+  const ow = mergeOverwrite(ea, ev, ia, iv);
+  const a = ow.accounts[0]!;
+  check(ow.accounts.length === 1 && a.id === 'e1', `classification preserve: one account, got ${ow.accounts.length}`);
+  check(a.name === 'Insurance Expense' && a.number === '6150' && a.externalId === 'qbo-9',
+    `classification preserve: metadata should refresh, got ${a.name}/${a.number}/${a.externalId}`);
+  check(a.type === 'expense' && a.costBehavior === 'fixed' && a.isManuallyClassified === true,
+    `classification preserve: type/behavior/manual flag must survive, got ${a.type}/${a.costBehavior}/${a.isManuallyClassified}`);
+  check(a.isExcluded === false && a.classificationSource === 'manual' && a.classificationConfidence === 'high' && a.detectedSection === 'expense',
+    'classification preserve: remaining classification fields must survive');
+  check(ow.changedCells === 0, `classification preserve: identical value should not count as changed, got ${ow.changedCells}`);
+}
+
+// ── Scenario 19: mergeOverwrite adopts a brand-new incoming account with its
+//    full (backfilled) history ────────────────────────────────────────────────
+{
+  const ea = [acc('e1', 'Sales', 'revenue', '4000')];
+  const ev = [val('e1', 2026, 1, 100), val('e1', 2026, 2, 200)];
+  const ia = [acc('i1', 'Sales', 'revenue', '4000'), accX('i2', 'Delivery', 'expense', '5300', 'qbo-77')];
+  const iv = [
+    val('i1', 2026, 1, 100), val('i1', 2026, 2, 200),
+    val('i2', 2026, 1, 20), val('i2', 2026, 2, 25),
+  ];
+  const ow = mergeOverwrite(ea, ev, ia, iv);
+  check(ow.addedAccounts === 1 && ow.accounts.length === 2, `overwrite adopt: 1 new account, got ${ow.addedAccounts}/${ow.accounts.length}`);
+  check(ow.changedCells === 0 && ow.addedPeriods === 0, `overwrite adopt: backfill is not a restatement, got ${ow.changedCells}/${ow.addedPeriods}`);
+  const deliveryVals = ow.values.filter((v) => v.accountId === 'i2');
+  check(deliveryVals.length === 2 && deliveryVals[0]!.amount === 20 && deliveryVals[1]!.amount === 25,
+    `overwrite adopt: full history should come in, got ${JSON.stringify(deliveryVals.map((v) => v.amount))}`);
 }
 
 if (failures > 0) {

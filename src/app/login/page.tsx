@@ -33,6 +33,7 @@
  */
 
 import React, { useState, useEffect, useRef, Suspense } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { sanitizeNext } from '@/lib/safe-next';
@@ -165,7 +166,7 @@ function LoginForm() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-4"
+      className="min-h-screen flex flex-col items-center justify-center px-4"
       style={{ background: 'hsl(var(--background))' }}
     >
       <div
@@ -302,6 +303,15 @@ function LoginForm() {
           firm, and never used to train AI models or sold to third parties.
         </p>
       </div>
+      <p className="mt-4 text-[11px]" style={{ color: 'hsl(var(--muted-foreground))' }}>
+        <Link href="/legal/privacy" className="underline underline-offset-2 hover:opacity-80">
+          Privacy
+        </Link>
+        <span aria-hidden="true"> · </span>
+        <Link href="/legal/terms" className="underline underline-offset-2 hover:opacity-80">
+          Terms
+        </Link>
+      </p>
     </div>
   );
 }

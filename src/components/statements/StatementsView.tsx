@@ -9,13 +9,12 @@
  */
 
 import { useMemo, useRef, useState } from 'react';
-import type { Account, AccountValue, ClientWorkspace, Period, StatementType } from '@/types';
+import type { Account, AccountValue, Period, StatementType } from '@/types';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { getProfile } from '@/lib/profiles';
 import { parseImportFile } from '@/lib/data/import-pipeline';
 import {
   diffImport,
-  mergeNewPeriods,
   isAdditiveStatementMerge,
   datasetOptions,
   activeDatasetId,
@@ -23,6 +22,7 @@ import {
   periodLabelShort,
   type ImportDiff,
 } from '@/lib/data/datasets';
+import { commitMergeNewPeriods, commitReplaceAsNewDataset } from '@/lib/data/dataset-commit';
 import { formatCurrency } from '@/lib/utils/format';
 
 type Granularity = 'monthly' | 'quarterly' | 'annual';
@@ -418,73 +418,42 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
     setBusy(false);
   }
 
-  /** Snapshot the current working data as a dataset if the registry is empty,
-   *  so nothing is lost when the first re-import happens. */
-  function ensureRegistry(ws: ClientWorkspace): NonNullable<ClientWorkspace['datasets']> {
-    if (ws.datasets && ws.datasets.length > 0) return ws.datasets;
-    return [
-      {
-        id: `ds-original-${Date.now()}`,
-        label: 'Original import',
-        importedAt: ws.createdAt,
-        accounts: ws.accounts,
-        values: ws.values,
-      },
-    ];
-  }
+  // The dataset bookkeeping (registry snapshot, merge, active-dataset update)
+  // lives in lib/data/dataset-commit — shared with the QBO sync flow. These
+  // handlers only wire the pure patch to the store and drive the UI/toasts.
 
-  function commitMergeNewPeriods() {
+  function handleMergeNewPeriods() {
     if (!workspace || !pending) return;
-    const merged = mergeNewPeriods(workspace.accounts, workspace.values, pending.accounts, pending.values);
-    const registry = ensureRegistry(workspace);
-    const active = registry.find((d) => d.id === activeId) ?? registry[0]!;
-    const updated = registry.map((d) =>
-      d.id === active.id ? { ...d, accounts: merged.accounts, values: merged.values } : d
-    );
-    updateWorkspace(clientId, {
-      accounts: merged.accounts,
-      values: merged.values,
-      datasets: updated,
-      activeDatasetId: active.id,
-    });
+    const patch = commitMergeNewPeriods(workspace, { accounts: pending.accounts, values: pending.values });
+    updateWorkspace(clientId, patch);
     setPending(null);
     setImporting(false);
     // Report what the merge actually added (not the reviewed diff's counts),
     // so the toast can never overstate the commit.
+    const activeLabel = patch.datasets.find((d) => d.id === patch.activeDatasetId)!.label;
     const periodsBefore = new Set(workspace.values.map((v) => periodKey(v.period)));
     const periodsAdded = new Set(
-      merged.values.filter((v) => !periodsBefore.has(periodKey(v.period))).map((v) => periodKey(v.period))
+      patch.values.filter((v) => !periodsBefore.has(periodKey(v.period))).map((v) => periodKey(v.period))
     ).size;
-    const accountsAdded = merged.accounts.length - workspace.accounts.length;
+    const accountsAdded = patch.accounts.length - workspace.accounts.length;
     const parts: string[] = [];
     if (periodsAdded > 0) parts.push(`${periodsAdded} new period${periodsAdded === 1 ? '' : 's'}`);
     if (accountsAdded > 0) parts.push(`${accountsAdded} new account${accountsAdded === 1 ? '' : 's'}`);
-    showToast(parts.length > 0 ? `Added ${parts.join(' + ')} to "${active.label}"` : `Nothing new to add to "${active.label}"`);
+    showToast(parts.length > 0 ? `Added ${parts.join(' + ')} to "${activeLabel}"` : `Nothing new to add to "${activeLabel}"`);
   }
 
-  function commitReplaceAsNewDataset() {
+  function handleReplaceAsNewDataset() {
     if (!workspace || !pending) return;
-    // Snapshot the outgoing active dataset's in-session edits before appending,
-    // mirroring handleSelectDataset, so mapping edits aren't lost.
-    const registry = ensureRegistry(workspace).map((d) =>
-      d.id === activeId ? { ...d, accounts: workspace.accounts, values: workspace.values } : d
+    const label = `${pending.statementType === 'pnl' ? 'P&L' : 'Balance Sheet'} · ${pending.fileName}`;
+    const patch = commitReplaceAsNewDataset(
+      workspace,
+      { accounts: pending.accounts, values: pending.values },
+      label
     );
-    const newDs = {
-      id: `ds-${Date.now()}`,
-      label: `${pending.statementType === 'pnl' ? 'P&L' : 'Balance Sheet'} · ${pending.fileName}`,
-      importedAt: new Date().toISOString(),
-      accounts: pending.accounts,
-      values: pending.values,
-    };
-    updateWorkspace(clientId, {
-      accounts: pending.accounts,
-      values: pending.values,
-      datasets: [...registry, newDs],
-      activeDatasetId: newDs.id,
-    });
+    updateWorkspace(clientId, patch);
     setPending(null);
     setImporting(false);
-    showToast(`Imported "${newDs.label}" as a new dataset`);
+    showToast(`Imported "${label}" as a new dataset`);
   }
 
   return (
@@ -645,20 +614,20 @@ export function StatementsView({ clientId, embedded = false }: { clientId: strin
               {/* Actions */}
               <div className="flex items-center gap-2 flex-wrap pt-1">
                 {canAdditiveMerge && pending.diff.changedCells.length === 0 && (
-                  <button onClick={commitMergeNewPeriods} data-testid="import-merge-btn"
+                  <button onClick={handleMergeNewPeriods} data-testid="import-merge-btn"
                     className="rounded-lg px-3 py-1.5 text-xs font-semibold"
                     style={{ background: 'hsl(142 71% 40%)', color: '#fff' }}>
                     Add {mergeAdditionsLabel(pending.diff)} to current data
                   </button>
                 )}
                 {canAdditiveMerge && pending.diff.changedCells.length > 0 && (
-                  <button onClick={commitMergeNewPeriods}
+                  <button onClick={handleMergeNewPeriods}
                     className="rounded-lg px-3 py-1.5 text-xs font-semibold"
                     style={{ background: 'hsl(142 71% 40%)', color: '#fff' }}>
                     Add {mergeAdditionsLabel(pending.diff)} only (keep existing values)
                   </button>
                 )}
-                <button onClick={commitReplaceAsNewDataset} data-testid="import-replace-btn"
+                <button onClick={handleReplaceAsNewDataset} data-testid="import-replace-btn"
                   className="rounded-lg border px-3 py-1.5 text-xs font-semibold"
                   style={{ borderColor: 'hsl(var(--border))', color: 'hsl(var(--foreground))' }}>
                   Import as a new dataset

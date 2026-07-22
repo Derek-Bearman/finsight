@@ -31,7 +31,12 @@
   //   echo "<service_role_key>" | wrangler secret put SUPABASE_SERVICE_ROLE_KEY
   "vars": {
     "NEXT_PUBLIC_SUPABASE_URL": "https://camphmqvrzqpgrhdjafo.supabase.co",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_wiFj4325ez0dD6O7ZYN6GA_igE_c9ov"
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_wiFj4325ez0dD6O7ZYN6GA_igE_c9ov",
+    // QBO OAuth redirect origin — MUST stay the custom domain (Intuit redirect
+    // URIs are exact-match; workers.dev is deliberately not registered).
+    // QBO_CLIENT_ID / QBO_CLIENT_SECRET / QBO_TOKEN_KEY / QBO_STATE_SECRET are
+    // wrangler SECRETS, set only at deploy time (see DEREK_QBO_RUNBOOK.md).
+    "QBO_REDIRECT_ORIGIN": "https://finsight.arktosmarketing.com"
   },
 
   // ─── Environments ─────────────────────────────────────────────────────────
