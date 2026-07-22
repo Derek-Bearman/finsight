@@ -36,6 +36,14 @@ export interface QboEnv {
   redirectOrigin: string;
   /** true → oauth + api URLs all point at the local /api/qbo/mock routes. */
   mockMode: boolean;
+  /**
+   * 'sandbox' → data-API calls hit Intuit's sandbox host. Intuit Development
+   * keys ONLY work against sandbox companies, so this must be 'sandbox'
+   * whenever QBO_CLIENT_ID holds dev keys (QBO_ENVIRONMENT=sandbox in
+   * .env.development.local). OAuth endpoints are shared between the two.
+   * Ignored in mock mode. Defaults to 'production'.
+   */
+  apiEnvironment: 'production' | 'sandbox';
 }
 
 function requireEnv(name: string, value: string | undefined): string {
@@ -66,6 +74,8 @@ export function getQboEnv(): QboEnv {
       process.env.QBO_REDIRECT_ORIGIN
     ).replace(/\/+$/, ''),
     mockMode,
+    apiEnvironment:
+      process.env.QBO_ENVIRONMENT === 'sandbox' ? 'sandbox' : 'production',
   };
 }
 
@@ -92,12 +102,14 @@ export function qboRevokeUrl(env: QboEnv): string {
 }
 
 /** Data-API base INCLUDING the /v3 segment — callers append
- *  `/company/<realmId>/...` so mock and real URLs compose identically.
- *  (Sandbox base `https://sandbox-quickbooks.api.intuit.com` is a Q5 concern —
- *  real-sandbox E2E is deferred until dev keys exist; plan §5.) */
+ *  `/company/<realmId>/...` so mock, sandbox, and real URLs compose
+ *  identically. Sandbox host is selected by QBO_ENVIRONMENT=sandbox (required
+ *  whenever Intuit Development keys are in use — they only work against
+ *  sandbox companies). */
 export function qboApiBaseUrl(env: QboEnv): string {
-  return env.mockMode
-    ? `${env.redirectOrigin}/api/qbo/mock/v3`
+  if (env.mockMode) return `${env.redirectOrigin}/api/qbo/mock/v3`;
+  return env.apiEnvironment === 'sandbox'
+    ? 'https://sandbox-quickbooks.api.intuit.com/v3'
     : 'https://quickbooks.api.intuit.com/v3';
 }
 

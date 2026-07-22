@@ -41,11 +41,16 @@ Do this whenever. Nothing here touches the live app.
    ```
    QBO_CLIENT_ID=paste-the-development-client-id-here
    QBO_CLIENT_SECRET=paste-the-development-client-secret-here
+   QBO_ENVIRONMENT=sandbox
    ```
 
+   (`QBO_ENVIRONMENT=sandbox` matters: Intuit Development keys only work
+   against sandbox companies, and that line points FinSight's API calls at the
+   sandbox host. Production deploys omit it.)
+
    This file is gitignored, so the secret never lands in the repo. Once the
-   values are in place, a Claude session can take it from there (flip off mock
-   mode and run the sandbox end-to-end test).
+   values are in place, a Claude session can take it from there (flip
+   `FINSIGHT_QBO_MOCK=false` and run the sandbox end-to-end test).
 
 5. Create a sandbox company: dashboard top nav → your profile / **Sandbox**
    (Intuit sometimes files it under "API Docs & Tools" → "Sandbox"). Click
