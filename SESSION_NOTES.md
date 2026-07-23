@@ -3,6 +3,21 @@
 **Last updated:** 2026-07-23
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
 
+> **2026-07-23 (later) — Mixed cost split moved onto the card (version `3513e718`).**
+> The fixed/variable split for mixed-behavior accounts is now an inline slider
+> ON each Mixed-bucket card (Cost Behavior view) instead of a separate section
+> below the columns. Pointer + click are stopPropagation-isolated so adjusting
+> it never starts a dnd-kit drag or selects the card (verified live: card stays
+> put; slider updates + persists + audits). Removed the redundant "Mixed Cost
+> Splits" section + MixedSplitSlider component; threaded onMixedSplitUpdate
+> through DropColumn. Also shipped: a SECOND standalone franchise
+> upload-practice pack (files only, NOT seeded) at
+> scripts/seed/franchise-upload-pack/ ("HandyPro Home Services", trades
+> profile) — corporate SCOA + benchmark CSVs + 5 franchisees as importable
+> P&L/BS CSVs (QBO section shape, dedicated Number column, parse-verified) +
+> README with the upload order; #203 missing-account, #204 renamed+extra drift
+> for SCOA-audit practice.
+>
 > **2026-07-23 — TAB UX BATCH + FRANCHISE PRACTICE DATA LIVE (version `e320c4f1`).**
 > Three UX improvements from Derek's real-use feedback, one release:
 > (U1) a shared from/to **date-range control** (From/To month selects +
