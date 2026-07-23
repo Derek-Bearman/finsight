@@ -3,9 +3,10 @@
 /**
  * Firm-level franchise manager (FRANCHISE_BENCHMARKS_PLAN.md §F1) — lists the
  * firm's franchises with linked-client counts; owners/admins can create,
- * rename, and delete. Members and the shared demo get a read-only list. All
- * mutations go through the franchise server actions, which re-check role and
- * demo gates on top of the database RLS policies.
+ * rename, and delete, and expand per-row panels for corporate benchmarks
+ * (§F2) and the corporate SCOA (§F4). Members and the shared demo get a
+ * read-only list. All mutations go through the franchise server actions,
+ * which re-check role and demo gates on top of the database RLS policies.
  */
 
 import { useEffect, useState, useTransition } from 'react';
@@ -29,8 +30,12 @@ import {
 } from '@/lib/data/franchise-actions';
 import type { Franchise } from '@/lib/data/franchises';
 import { BenchmarkSetPanel } from '@/components/franchise/BenchmarkSetPanel';
+import { ScoaPanel } from '@/components/franchise/ScoaPanel';
 
 type FranchiseWithLinks = Franchise & { linkedCount: number };
+
+/** Which per-row panel is expanded (one open at a time across all rows). */
+type ExpandedPanel = { id: string; panel: 'benchmarks' | 'scoa' };
 
 function profileLabel(industryProfileId: string | null): string {
   if (!industryProfileId) return 'No profile';
@@ -67,8 +72,8 @@ export function FranchiseManager() {
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<FranchiseWithLinks | null>(null);
 
-  // Per-row corporate-benchmarks panel (canManage only)
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Per-row expanded panel: corporate benchmarks or SCOA (canManage only)
+  const [expanded, setExpanded] = useState<ExpandedPanel | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -229,6 +234,10 @@ export function FranchiseManager() {
           <CardContent className="space-y-2">
             {franchises.map((f) => {
               const isRenaming = renamingId === f.id;
+              const openPanel = expanded && expanded.id === f.id ? expanded.panel : null;
+              const benchmarksOpen = openPanel === 'benchmarks';
+              const scoaOpen = openPanel === 'scoa';
+              const scoaCount = f.config.scoa?.accounts.length ?? 0;
               return (
                 <div
                   key={f.id}
@@ -274,6 +283,12 @@ export function FranchiseManager() {
                         <span className="text-xs text-muted-foreground">
                           {f.linkedCount} linked client{f.linkedCount === 1 ? '' : 's'} ·{' '}
                           <span data-testid="franchise-benchmark-summary">{benchmarkSummary(f)}</span>
+                          {f.config.scoa && (
+                            <span data-testid="franchise-scoa-summary">
+                              {' · SCOA: '}
+                              {scoaCount} account{scoaCount === 1 ? '' : 's'}
+                            </span>
+                          )}
                           {' · Created '}
                           {new Date(f.createdAt).toLocaleDateString()}
                         </span>
@@ -283,12 +298,24 @@ export function FranchiseManager() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => setExpandedId(expandedId === f.id ? null : f.id)}
+                            onClick={() =>
+                              setExpanded(benchmarksOpen ? null : { id: f.id, panel: 'benchmarks' })
+                            }
                             disabled={pending}
-                            aria-expanded={expandedId === f.id}
+                            aria-expanded={benchmarksOpen}
                             data-testid="franchise-benchmarks-toggle"
                           >
-                            {expandedId === f.id ? 'Hide benchmarks' : 'Benchmarks'}
+                            {benchmarksOpen ? 'Hide benchmarks' : 'Benchmarks'}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setExpanded(scoaOpen ? null : { id: f.id, panel: 'scoa' })}
+                            disabled={pending}
+                            aria-expanded={scoaOpen}
+                            data-testid="franchise-scoa-toggle"
+                          >
+                            {scoaOpen ? 'Hide SCOA' : 'SCOA'}
                           </Button>
                           <Button
                             variant="outline"
@@ -312,9 +339,13 @@ export function FranchiseManager() {
                       )}
                     </>
                   )}
-                  {canManage && !isRenaming && expandedId === f.id && (
+                  {canManage && !isRenaming && openPanel && (
                     <div className="basis-full pt-1">
-                      <BenchmarkSetPanel franchise={f} onUpdated={handleFranchiseUpdated} />
+                      {openPanel === 'benchmarks' ? (
+                        <BenchmarkSetPanel franchise={f} onUpdated={handleFranchiseUpdated} />
+                      ) : (
+                        <ScoaPanel franchise={f} onUpdated={handleFranchiseUpdated} />
+                      )}
                     </div>
                   )}
                 </div>

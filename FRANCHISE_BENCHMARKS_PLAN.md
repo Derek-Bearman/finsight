@@ -1,5 +1,23 @@
 # FinSight — Franchise Benchmarking & SCOA System ("the Qvinci-killer")
 
+> **BUILD STATUS 2026-07-23 (mid-build, autonomous session):**
+> F0 ✅ (prod at 7da63d77 pre-build). F1 ✅ commits b219766+60bc074 (table
+> RLS-proven 10/10, manager page, wizard designation, link control).
+> F2 ✅ commits b299aac+3321a84 (composition+packs core, upload panel,
+> TargetsEditor benchmarks section, wiring across all surfaces,
+> benchmarks.check.ts; 13/13 suites green at commit time).
+> F3+F4 IN FLIGHT: pure layers + actions DONE in working tree (peer-metrics,
+> franchise-peer-actions, scoa-audit, saveScoaAction/clearScoaAction,
+> Account.scoaNumber, franchise.check.ts passing); UI workflow
+> wf_6b94bf50-dc1 running 3 agents (C1 FranchiseComparison + ReportsTab
+> mount, C2 ScoaPanel + FranchiseManager, C3 ScoaMappingSection + mapping
+> page). After it lands: tsc + all suites, commit F3+F4, then F5 per §2
+> (adversarial review workflow → fixes → cf:build → ONE cf:deploy → prod
+> click-verify → docs/memory). Known F5 review feeds: B1's notes (reports-tab
+> MetricRow hardcoded benchmarks not wired — product call; exec-summary
+> "client targets" copy with pack targets counted), B2's note (config
+> read-modify-write last-write-wins), C-round reports pending.
+
 **Created:** 2026-07-23 · **Requested by:** Derek (verbatim requirements below) ·
 **Decisions locked:** curated built-in benchmark packs (no external data feed);
 autonomous build, adversarial review per phase, ONE deploy at the end.

@@ -44,6 +44,13 @@ export interface Account {
    * and account-number changes, making re-sync idempotent.
    */
   externalId?: string;
+  /**
+   * Corporate SCOA account number this account maps to (franchisee COA →
+   * corporate standard chart mapping, FRANCHISE_BENCHMARKS_PLAN.md §F4).
+   * Set via the Mapping tab's Corporate SCOA mode; undefined = unmapped.
+   * Cross-franchisee account rollups align on this when present.
+   */
+  scoaNumber?: string;
   number?: string;
   name: string;
   type: AccountType;

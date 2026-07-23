@@ -9,6 +9,7 @@ import {
   MappingToolbar,
   MappingViewA,
   MappingViewB,
+  ScoaMappingSection,
   computeSourceCounts,
 } from '@/components/mapping';
 import type { SourceFilter } from '@/components/mapping';
@@ -340,6 +341,16 @@ export default function MappingPage({ params }: PageProps) {
               </Link>
             </div>
           )}
+
+          {/* Corporate SCOA mapping — renders only when this workspace is
+              linked to a franchise with an uploaded corporate chart (F4).
+              Persists Account.scoaNumber through the same store path as the
+              mapping views above. */}
+          <ScoaMappingSection
+            workspace={workspace}
+            onAccountsChange={handleAccountsChange}
+            onNotify={showToast}
+          />
         </div>
         </ReadOnlyGuard>
       </main>

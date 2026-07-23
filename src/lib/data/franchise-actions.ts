@@ -302,3 +302,72 @@ export async function deleteFranchiseAction(params: { id: string }): Promise<Fra
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to delete franchise.' };
   }
 }
+
+// ─────────────────────────────────────────────
+// Corporate SCOA (FRANCHISE_BENCHMARKS_PLAN.md §F4)
+// One SCOA per franchise, stored in config.scoa; replacing overwrites.
+// ─────────────────────────────────────────────
+
+const SCOA_ACCOUNTS_MAX = 2000;
+
+export async function saveScoaAction(params: {
+  franchiseId: string;
+  accounts: Array<{ number: string; name: string; type?: string; statementType?: 'pnl' | 'balance'; parentNumber?: string }>;
+}): Promise<FranchiseActionResult> {
+  const guard = await requireManageContext();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const rows = Array.isArray(params.accounts) ? params.accounts : [];
+  if (rows.length === 0) return { ok: false, error: 'The SCOA needs at least one account.' };
+  if (rows.length > SCOA_ACCOUNTS_MAX) {
+    return { ok: false, error: `A SCOA is limited to ${SCOA_ACCOUNTS_MAX} accounts.` };
+  }
+  const seen = new Set<string>();
+  const clean = [];
+  for (const r of rows) {
+    const number = typeof r.number === 'string' ? r.number.trim() : '';
+    const name = typeof r.name === 'string' ? r.name.trim() : '';
+    if (!number || !name) return { ok: false, error: 'Every SCOA row needs an account number and a name.' };
+    if (seen.has(number)) return { ok: false, error: `Duplicate SCOA account number "${number}".` };
+    seen.add(number);
+    clean.push({
+      number,
+      name,
+      ...(typeof r.type === 'string' && r.type.trim() ? { type: r.type.trim() } : {}),
+      ...(r.statementType === 'pnl' || r.statementType === 'balance' ? { statementType: r.statementType } : {}),
+      ...(typeof r.parentNumber === 'string' && r.parentNumber.trim() ? { parentNumber: r.parentNumber.trim() } : {}),
+    });
+  }
+  try {
+    const franchise = await getFranchise(params.franchiseId);
+    if (!franchise) return { ok: false, error: 'Franchise not found.' };
+    const config: FranchiseConfig = {
+      ...franchise.config,
+      scoa: {
+        uploadedAt: new Date().toISOString(),
+        ...(guard.ctx.email ? { uploadedBy: guard.ctx.email } : {}),
+        accounts: clean,
+      },
+    };
+    const updated = await updateFranchiseRow(params.franchiseId, { config });
+    if (!updated) return { ok: false, error: 'Franchise not found (or you lack permission).' };
+    return { ok: true, data: await withLinkedCount(updated) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Failed to save the SCOA.' };
+  }
+}
+
+export async function clearScoaAction(params: { franchiseId: string }): Promise<FranchiseActionResult> {
+  const guard = await requireManageContext();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  try {
+    const franchise = await getFranchise(params.franchiseId);
+    if (!franchise) return { ok: false, error: 'Franchise not found.' };
+    const config: FranchiseConfig = { ...franchise.config };
+    delete config.scoa;
+    const updated = await updateFranchiseRow(params.franchiseId, { config });
+    if (!updated) return { ok: false, error: 'Franchise not found (or you lack permission).' };
+    return { ok: true, data: await withLinkedCount(updated) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Failed to remove the SCOA.' };
+  }
+}

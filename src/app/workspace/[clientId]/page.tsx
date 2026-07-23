@@ -74,6 +74,7 @@ import { BillingBanner } from '@/components/billing/BillingBanner';
 import { ExecutiveSummary } from '@/components/insights/ExecutiveSummary';
 import { TargetsEditor } from '@/components/app/TargetsEditor';
 import { FranchiseLinkControl } from '@/components/franchise/FranchiseLinkControl';
+import { FranchiseComparison } from '@/components/franchise/FranchiseComparison';
 import { RATIO_DEF_MAP, resolveRatioBenchmark, type RatioKey } from '@/lib/targets';
 import { useEffectiveTargets } from '@/lib/franchise/useEffectiveTargets';
 import { INDUSTRY_BENCHMARK_DISCLAIMER } from '@/lib/benchmarks/packs';
@@ -722,6 +723,18 @@ function ReportsTab({
             </div>
           )}
         </>
+      )}
+
+      {/* Co-franchisee comparison (§F3) — franchise-linked workspaces only.
+          Renders regardless of THIS workspace's data: siblings may have
+          numbers worth seeing even before this client's first import. */}
+      {workspace.franchiseId && (
+        <div>
+          <h3 className="text-sm font-semibold mb-3" style={{ color: 'hsl(var(--foreground))' }}>
+            Franchise comparison
+          </h3>
+          <FranchiseComparison franchiseId={workspace.franchiseId} workspaceId={workspace.id} />
+        </div>
       )}
     </div>
   );
