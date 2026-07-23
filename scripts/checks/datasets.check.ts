@@ -599,6 +599,65 @@ for (let m = 1; m <= 6; m++) {
   );
 }
 
+// ── Adopted-account parentId remap (both merges) ─────────────────────────────
+// An incoming QBO batch can carry a parent that MATCHES an existing account
+// (its incoming id never enters the workspace) and a child that's brand-new
+// (adopted verbatim). The child's parentId must follow the same idRemap the
+// values use, or it dangles on an id that doesn't exist in the merged set —
+// nothing consumes parentId today, but future tree features must not inherit
+// orphans. Parent-after-child ordering is exercised on purpose (the remap has
+// to be a post-pass).
+{
+  const existing = [acc('e1', 'Job Income', 'revenue', '4000')];
+  const existingVals = [val('e1', 2026, 1, 1000)];
+  const incChild: Account = {
+    ...accX('i2', 'Job Income:Installs', 'revenue', undefined, 'r1:22'),
+    parentId: 'i1',
+  };
+  const incParent = accX('i1', 'Job Income', 'revenue', '4000', 'r1:21');
+  // Child FIRST, parent second — the parent's remap isn't known yet when the
+  // child is adopted.
+  const incAccounts = [incChild, incParent];
+  const incValues = [val('i1', 2026, 2, 1100), val('i2', 2026, 2, 400)];
+
+  const merged = mergeNewPeriods(existing, existingVals, incAccounts, incValues);
+  const child = merged.accounts.find((a) => a.externalId === 'r1:22');
+  check(
+    child?.parentId === 'e1',
+    `mergeNewPeriods: adopted child's parentId remaps onto the matched parent, got ${child?.parentId}`
+  );
+  check(
+    merged.accounts.every((a) => !a.parentId || merged.accounts.some((p) => p.id === a.parentId)),
+    'mergeNewPeriods: no account references a parent id absent from the merged set'
+  );
+
+  const over = mergeOverwrite(existing, existingVals, incAccounts, incValues);
+  const overChild = over.accounts.find((a) => a.externalId === 'r1:22');
+  check(
+    overChild?.parentId === 'e1',
+    `mergeOverwrite: adopted child's parentId remaps onto the matched parent, got ${overChild?.parentId}`
+  );
+  check(
+    over.accounts.every((a) => !a.parentId || over.accounts.some((p) => p.id === a.parentId)),
+    'mergeOverwrite: no account references a parent id absent from the merged set'
+  );
+
+  // Both-adopted chains keep their linkage (identity remap), and a parent
+  // absent from the batch entirely is left untouched.
+  const freshChild: Account = { ...accX('i9', 'New:Leaf', 'expense', undefined, 'r1:99'), parentId: 'i8' };
+  const freshParent = accX('i8', 'New', 'expense', undefined, 'r1:98');
+  const outside: Account = { ...accX('i7', 'Outside', 'expense', undefined, 'r1:97'), parentId: 'e1' };
+  const merged2 = mergeNewPeriods(existing, existingVals, [freshChild, freshParent, outside], [val('i9', 2026, 2, 5)]);
+  check(
+    merged2.accounts.find((a) => a.id === 'i9')?.parentId === 'i8',
+    'mergeNewPeriods: adopted-parent chain keeps its linkage'
+  );
+  check(
+    merged2.accounts.find((a) => a.id === 'i7')?.parentId === 'e1',
+    'mergeNewPeriods: a parentId not in the incoming batch is left as-is'
+  );
+}
+
 if (failures > 0) {
   console.error(`\n${failures} dataset check(s) FAILED`);
   process.exit(1);

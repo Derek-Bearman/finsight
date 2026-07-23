@@ -56,9 +56,20 @@ const conflicted = new Set<string>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const retryCounts = new Map<string, number>();
-/** id -> one-shot callbacks fired after the NEXT successful save (see
- *  onNextSuccessfulSave). Discarded unfired if the workspace conflicts. */
-const nextSaveCallbacks = new Map<string, Array<() => void>>();
+/** One-shot post-save callback plus the updatedAt watermark captured at
+ *  registration (see onNextSuccessfulSave). Exported for the check suite. */
+export interface NextSaveEntry {
+  cb: () => void;
+  /** The workspace's updatedAt when the callback was registered, or null when
+   *  the workspace wasn't in the store. A save only satisfies this entry when
+   *  its payload is at least this fresh. */
+  notBefore: string | null;
+}
+
+/** id -> one-shot callbacks fired after the next successful save whose payload
+ *  covers their watermark (see onNextSuccessfulSave). Discarded unfired if the
+ *  workspace conflicts. */
+const nextSaveCallbacks = new Map<string, NextSaveEntry[]>();
 
 let unsubscribe: (() => void) | null = null;
 let windowListenersInstalled = false;
@@ -131,28 +142,69 @@ async function recheckAccess(): Promise<void> {
 }
 
 /**
- * Register a callback to run once, after the NEXT save of `workspaceId` is
- * confirmed persisted. Used for side effects that must not outrun the save —
- * e.g. stamping qbo last_synced_at only once the committed data actually
- * exists in Postgres. If the workspace instead enters the conflict state
- * (a teammate's save won; this data will never persist), the callback is
- * discarded WITHOUT being invoked. Multiple registrations all fire on the
- * same successful save, in registration order.
+ * Register a callback to run once, after the next save of `workspaceId` whose
+ * PAYLOAD INCLUDES the store state as of registration is confirmed persisted.
+ * Used for side effects that must not outrun the save — e.g. stamping qbo
+ * last_synced_at only once the committed data actually exists in Postgres.
+ *
+ * The watermark matters: a debounced save can already be on the wire with a
+ * snapshot captured BEFORE the registrant's mutation. That save's success must
+ * not release the callback — the mutation rides the NEXT save, which can still
+ * lose the optimistic-concurrency conflict. Each registration captures the
+ * workspace's current updatedAt and only fires for a save at least that fresh.
+ *
+ * If the workspace instead enters the conflict state (a teammate's save won;
+ * this data will never persist), the callback is discarded WITHOUT being
+ * invoked. Multiple registrations all fire on the same successful save, in
+ * registration order.
  */
 export function onNextSuccessfulSave(workspaceId: string, cb: () => void): void {
   const list = nextSaveCallbacks.get(workspaceId) ?? [];
-  list.push(cb);
+  list.push({ cb, notBefore: currentWorkspace(workspaceId)?.updatedAt ?? null });
   nextSaveCallbacks.set(workspaceId, list);
 }
 
-/** Pop and invoke the one-shot save callbacks for `id` (success path only). */
-function fireNextSaveCallbacks(id: string): void {
-  const cbs = nextSaveCallbacks.get(id);
-  if (!cbs) return;
-  nextSaveCallbacks.delete(id);
-  for (const cb of cbs) {
+/**
+ * True when a save whose payload carried `savedUpdatedAt` satisfies an entry
+ * registered at watermark `notBefore` — i.e. the saved snapshot is at least as
+ * fresh as the state the registrant was waiting on. Identical strings always
+ * satisfy; otherwise the timestamps compare numerically, and an unparseable
+ * side fails open (fire rather than strand the callback forever). Exported
+ * for the check suite.
+ */
+export function saveCoversWatermark(savedUpdatedAt: string, notBefore: string | null): boolean {
+  if (notBefore === null || savedUpdatedAt === notBefore) return true;
+  const saved = Date.parse(savedUpdatedAt);
+  const min = Date.parse(notBefore);
+  if (Number.isNaN(saved) || Number.isNaN(min)) return true;
+  return saved >= min;
+}
+
+/** Split entries into those a save with `savedUpdatedAt` releases and those
+ *  still waiting on a fresher save. Pure — exported for the check suite. */
+export function partitionNextSaveEntries(
+  entries: NextSaveEntry[],
+  savedUpdatedAt: string
+): { ready: NextSaveEntry[]; waiting: NextSaveEntry[] } {
+  const ready: NextSaveEntry[] = [];
+  const waiting: NextSaveEntry[] = [];
+  for (const e of entries) {
+    (saveCoversWatermark(savedUpdatedAt, e.notBefore) ? ready : waiting).push(e);
+  }
+  return { ready, waiting };
+}
+
+/** Invoke the one-shot save callbacks the save with `savedUpdatedAt` releases
+ *  (success path only); entries with a fresher watermark stay registered. */
+function fireNextSaveCallbacks(id: string, savedUpdatedAt: string): void {
+  const entries = nextSaveCallbacks.get(id);
+  if (!entries) return;
+  const { ready, waiting } = partitionNextSaveEntries(entries, savedUpdatedAt);
+  if (waiting.length > 0) nextSaveCallbacks.set(id, waiting);
+  else nextSaveCallbacks.delete(id);
+  for (const e of ready) {
     try {
-      cb();
+      e.cb();
     } catch {
       // A callback must never be able to break the save pipeline.
     }
@@ -327,9 +379,11 @@ async function flushSave(id: string): Promise<void> {
     if (typeof res.data.cloudVersion === 'number') {
       useWorkspaceStore.getState().bumpCloudVersion(id, res.data.cloudVersion);
     }
-    // The save is confirmed in Postgres — release any one-shot side effects
-    // that were waiting on it (e.g. the QBO last_synced_at stamp).
-    fireNextSaveCallbacks(id);
+    // The save is confirmed in Postgres — release the one-shot side effects
+    // whose watermark this payload covers (e.g. the QBO last_synced_at
+    // stamp). Entries registered after this payload was captured keep
+    // waiting for the follow-up save scheduled below.
+    fireNextSaveCallbacks(id, sending);
     // If the user kept editing while the save was on the wire, chase the tail.
     const now = currentWorkspace(id);
     if (now && now.updatedAt !== sending) scheduleSave(id);

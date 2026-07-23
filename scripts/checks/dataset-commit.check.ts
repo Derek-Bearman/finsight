@@ -231,6 +231,39 @@ const incoming = {
   check(patch2.datasets[0]!.label === 'Original import', `overwrite commit: no label → name unchanged, got ${patch2.datasets[0]!.label}`);
 }
 
+// ── 6. commitMergeNewPeriods provenance label (QBO into empty workspace) ─────
+// Regression for the 2026-07-23 first-real-connect finding: a QBO backfill
+// into an EMPTY workspace takes the merge-new-periods path (diff verdict
+// 'disjoint' — nothing overlaps), lands in the bootstrap dataset, and stayed
+// labeled "Original import". With `label` passed the commit carries its
+// provenance (plan §2.8: "QuickBooks — <CompanyName>").
+{
+  const empty: ClientWorkspace = {
+    ...makeWs(),
+    accounts: [],
+    values: [],
+    datasets: undefined,
+    activeDatasetId: undefined,
+  };
+  const patch = commitMergeNewPeriods(empty, incoming, 'QuickBooks — Arktos Bookkeeping');
+  check(patch.datasets.length === 1, `qbo label: single bootstrap dataset, got ${patch.datasets.length}`);
+  check(
+    patch.datasets[0]!.label === 'QuickBooks — Arktos Bookkeeping',
+    `qbo label: empty-workspace backfill carries provenance, got "${patch.datasets[0]!.label}"`
+  );
+  check(patch.values.length === incoming.values.length, 'qbo label: full batch lands in the empty workspace');
+
+  // Registry workspace: label relabels the ACTIVE dataset only.
+  const patch2 = commitMergeNewPeriods(makeWs(), incoming, 'QuickBooks — Acme Co');
+  check(patch2.datasets[0]!.label === 'QuickBooks — Acme Co', `qbo label: active dataset relabeled, got "${patch2.datasets[0]!.label}"`);
+  check(patch2.datasets[1]!.label === 'Q1 upload', 'qbo label: non-active dataset keeps its name');
+
+  // No label (the file-import path) stays exactly as before — also pinned by
+  // the section-1 parity literal above.
+  const patch3 = commitMergeNewPeriods(makeWs(), incoming);
+  check(patch3.datasets[0]!.label === 'Original import', `qbo label: no label → name unchanged, got "${patch3.datasets[0]!.label}"`);
+}
+
 if (failures > 0) {
   console.error(`\n${failures} dataset-commit check(s) FAILED`);
   process.exit(1);

@@ -522,7 +522,15 @@ export function StatementsView({
   function handleMergeNewPeriods() {
     if (!workspace || !pending) return;
     const wasQbo = pending.source === 'qbo';
-    const patch = commitMergeNewPeriods(workspace, { accounts: pending.accounts, values: pending.values });
+    // A QBO batch relabels the active dataset with its provenance
+    // ("QuickBooks — <Company>") — a backfill into an empty workspace takes
+    // this path ('disjoint' verdict — nothing overlaps) and would otherwise
+    // stay "Original import".
+    const patch = commitMergeNewPeriods(
+      workspace,
+      { accounts: pending.accounts, values: pending.values },
+      wasQbo ? pending.fileName : undefined
+    );
     updateWorkspace(clientId, patch);
     setPending(null);
     setImporting(false);

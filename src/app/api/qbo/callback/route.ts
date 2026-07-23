@@ -8,7 +8,8 @@
  * a SESSION-LESS arrival: the signed state carries {user, firm, workspace}
  * identity, and authorization is re-proven via the SERVICE client (workspace
  * still belongs to firm f; user u still holds an active owner/admin
- * membership of firm f) before anything is stored.
+ * membership of firm f; firm f still has 'full' billing access — the same
+ * gate /api/qbo/connect enforced) before anything is stored.
  *
  * Replay guards (plan §1: auth codes are single-use — a duplicate exchange
  * invalidates the first exchange's tokens):
@@ -33,6 +34,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { createSupabaseServiceClient } from '@/lib/supabase/service';
+import { resolveAccess } from '@/lib/billing/access';
 import { getQboEnv, qboApiBaseUrl } from '@/lib/qbo/config';
 import { exchangeCode } from '@/lib/qbo/oauth';
 import { verifyState } from '@/lib/qbo/state';
@@ -119,6 +121,19 @@ export async function GET(request: NextRequest): Promise<Response> {
     if (memberError) throw memberError;
     if (!membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
       return respond(target, { qbo_error: 'forbidden' });
+    }
+
+    // Billing re-proof, mirroring /api/qbo/connect's 'full' gate: the state
+    // is at most 10 minutes old, but access can lapse mid-flow, and a stored
+    // connection is a live books feed — re-check before storing anything.
+    const { data: firm, error: firmError } = await service
+      .from('firms')
+      .select('plan_status, trial_ends_at, current_period_end, grace_ends_at')
+      .eq('id', state.f)
+      .maybeSingle();
+    if (firmError) throw firmError;
+    if (!firm || resolveAccess(firm).level !== 'full') {
+      return respond(target, { qbo_error: 'billing' });
     }
 
     // The company may already be wired to a DIFFERENT workspace in this firm

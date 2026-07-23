@@ -18,10 +18,12 @@
  *  - claimRefresh / clearRefreshClaim adapter: the PostgREST filter chain
  *    (update/eq/eq/or NULL-or-stale/select) built against a recording fake
  *    supabase client
- *  - upsertConnection: same-realm update vs different-realm delete+insert
+ *  - upsertConnection: same-realm update vs different-realm retire+insert
  *    (realm_id is trigger-pinned immutable; connected_by IS rewritten and
- *    persists — migration v2 un-pinned it), refresh-claim reset on
- *    reconnect, unique-violation → typed QboRealmInUseError, audit rows
+ *    persists — migration v2 un-pinned it; the old connection retires via
+ *    deleteConnection: best-effort revoke + 'qbo.disconnect' audit),
+ *    refresh-claim reset on reconnect, unique-violation → typed
+ *    QboRealmInUseError, audit rows
  *  - runQboSyncChunk client-date validation matrix (bad ISO, inverted range,
  *    cross-year range rejected; valid same-year ranges pass through)
  *  - markSyncResult / resolveSyncStatus (needs_reauth stickiness)
@@ -811,20 +813,85 @@ async function main(): Promise<void> {
       );
     }
 
-    // Different realm → delete + fresh insert (realm_id is trigger-pinned).
+    // Different realm → the old connection retires through deleteConnection
+    // (best-effort revoke of the OLD refresh token at Intuit + a
+    // 'qbo.disconnect' audit row), then a fresh insert (realm_id is
+    // trigger-pinned). A bare row delete would leave the old company's grant
+    // live in Connected Apps for up to 100 idle days.
     {
-      const existing = makeRow({ id: 'conn-9', realm_id: '9130002' });
-      const { db, log } = fakeDb({ getByWorkspace: async () => existing });
-      await upsertConnection(params, makeDeps(db));
+      const existing = makeRow({
+        id: 'conn-9',
+        realm_id: '9130002',
+        refresh_token_enc: await encryptSecret('old-rt', TOKEN_KEY),
+      });
+      const revoked: string[] = [];
+      const { db, log } = fakeDb({
+        getByWorkspace: async () => existing,
+        getById: async (id) => (id === 'conn-9' ? existing : null),
+      });
+      await upsertConnection(
+        params,
+        makeDeps(db, {
+          revoke: async (_env, { token }) => {
+            revoked.push(token);
+          },
+        })
+      );
+      check(
+        revoked.length === 1 && revoked[0] === 'old-rt',
+        'different-realm reconnect revokes the OLD refresh token at Intuit'
+      );
       check(
         log.deletes.length === 1 && log.deletes[0] === 'conn-9',
-        'different-realm reconnect deletes the old row first'
+        'different-realm reconnect deletes the old row'
       );
       check(
         log.inserts.length === 1 && log.inserts[0].realm_id === '9130001',
         'different-realm reconnect inserts fresh with the new realm'
       );
       check(log.updates.length === 0, 'different-realm reconnect never updates the pinned row');
+      check(
+        log.audits.length === 2 &&
+          log.audits[0].action === 'qbo.disconnect' &&
+          log.audits[0].target === 'ws-1' &&
+          (log.audits[0].metadata as { realmId?: string; revoked?: boolean }).realmId === '9130002' &&
+          (log.audits[0].metadata as { revoked?: boolean }).revoked === true &&
+          log.audits[1].action === 'qbo.connect',
+        'different-realm reconnect audits the old-company disconnect before the connect'
+      );
+    }
+
+    // Revoke failure on the different-realm path stays best-effort: the old
+    // row is still deleted, the new connect still lands, and the disconnect
+    // audit records the failure.
+    {
+      const existing = makeRow({
+        id: 'conn-9',
+        realm_id: '9130002',
+        refresh_token_enc: await encryptSecret('old-rt', TOKEN_KEY),
+      });
+      const { db, log } = fakeDb({
+        getByWorkspace: async () => existing,
+        getById: async () => existing,
+      });
+      await upsertConnection(
+        params,
+        makeDeps(db, {
+          revoke: async () => {
+            throw new Error('intuit revocation endpoint down');
+          },
+        })
+      );
+      check(
+        log.deletes.length === 1 && log.inserts.length === 1,
+        'failed revoke never blocks the different-realm reconnect'
+      );
+      check(
+        log.audits[0]?.action === 'qbo.disconnect' &&
+          (log.audits[0].metadata as { revoked?: boolean; revokeError?: string }).revoked === false &&
+          typeof (log.audits[0].metadata as { revokeError?: string }).revokeError === 'string',
+        'failed revoke is recorded in the disconnect audit metadata'
+      );
     }
 
     // unique(firm_id, realm_id) violation on insert (residual connect race)

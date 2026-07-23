@@ -333,8 +333,10 @@ export interface UpsertConnectionParams {
 
 /**
  * Store a freshly-authorized connection. realm_id is trigger-pinned immutable,
- * so a workspace re-connecting to a DIFFERENT company deletes the old row and
- * inserts fresh; the same realm just updates tokens/company_name/connected_by
+ * so a workspace re-connecting to a DIFFERENT company retires the old
+ * connection through deleteConnection (best-effort revoke at Intuit +
+ * 'qbo.disconnect' audit) and inserts fresh; the same realm just updates
+ * tokens/company_name/connected_by
  * (persisted — migration v2 un-pinned connected_by, so the reconnecting admin
  * becomes the recorded connector) and returns the row to 'active', clearing
  * any stale sync error AND any leftover refresh claim. An insert that hits
@@ -352,7 +354,11 @@ export async function upsertConnection(
 
   const existing = await db.getByWorkspace(params.workspaceId);
   if (existing && existing.realm_id !== params.realmId) {
-    await db.delete(existing.id);
+    // Retire the old company through the SAME path as an explicit disconnect
+    // (best-effort token revocation at Intuit + 'qbo.disconnect' audit row) —
+    // a bare row delete would leave the old company's grant live in Intuit's
+    // Connected Apps for up to 100 idle days, with no trail of the switch.
+    await deleteConnection(existing.id, { revoke: true, actor: params.connectedBy }, deps);
   }
 
   if (existing && existing.realm_id === params.realmId) {

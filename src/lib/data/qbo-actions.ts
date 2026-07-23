@@ -324,9 +324,13 @@ export async function runQboSyncChunk(
   const gate = await gateSync(workspaceId);
   if (!gate.ok) return gate;
 
-  const apiCtx = buildApiContext(gate.connection);
-  const range = { startDate: chunk.startDate, endDate: chunk.endDate };
   try {
+    // Inside the try like planQboSync: buildApiContext's default deps read
+    // getQboEnv(), which THROWS on a missing/misconfigured secret — outside
+    // the try that would cross the server-action boundary as a raw error
+    // instead of the fail-closed result shape.
+    const apiCtx = buildApiContext(gate.connection);
+    const range = { startDate: chunk.startDate, endDate: chunk.endDate };
     // Serialized on purpose: Intuit throttles per-realm (parallelize across
     // companies, serialize within one — plan §1).
     const pnl = await fetchProfitAndLossMonthly(apiCtx, range);

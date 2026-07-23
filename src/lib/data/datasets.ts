@@ -386,6 +386,18 @@ export function mergeNewPeriods(
     }
   }
 
+  // Adopted accounts arrive verbatim, but a parentId pointing at an incoming
+  // account that MATCHED an existing one would dangle — that incoming id
+  // never enters the workspace. Remap it through the same idRemap the values
+  // use (a post-pass, since the parent may appear after the child). A parent
+  // absent from the batch entirely is left as-is.
+  for (let i = 0; i < accounts.length; i++) {
+    const a = accounts[i]!;
+    if (!newAccountIds.has(a.id) || !a.parentId) continue;
+    const target = idRemap.get(a.parentId);
+    if (target !== undefined && target !== a.parentId) accounts[i] = { ...a, parentId: target };
+  }
+
   // Add values for new periods, plus ALL periods of a newly-adopted account
   // (its overlapping-period values can't overwrite anything that exists).
   // The new-account test must use the remap TARGET id: a second incoming row
@@ -468,9 +480,16 @@ export function mergeOverwrite(
       adopted.push(inc);
     }
   }
+  // Same dangling-parentId remap as mergeNewPeriods: an adopted account whose
+  // parent matched an existing account must follow the remap, not keep an
+  // incoming id that never enters the workspace.
   const accounts = [
     ...existingAccounts.map((a) => refreshedById.get(a.id) ?? a),
-    ...adopted,
+    ...adopted.map((a) => {
+      if (!a.parentId) return a;
+      const target = idRemap.get(a.parentId);
+      return target !== undefined && target !== a.parentId ? { ...a, parentId: target } : a;
+    }),
   ];
 
   const cellKey = (accountId: string, pk: string) => `${accountId}|${pk}`;

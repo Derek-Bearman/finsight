@@ -59,17 +59,29 @@ function resolveActive(ws: ClientWorkspace, registry: Dataset[]): Dataset {
 /**
  * "Add July" — merge the incoming batch's NEW periods (and new accounts, with
  * their full history) into the ACTIVE dataset without touching any existing
- * value. The safe, non-destructive path for a YTD re-import.
+ * value. The safe, non-destructive path for a YTD re-import. Pass `label` to
+ * (re)label the active dataset — a QBO backfill into an EMPTY workspace takes
+ * this path (verdict 'disjoint' — nothing overlaps), and without the label it would keep the
+ * bootstrap "Original import" name instead of "QuickBooks — <Company>"
+ * (plan §2.8 provenance).
  */
 export function commitMergeNewPeriods(
   ws: ClientWorkspace,
-  incoming: IncomingBatch
+  incoming: IncomingBatch,
+  label?: string
 ): DatasetCommitPatch {
   const merged = mergeNewPeriods(ws.accounts, ws.values, incoming.accounts, incoming.values);
   const registry = ensureDatasetRegistry(ws);
   const active = resolveActive(ws, registry);
   const datasets = registry.map((d) =>
-    d.id === active.id ? { ...d, accounts: merged.accounts, values: merged.values } : d
+    d.id === active.id
+      ? {
+          ...d,
+          accounts: merged.accounts,
+          values: merged.values,
+          ...(label !== undefined ? { label } : {}),
+        }
+      : d
   );
   return {
     accounts: merged.accounts,
