@@ -93,6 +93,47 @@ export type Database = {
         }
         Relationships: []
       }
+      franchises: {
+        Row: {
+          config: Json
+          created_at: string
+          created_by: string
+          firm_id: string
+          id: string
+          industry_profile_id: string | null
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          created_by?: string
+          firm_id: string
+          id?: string
+          industry_profile_id?: string | null
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          created_by?: string
+          firm_id?: string
+          id?: string
+          industry_profile_id?: string | null
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "franchises_firm_id_fkey"
+            columns: ["firm_id"]
+            isOneToOne: false
+            referencedRelation: "firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invitations: {
         Row: {
           accepted_at: string | null

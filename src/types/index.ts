@@ -219,6 +219,19 @@ export interface ClientWorkspace {
   operationalInputs?: OperationalInputPool[];
   /** Client-specific KPI targets (corporate mandates / custom goals). */
   targets?: WorkspaceTargets;
+  /** Firm-level franchise this client is a franchisee of (see
+   *  FRANCHISE_BENCHMARKS_PLAN.md). Franchise-wide benchmark sets and the
+   *  corporate SCOA resolve through this link. */
+  franchiseId?: string;
+  /** Cached franchise display name (denormalized for UI labels). */
+  franchiseName?: string;
+  /** Opt-in toggle: use industry benchmark packs when no corporate benchmark
+   *  covers a metric. Default off — corporate uploads always supersede. */
+  industryBenchmarksEnabled?: boolean;
+  /** US region scoping industry benchmark packs (undefined = national). */
+  benchmarkRegion?: string;
+  /** Benchmark pack version last applied via "Refresh benchmarks". */
+  benchmarkPackVersion?: string;
   customMetrics: CustomMetricDef[];
   auditLog: AuditEntry[];
   createdAt: string;
