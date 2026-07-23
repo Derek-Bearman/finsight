@@ -1,22 +1,53 @@
 # FinSight — Franchise Benchmarking & SCOA System ("the Qvinci-killer")
 
-> **BUILD STATUS 2026-07-23 (mid-build, autonomous session):**
-> F0 ✅ (prod at 7da63d77 pre-build). F1 ✅ commits b219766+60bc074 (table
-> RLS-proven 10/10, manager page, wizard designation, link control).
-> F2 ✅ commits b299aac+3321a84 (composition+packs core, upload panel,
-> TargetsEditor benchmarks section, wiring across all surfaces,
-> benchmarks.check.ts; 13/13 suites green at commit time).
-> F3+F4 IN FLIGHT: pure layers + actions DONE in working tree (peer-metrics,
-> franchise-peer-actions, scoa-audit, saveScoaAction/clearScoaAction,
-> Account.scoaNumber, franchise.check.ts passing); UI workflow
-> wf_6b94bf50-dc1 running 3 agents (C1 FranchiseComparison + ReportsTab
-> mount, C2 ScoaPanel + FranchiseManager, C3 ScoaMappingSection + mapping
-> page). After it lands: tsc + all suites, commit F3+F4, then F5 per §2
-> (adversarial review workflow → fixes → cf:build → ONE cf:deploy → prod
-> click-verify → docs/memory). Known F5 review feeds: B1's notes (reports-tab
-> MetricRow hardcoded benchmarks not wired — product call; exec-summary
-> "client targets" copy with pack targets counted), B2's note (config
-> read-modify-write last-write-wins), C-round reports pending.
+> **BUILD STATUS 2026-07-23 — COMPLETE + LIVE IN PRODUCTION (version 946b2492).**
+> All phases shipped in one release off phase-2a-tenancy:
+> F1 (b219766+60bc074), F2 (b299aac+3321a84), F3+F4 (05779f2),
+> F5 fixes (8b4cf7d). 14/14 check suites + tsc + cf:build green; single
+> cf:deploy done; prod click-verified.
+>
+> F5 review: 31-agent adversarial workflow (wf_82265d0d) over the full diff.
+> 8 unique CONFIRMED findings, ALL FIXED before deploy: (1) franchises.config
+> last-write-wins → optimistic-concurrency guard on updated_at + 1 retry;
+> (2) percent 100x for no-profile franchises → registry-format ids + explicit
+> Percent/Number unit (CSV unit column + manual toggle); (3) exec summary
+> counted industry-pack values as "client targets" → corporate+custom only;
+> (4) print auto-fire raced the franchise fetch → gated on `loaded` + 8s
+> fallback; (5) failed franchise fetch poisoned the session cache → no longer
+> cached, retries; (6) /franchises hung on transport error → error card +
+> Retry, mutations surface errors + invalidate cache; (7) TargetsEditor
+> Cancel didn't revert benchmark controls → dialog-local draft, commit on
+> Save; (8) unknown-id CSV upload was silent + sets uninspectable → pre-save
+> warning + expandable set rows. Also: invalid persisted region no longer
+> NaNs pack math. (Two fix agents died on a Fable credit cap mid-run; their
+> BenchmarkSetPanel JSX was finished by hand on Opus — parse/helpers were
+> agent-written, UI wiring completed manually; FranchiseManager+TargetsEditor
+> were already agent-complete.)
+>
+> Prod verification (demo firm, member role): /franchises renders read-only
+> with the demo containment note and NO create controls; wizard hides the
+> franchise block for members; Bella Roma (non-franchise) Overview + exec
+> summary + Reports render byte-identically with NO franchise comparison
+> section and zero console errors — the non-franchise regression guarantee
+> holds live.
+>
+> REMAINING (human-only, Derek's real firm — demo is member-role so it can't
+> exercise owner creates): end-to-end owner flow smoke test — create a
+> franchise, upload a corporate benchmark CSV, designate 2+ franchisee
+> clients, confirm the corporate tier supersedes industry on their Reports,
+> the co-franchisee comparison table ranks them, and the SCOA
+> upload→audit→map flow writes scoaNumber. Covered at the logic level by the
+> 10/10 RLS proof + 14 suites + this review; just needs real books.
+>
+> ACCEPTED MINOR/DEFERRED (not blockers; documented from the review):
+> workspace-side franchise fields (franchiseId/toggle/scoaNumber) are
+> member-writable server-side (canManage is UI-only there) and demo can flip
+> the industry toggle for other demo visitors until nightly reseed — both
+> consistent with the pre-existing "demo is editable" sandbox model; the full
+> /reports RatiosReport still uses hardcoded benchmarks (composed targets not
+> wired there — product call); a re-sync/dataset-switch can drop scoaNumber
+> mappings; delete-franchise unlink-check can race the 800ms workspace save.
+> Candidates for a follow-up hardening pass.
 
 **Created:** 2026-07-23 · **Requested by:** Derek (verbatim requirements below) ·
 **Decisions locked:** curated built-in benchmark packs (no external data feed);

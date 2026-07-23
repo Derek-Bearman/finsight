@@ -3,6 +3,30 @@
 **Last updated:** 2026-07-23
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
 
+> **2026-07-23 — FRANCHISE BENCHMARKING + SCOA SYSTEM LIVE (version `946b2492`).**
+> The "Qvinci-killer": franchisors' clients compared to corporate benchmarks
+> and to each other. Full spec + status in `FRANCHISE_BENCHMARKS_PLAN.md`.
+> New firm-level `franchises` table (additive migration
+> `20260723080000_franchises.sql`, RLS owner/admin-write + member-read,
+> impersonation-proven 10/10). Client workspaces designate as franchisees
+> (wizard step + workspace link control + `workspace.data.franchiseId`).
+> **Corporate benchmark upload** (CSV + template, versioned sets, one active)
+> on each franchise; **precedence** per-client target > corporate set >
+> industry pack (opt-in toggle, default off) > FinSight default, composed in
+> `lib/targets/composeEffectiveTargets` + `lib/franchise/useEffectiveTargets`
+> and rendered across Overview/Reports/Operational/Print/exec-summary with an
+> asterisk + hover disclaimer on the industry tier. Curated **industry packs**
+> (`lib/benchmarks/packs.ts`, industry × revenue band × US region,
+> PACK_VERSION 2026.07) with a Refresh button. **Co-franchisee comparison**
+> (server-computed peer snapshots, sortable rank table + median row, on the
+> Reports tab). **Corporate SCOA** upload per franchise + COA audit (tiered
+> match, side-guarded) + Mapping-tab assignment writing `Account.scoaNumber`.
+> Built via parallel agent workflows; F5 = 31-agent adversarial review, all 8
+> confirmed findings fixed (see plan doc). 14 check suites now (added
+> `benchmarks.check.ts`, `franchise.check.ts`). **Non-franchise workspaces
+> render byte-identically — verified live on the demo.** Remaining: Derek's
+> owner-flow smoke test on a real firm (demo is member-role).
+
 > **2026-07-23 — QBO post-merge polish: all 4 review chips + 2 prod-connect
 > findings FIXED + DEPLOYED (version `7da63d77`, commits `9533c17` +
 > `e3f582a`).** (1) `upsertConnection`'s different-realm
