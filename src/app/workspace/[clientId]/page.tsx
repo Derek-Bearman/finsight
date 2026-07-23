@@ -73,6 +73,7 @@ import { AppNav } from '@/components/app/AppNav';
 import { BillingBanner } from '@/components/billing/BillingBanner';
 import { ExecutiveSummary } from '@/components/insights/ExecutiveSummary';
 import { TargetsEditor } from '@/components/app/TargetsEditor';
+import { FranchiseLinkControl } from '@/components/franchise/FranchiseLinkControl';
 import { RATIO_DEF_MAP, resolveRatioBenchmark, type RatioKey } from '@/lib/targets';
 
 // ── Helper: years available in values ────────────────────────────────────────
@@ -1822,6 +1823,7 @@ export default function WorkspacePage({ params }: PageProps) {
               </span>
               <span>scenarios</span>
             </span>
+            <FranchiseLinkControl clientId={clientId} />
             <button
               type="button"
               data-testid="targets-btn"

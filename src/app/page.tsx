@@ -27,6 +27,7 @@ import { canOfferQboConnect } from '@/lib/qbo/entry-gate';
 import { AppNav } from '@/components/app/AppNav';
 import { BillingBanner } from '@/components/billing/BillingBanner';
 import { saveNewWorkspace, removeWorkspace } from '@/lib/data/workspace-actions';
+import { getFranchiseState, createFranchiseAction } from '@/lib/data/franchise-actions';
 import { noteCreated, noteDeleted } from '@/lib/data/cloud-sync';
 
 // ── Auto-exclude summary line names ─────────────────────────────────────────
@@ -99,6 +100,18 @@ const EMPTY_UPLOAD: UploadState = {
   warnings: [],
   phase: 'idle',
 };
+
+// ── Franchise designation (profile step) ────────────────────────────────────
+
+/** Minimal franchise shape the wizard's designation select needs. Kept local
+ *  so the client bundle never touches lib/data/franchises (server-only). */
+interface FranchiseOption {
+  id: string;
+  name: string;
+}
+
+/** Sentinel select value for the inline "New franchise…" flow. */
+const NEW_FRANCHISE = '__new__';
 
 // ── Step indicator ───────────────────────────────────────────────────────────
 
@@ -475,6 +488,36 @@ export default function HomePage() {
 
   const [newWorkspaceId, setNewWorkspaceId] = useState('');
 
+  // ── Franchise designation (optional, profile step) ─────────────────────────
+  // null = block hidden (state not loaded yet, or caller can't manage
+  // franchises — members and the demo user never see it).
+  const [franchiseOptions, setFranchiseOptions] = useState<FranchiseOption[] | null>(null);
+  const [isFranchisee, setIsFranchisee] = useState(false);
+  /** '' (unselected) | NEW_FRANCHISE | an existing franchise id. */
+  const [franchiseChoice, setFranchiseChoice] = useState('');
+  const [newFranchiseName, setNewFranchiseName] = useState('');
+  const [franchiseError, setFranchiseError] = useState('');
+  const [creatingFranchise, setCreatingFranchise] = useState(false);
+
+  // Load franchise state lazily once the wizard mounts. Any failure (not
+  // signed in, transport error) just leaves the block hidden — designation
+  // is optional and must never get in the way of creating a client.
+  useEffect(() => {
+    let cancelled = false;
+    getFranchiseState()
+      .then((res) => {
+        if (!cancelled && res.ok && res.canManage) {
+          setFranchiseOptions(res.franchises.map((f) => ({ id: f.id, name: f.name })));
+        }
+      })
+      .catch(() => {
+        /* hide silently */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ── Privacy mode (don't save to this browser) ──────────────────────────────
   // Local mirror so the header button re-renders on toggle. The source of
   // truth lives in the storage adapter (module flag); we just re-read it
@@ -756,12 +799,51 @@ export default function HomePage() {
 
   const goToStep = (s: Step) => setStep(s);
 
-  const handleProfileNext = () => {
+  const handleProfileNext = async () => {
     if (!clientName.trim()) {
       setClientNameError('Client name is required');
       return;
     }
     setClientNameError('');
+    // Resolve the optional franchise designation before leaving the step so a
+    // failed create surfaces here, where the user can retry. Never a hard
+    // block: unchecking the box always lets the wizard continue.
+    if (isFranchisee && franchiseOptions !== null) {
+      if (franchiseChoice === NEW_FRANCHISE) {
+        const name = newFranchiseName.trim();
+        if (!name) {
+          setFranchiseError('Enter a name for the new franchise, or uncheck the franchisee box to continue without one.');
+          return;
+        }
+        if (creatingFranchise) return; // guard against double-submit
+        setFranchiseError('');
+        setCreatingFranchise(true);
+        let res: Awaited<ReturnType<typeof createFranchiseAction>>;
+        try {
+          res = await createFranchiseAction({ name, industryProfileId: selectedProfileId });
+        } catch {
+          // Transport-level rejection (offline, stale tab after a deploy) —
+          // mirror createWorkspaceFromWizard's handling.
+          setCreatingFranchise(false);
+          setFranchiseError('Could not reach the server. Check your connection and try again.');
+          return;
+        }
+        setCreatingFranchise(false);
+        if (!res.ok) {
+          setFranchiseError(res.error);
+          return;
+        }
+        // Fold the new franchise into the options and select it so the
+        // workspace-create step (and a Back visit) sees it like any other.
+        setFranchiseOptions((prev) => [...(prev ?? []), { id: res.data.id, name: res.data.name }]);
+        setFranchiseChoice(res.data.id);
+        setNewFranchiseName('');
+      } else if (!franchiseChoice) {
+        setFranchiseError('Select a franchise, or uncheck the franchisee box to continue without one.');
+        return;
+      }
+    }
+    setFranchiseError('');
     goToStep('pnl');
   };
 
@@ -832,6 +914,15 @@ export default function HomePage() {
       createdAt: now,
       updatedAt: now,
     };
+    // Optional franchise designation from the profile step. Both fields are
+    // optional on ClientWorkspace, so non-franchise workspaces are unchanged.
+    if (isFranchisee && franchiseChoice && franchiseChoice !== NEW_FRANCHISE) {
+      const fr = franchiseOptions?.find((f) => f.id === franchiseChoice);
+      if (fr) {
+        workspace.franchiseId = fr.id;
+        workspace.franchiseName = fr.name;
+      }
+    }
     setCreating(true);
     let res: Awaited<ReturnType<typeof saveNewWorkspace>>;
     try {
@@ -1104,8 +1195,93 @@ export default function HomePage() {
               </div>
             </div>
 
-            <Button onClick={handleProfileNext} data-testid="profile-next" className="self-end">
-              Continue →
+            {/* Franchise designation — rendered only for owners/admins
+                (getFranchiseState().canManage); members and demo see nothing. */}
+            {franchiseOptions !== null && (
+              <div>
+                <p className="text-sm font-medium mb-3" style={{ color: 'hsl(var(--foreground))' }}>
+                  Franchise{' '}
+                  <span className="font-normal" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                    (optional)
+                  </span>
+                </p>
+                <label
+                  className="flex items-center gap-2 text-sm cursor-pointer"
+                  style={{ color: 'hsl(var(--foreground))' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isFranchisee}
+                    onChange={(e) => {
+                      setIsFranchisee(e.target.checked);
+                      setFranchiseError('');
+                    }}
+                    data-testid="franchise-toggle"
+                    className="h-4 w-4 cursor-pointer"
+                  />
+                  This client is a franchisee
+                </label>
+                {isFranchisee && (
+                  <div className="mt-3 flex flex-col gap-3">
+                    <select
+                      value={franchiseChoice}
+                      onChange={(e) => {
+                        setFranchiseChoice(e.target.value);
+                        setFranchiseError('');
+                      }}
+                      aria-label="Franchise"
+                      data-testid="franchise-select"
+                      className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2"
+                      style={{
+                        borderColor: 'hsl(var(--border))',
+                        background: 'hsl(var(--background))',
+                        color: 'hsl(var(--foreground))',
+                      }}
+                    >
+                      <option value="">Select a franchise…</option>
+                      {franchiseOptions.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                      <option value={NEW_FRANCHISE}>New franchise…</option>
+                    </select>
+                    {franchiseChoice === NEW_FRANCHISE && (
+                      <input
+                        type="text"
+                        value={newFranchiseName}
+                        onChange={(e) => {
+                          setNewFranchiseName(e.target.value);
+                          setFranchiseError('');
+                        }}
+                        placeholder="e.g. Acme Franchise Group"
+                        aria-label="New franchise name"
+                        data-testid="new-franchise-name-input"
+                        className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2"
+                        style={{
+                          borderColor: franchiseError ? 'hsl(var(--destructive))' : 'hsl(var(--border))',
+                          background: 'hsl(var(--background))',
+                          color: 'hsl(var(--foreground))',
+                        }}
+                      />
+                    )}
+                    {franchiseError && (
+                      <p className="text-xs text-red-600" data-testid="franchise-error">
+                        {franchiseError}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <Button
+              onClick={() => void handleProfileNext()}
+              disabled={creatingFranchise}
+              data-testid="profile-next"
+              className="self-end"
+            >
+              {creatingFranchise ? 'Creating franchise…' : 'Continue →'}
             </Button>
 
             {/* Workspace JSON import — restore from a .finsight.json file */}
@@ -1412,6 +1588,10 @@ export default function HomePage() {
                 setMergedValues([]);
                 setClassificationResults(new Map());
                 setNewWorkspaceId('');
+                setIsFranchisee(false);
+                setFranchiseChoice('');
+                setNewFranchiseName('');
+                setFranchiseError('');
                 setCreating(false); // stays true after a successful create (double-submit guard)
               }}
               className="text-sm underline underline-offset-2"

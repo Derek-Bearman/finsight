@@ -28,6 +28,9 @@ export function AppNav() {
       <Link href="/team" className={linkClass} style={linkStyle} data-testid="nav-team">
         Team
       </Link>
+      <Link href="/franchises" className={linkClass} style={linkStyle} data-testid="nav-franchises">
+        Franchises
+      </Link>
       <Link href="/billing" className={linkClass} style={linkStyle} data-testid="nav-billing">
         Billing
       </Link>
