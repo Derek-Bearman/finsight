@@ -4,7 +4,8 @@
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
 
 > **2026-07-23 — QBO post-merge polish: all 4 review chips + 2 prod-connect
-> findings FIXED, NOT deployed.** (1) `upsertConnection`'s different-realm
+> findings FIXED + DEPLOYED (version `7da63d77`, commits `9533c17` +
+> `e3f582a`).** (1) `upsertConnection`'s different-realm
 > reconnect now retires the old connection through `deleteConnection`
 > (best-effort revoke at Intuit + 'qbo.disconnect' audit) instead of a bare
 > row delete that left the old company's grant live in Connected Apps.
@@ -37,12 +38,20 @@
 > clean fix is a per-workspace monotonic mutation counter carried in the
 > save snapshot instead of parsed ISO strings. NOTE: the wizard-guard + error-message edits rode
 > along in commit `5d01ae5` (the discoverability session committed while
-> this pass was in flight); the rest of this pass is the working tree.
+> this pass was in flight); the rest landed as `9533c17` + the pre-deploy
+> review fix `e3f582a` (a transport-rejected saveNewWorkspace left
+> `creating` stuck true and dead-ended the wizard — now caught with a
+> "Could not reach the server" banner; P&L Back/Continue disabled while
+> the QBO-instead create is in flight).
 > Derek will delete the leftover empty duplicate + relabel `b5ae4bc6`'s
 > dataset himself (prod rows untouched by policy).
 
 > **2026-07-23 — QBO connect discoverability (Derek's first-use feedback):
-> BUILT + verified in dev, NOT deployed.** The Connect entry point was buried
+> BUILT + verified in dev (commit `5d01ae5`); DEPLOYED in version
+> `7da63d77` alongside the polish pass. Prod smoke after deploy:
+> login/legal 200, mock routes 404, connect auth-bounces, demo wizard
+> shows NO QBO link, demo Statements click-through clean, zero console
+> errors.** The Connect entry point was buried
 > on the Statements tab; now (1) the new-client wizard's P&L step shows
 > "Connect QuickBooks instead" beside the manual-entry link — it creates the
 > workspace immediately (including any manually-entered accounts) and lands on
