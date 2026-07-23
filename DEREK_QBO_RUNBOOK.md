@@ -7,6 +7,23 @@ Work top to bottom; each section says when to do it.
 Companion doc: `QBO_INTEGRATION_PLAN.md` (the technical spec). You never need
 it to follow this runbook.
 
+> **STATUS 2026-07-23 — §D DONE. FEATURE COMPLETE END-TO-END WITH REAL BOOKS.**
+> Derek connected his real QBOA firm company "Arktos Bookkeeping LLC" (realm
+> 9341453195856794) via the QBOA picker ("Install for your firm" checked; the
+> "Not you?" link switches Intuit logins). Backfill committed (7 accounts /
+> 97 cells, Sep 2024→). Re-sync over the same range verified idempotent in
+> prod: "Matches existing data", 0 changed / 0 new, "Already up to date".
+> Token lifecycle columns confirmed from real Intuit responses (rolling
+> expiry +100d, hard expiry +5y). Disconnect path also proven live earlier
+> the same night (revoked:true + audit rows, when Derek unlinked the personal
+> "Derek Bearman" company he'd connected first by accident — the Keys page
+> defaults to the DEVELOPMENT tab; production credentials live behind the
+> Production toggle, which is how dev keys briefly landed in the prod Worker).
+> QBOA note for client books: one FinSight workspace per client; connect from
+> each workspace and pick the client with "Install for your firm" UNchecked.
+> Nothing left in this runbook. Ops: see §E (needs_reauth lifecycle, quotas)
+> and the Q5 keepalive Worker before real users idle 100 days.
+>
 > **STATUS 2026-07-23 — §C DEPLOY DAY DONE. QBO IS LIVE IN PRODUCTION.**
 > feature/qbo-integration merged into phase-2a-tenancy (fast-forward, pushed)
 > after a fresh 6-agent merge-readiness review (0 blockers; 11 suites + tsc
