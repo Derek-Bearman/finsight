@@ -7,6 +7,17 @@ Work top to bottom; each section says when to do it.
 Companion doc: `QBO_INTEGRATION_PLAN.md` (the technical spec). You never need
 it to follow this runbook.
 
+> **STATUS 2026-07-22 (late night) — PRODUCTION APPROVED, portal work COMPLETE.**
+> Intuit approved the assessment (app card shows IN PRODUCTION; production
+> Client ID/Secret live on Keys and credentials → Production — Derek copies
+> them to the password manager at deploy time, §C). Production redirect URI
+> `https://finsight.arktosmarketing.com/api/qbo/callback` added and saved;
+> Intuit's default OAuth2Playground URL removed from the Production list (per
+> plan: prod registers ONLY our callback — re-addable anytime if the OAuth
+> playground is ever needed against prod keys). Development URIs untouched
+> (playground + localhost:3011). **NEXT: review + merge feature/qbo-integration,
+> then deploy day (§C — wrangler secrets ONLY at deploy time).**
+>
 > **STATUS 2026-07-22 (night) — QUESTIONNAIRE SUBMITTED.** Claude filled all 6
 > sections + the Accounting API sub-section in-browser from the implementation
 > facts (notable: App Info Q1 = both "from scratch" AND Claude Code disclosure;
