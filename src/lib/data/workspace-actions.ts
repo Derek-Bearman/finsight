@@ -42,6 +42,9 @@ export type FirmAppState =
       role: MembershipRole;
       access: AccessDecision;
       isSuperAdmin: boolean;
+      /** True when this is the shared public demo firm — write affordances
+       *  the server blocks for the demo (e.g. QBO connect) hide themselves. */
+      isDemoFirm: boolean;
       workspaces: ClientWorkspace[];
     };
 
@@ -64,6 +67,7 @@ export async function loadFirmApp(): Promise<FirmAppState> {
     role: ctx.role,
     access: ctx.access,
     isSuperAdmin: isSuperAdmin(ctx.email),
+    isDemoFirm: ctx.firm.id === DEMO_FIRM_ID,
     workspaces,
   };
 }

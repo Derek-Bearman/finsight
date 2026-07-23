@@ -19,6 +19,9 @@ export interface FirmContextValue {
   role: MembershipRole;
   access: AccessDecision;
   isSuperAdmin: boolean;
+  /** True when this is the shared public demo firm (server-computed) — write
+   *  affordances the server blocks for the demo hide themselves. */
+  isDemoFirm: boolean;
   /** Convenience: true when the firm is in read-only billing grace. */
   readOnly: boolean;
 }

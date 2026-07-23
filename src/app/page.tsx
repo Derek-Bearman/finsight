@@ -23,6 +23,7 @@ import { buildDefaultScenarios } from '@/lib/scenarios';
 import { validateImport } from '@/lib/parsers/import-validator';
 import { parseWorkspaceJSON } from '@/lib/utils/workspace-io';
 import { useFirmContext } from '@/components/app/firm-context';
+import { canOfferQboConnect } from '@/lib/qbo/entry-gate';
 import { AppNav } from '@/components/app/AppNav';
 import { BillingBanner } from '@/components/billing/BillingBanner';
 import { saveNewWorkspace, removeWorkspace } from '@/lib/data/workspace-actions';
@@ -238,6 +239,9 @@ interface UploadStepProps {
   onMappingCancel: () => void;
   onShowManual: () => void;
   showManual: boolean;
+  /** Optional extra alternative rendered beside the manual-entry toggle
+   *  (e.g. the P&L step's "Connect QuickBooks instead" link). */
+  secondaryAction?: React.ReactNode;
   /** Called when the manual-entry form adds an account — must persist it into this step's upload state */
   onManualAdd: (account: Account, values: AccountValue[]) => void;
   /** Called when the user clicks "Done" in the manual-entry form — collapse the panel */
@@ -258,6 +262,7 @@ function UploadStep({
   onMappingCancel,
   onShowManual,
   showManual,
+  secondaryAction,
   onManualAdd,
   onManualDone,
   onContinue,
@@ -335,7 +340,7 @@ function UploadStep({
         sublabel="Export from QuickBooks, Xero, or any accounting system"
       />
 
-      <div className="flex items-center justify-start">
+      <div className="flex flex-wrap items-center justify-start gap-x-5 gap-y-2">
         <button
           type="button"
           onClick={onShowManual}
@@ -345,6 +350,7 @@ function UploadStep({
         >
           {showManual ? 'Hide manual entry' : 'Enter accounts manually instead'}
         </button>
+        {secondaryAction}
       </div>
 
       {showManual && (
@@ -442,6 +448,10 @@ export default function HomePage() {
   const { workspaces, addWorkspace, setActiveWorkspace, deleteWorkspace } = useWorkspaceStore();
   const firm = useFirmContext();
   const readOnly = firm?.readOnly ?? false;
+  // Whether to SHOW the wizard's "Connect QuickBooks instead" link — mirrors
+  // the server gates (owner/admin, non-demo firm, billing 'full') purely for
+  // visibility; /api/qbo/connect re-checks everything server-side.
+  const canConnectQbo = canOfferQboConnect(firm);
   // Home tour auto-opens for brand-new users (own storage key — completing it
   // must not suppress the workspace tour, which keeps the legacy key).
   const tourHook = useTour({ storageKey: 'finsight-tour-home-seen' });
@@ -777,12 +787,21 @@ export default function HomePage() {
     goToStep('classify');
   };
 
-  const handleClassifyConfirm = async (finalAccounts: Account[]) => {
-    if (creating) return; // guard against double-submit
+  /**
+   * Build + persist a new workspace from the wizard state. Shared by the
+   * classify-step confirm and the P&L-step "Connect QuickBooks instead" path
+   * (which skips the remaining steps and creates the workspace immediately).
+   * Returns the stored workspace (DB-assigned uuid) or null after surfacing
+   * the failure via createError.
+   */
+  const createWorkspaceFromWizard = async (
+    accounts: Account[],
+    values: AccountValue[]
+  ): Promise<ClientWorkspace | null> => {
     setCreateError(null);
     if (readOnly) {
       setCreateError('Your workspace is read-only right now — resolve billing to create clients.');
-      return;
+      return null;
     }
     const wsId = `ws-${Date.now()}`;
     const now = new Date().toISOString();
@@ -790,11 +809,11 @@ export default function HomePage() {
     // the earliest imported period — or the current month for an empty workspace.
     // Matches how the What-If views seed defaults for scenario-less workspaces.
     const appliesFrom: Period = (() => {
-      if (mergedValues.length === 0) {
+      if (values.length === 0) {
         const today = new Date();
         return { year: today.getFullYear(), month: today.getMonth() + 1 };
       }
-      const sorted = [...mergedValues].sort(
+      const sorted = [...values].sort(
         (a, b) => a.period.year * 12 + a.period.month - (b.period.year * 12 + b.period.month)
       );
       return sorted[0]!.period;
@@ -803,8 +822,8 @@ export default function HomePage() {
       id: wsId,
       name: clientName.trim(),
       industryProfileId: selectedProfileId,
-      accounts: finalAccounts,
-      values: mergedValues,
+      accounts,
+      values,
       fiscalYearStart: 1,
       scenarios: buildDefaultScenarios(appliesFrom),
       operationalData: [],
@@ -815,17 +834,44 @@ export default function HomePage() {
     };
     setCreating(true);
     const res = await saveNewWorkspace(workspace);
-    setCreating(false);
     if (!res.ok) {
+      setCreating(false);
       setCreateError(res.error);
-      return;
+      return null;
     }
+    // `creating` deliberately stays true on success: both callers leave this
+    // screen (goToStep('done') / router.push), but the navigation isn't
+    // instant — re-enabling the buttons here opened a window where a second
+    // click during the route transition created a duplicate workspace. The
+    // done step's "Create another workspace" reset clears it.
     const stored = res.data; // DB-assigned uuid id
     addWorkspace(stored);
     noteCreated(stored);
     setActiveWorkspace(stored.id);
+    return stored;
+  };
+
+  const handleClassifyConfirm = async (finalAccounts: Account[]) => {
+    if (creating) return; // guard against double-submit
+    const stored = await createWorkspaceFromWizard(finalAccounts, mergedValues);
+    if (!stored) return;
     setNewWorkspaceId(stored.id);
     goToStep('done');
+  };
+
+  /**
+   * "Connect QuickBooks instead" on the P&L step: finish creating the
+   * workspace now (including any accounts already entered manually on this
+   * step — usually none) and land on it with ?qbo=start, which hands off to
+   * /api/qbo/connect for the new workspace. The link is only SHOWN to
+   * eligible callers (canOfferQboConnect); the connect route re-checks every
+   * gate server-side and bounces ineligible callers back with ?qbo_error.
+   */
+  const handleQboConnectInstead = async () => {
+    if (creating) return; // guard against double-submit
+    const stored = await createWorkspaceFromWizard(pnlUpload.accounts, pnlUpload.values);
+    if (!stored) return;
+    router.push(`/workspace/${stored.id}?qbo=start`);
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1123,6 +1169,18 @@ export default function HomePage() {
               <ImportValidationBanner warnings={pnlUpload.warnings} />
             )}
 
+            {/* Surfaces a failed workspace create from the QBO path (the
+                classify step renders its own copy of this banner). */}
+            {createError && (
+              <div
+                role="alert"
+                className="rounded-lg border px-4 py-3 text-sm"
+                style={{ borderColor: 'hsl(0 84% 60%)', background: 'hsl(0 84% 60% / 0.08)', color: 'hsl(0 84% 32%)' }}
+              >
+                {createError}
+              </div>
+            )}
+
             <UploadStep
               title="P&L file"
               subtitle="Upload a P&L report — CSV or Excel (.xlsx) both work. Exports from QuickBooks, Xero, and most accounting platforms are supported."
@@ -1133,6 +1191,21 @@ export default function HomePage() {
               onMappingCancel={() => setPnlUpload(EMPTY_UPLOAD)}
               onShowManual={() => setShowPnlManual((v) => !v)}
               showManual={showPnlManual}
+              secondaryAction={
+                canConnectQbo ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleQboConnectInstead()}
+                    disabled={creating}
+                    data-testid="wizard-qbo-connect"
+                    className="text-sm font-medium underline underline-offset-2 disabled:opacity-60 disabled:no-underline"
+                    style={{ color: 'hsl(var(--primary))' }}
+                    title="Create this workspace now and connect it to a QuickBooks Online company — no file needed"
+                  >
+                    {creating ? 'Creating workspace…' : 'Connect QuickBooks instead'}
+                  </button>
+                ) : undefined
+              }
               onManualAdd={(account, values) => handleManualAdd(setPnlUpload, account, values)}
               onManualDone={() => setShowPnlManual(false)}
               onContinue={handlePnlNext}
@@ -1326,6 +1399,7 @@ export default function HomePage() {
                 setMergedValues([]);
                 setClassificationResults(new Map());
                 setNewWorkspaceId('');
+                setCreating(false); // stays true after a successful create (double-submit guard)
               }}
               className="text-sm underline underline-offset-2"
               style={{ color: 'hsl(var(--muted-foreground))' }}

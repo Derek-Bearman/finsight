@@ -124,6 +124,7 @@ export function FirmAppGate({ children }: { children: React.ReactNode }) {
         role: app.role,
         access: app.access,
         isSuperAdmin: app.isSuperAdmin,
+        isDemoFirm: app.isDemoFirm,
         readOnly: app.access.level === 'read_only',
       });
 

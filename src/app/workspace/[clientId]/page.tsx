@@ -27,6 +27,7 @@ import type { SourceFilter } from '@/components/mapping';
 import { downloadWorkspaceJSON } from '@/lib/utils/workspace-io';
 import { getKeyAccounts } from '@/lib/utils/accounts';
 import { StatementsView } from '@/components/statements/StatementsView';
+import { getQboStatus } from '@/lib/data/qbo-actions';
 import {
   applyScenario as _applyScenario,
   computeScenarioImpact,
@@ -111,6 +112,12 @@ const QBO_ERROR_MESSAGES: Record<string, string> = {
   forbidden: 'Only firm owners and admins can connect QuickBooks.',
   billing: 'Your plan is read-only right now.',
   not_configured: "QuickBooks isn't configured on this server.",
+  // Retrying can never fix this one — the fix is disconnecting the other
+  // workspace (or picking a different company), so say that instead of the
+  // generic "try again" fallback.
+  realm_in_use:
+    'That QuickBooks company is already connected to another client in your firm. Disconnect it there first, or choose a different company.',
+  exchange_failed: "QuickBooks didn't finish connecting — please try again.",
 };
 
 // ── Horizon months map ─────────────────────────────────────────────────────────
@@ -892,6 +899,29 @@ function OverviewTab({
     return [baselineScenario];
   }, [workspace?.scenarios, periodAggs]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── QBO connect affordance for the empty state ───────────────────────────
+  // An empty workspace advertises the QuickBooks integration. Eligibility is
+  // SERVER-owned: getQboStatus().canManage is true only for owner/admin of a
+  // non-demo firm with full billing access, and an already-connected
+  // workspace doesn't re-advertise (its sync controls live on the Statements
+  // tab). Fails closed — any error just hides the button.
+  const isEmpty = !!workspace && (workspace.accounts.length === 0 || workspace.values.length === 0);
+  const [qboOffer, setQboOffer] = useState(false);
+  useEffect(() => {
+    if (!isEmpty) return;
+    let stale = false;
+    getQboStatus(clientId)
+      .then((s) => {
+        if (!stale) setQboOffer(s.canManage && !s.connected);
+      })
+      .catch(() => {
+        /* fail closed: no affordance */
+      });
+    return () => {
+      stale = true;
+    };
+  }, [clientId, isEmpty]);
+
   if (!workspace) return null;
 
   const hasData = workspace.values.length > 0 && workspace.accounts.length > 0;
@@ -973,16 +1003,37 @@ function OverviewTab({
           style={{ borderColor: 'hsl(var(--border))' }}
         >
           <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            No financial data yet — import a P&amp;L or balance sheet on the Statements tab to see summary metrics.
+            No financial data yet — {qboOffer ? 'connect QuickBooks or ' : ''}import a P&amp;L or
+            balance sheet on the Statements tab to see summary metrics.
           </p>
-          <button
-            type="button"
-            onClick={onImportData}
-            className="inline-flex mt-3 text-sm font-medium underline underline-offset-2"
-            style={{ color: 'hsl(var(--primary))' }}
-          >
-            Import data
-          </button>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-4">
+            {qboOffer && (
+              <button
+                type="button"
+                data-testid="overview-qbo-connect"
+                onClick={() =>
+                  // Full navigation — /api/qbo/connect 302s to Intuit's
+                  // consent screen (fetch would eat the redirect).
+                  window.location.assign(
+                    '/api/qbo/connect?workspaceId=' + encodeURIComponent(clientId)
+                  )
+                }
+                className="rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+                style={{ borderColor: 'hsl(var(--primary))', color: 'hsl(var(--primary))' }}
+                title="Connect this workspace to a QuickBooks Online company"
+              >
+                Connect QuickBooks
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onImportData}
+              className="inline-flex text-sm font-medium underline underline-offset-2"
+              style={{ color: 'hsl(var(--primary))' }}
+            >
+              Import data
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -1606,9 +1657,11 @@ export default function WorkspacePage({ params }: PageProps) {
   // replaceState so a refresh doesn't re-fire — same pattern as ?tab= above.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const connected = params.get('qbo') === 'connected';
+    const qboParam = params.get('qbo');
+    const connected = qboParam === 'connected';
+    const start = qboParam === 'start';
     const qboError = params.get('qbo_error');
-    if (!connected && qboError === null) return;
+    if (!connected && !start && qboError === null) return;
     if (connected) {
       setActiveTab('statements');
       setQboAutoSync(true);
@@ -1627,7 +1680,17 @@ export default function WorkspacePage({ params }: PageProps) {
       '',
       window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash
     );
-  }, []);
+    // ?qbo=start — the wizard's "Connect QuickBooks instead" path lands here
+    // right after creating the workspace: hand off to /api/qbo/connect (full
+    // navigation — it 302s to Intuit), which owns EVERY eligibility gate
+    // server-side and bounces ineligible callers back to this page with
+    // ?qbo_error for the toast above. The param was stripped via replaceState
+    // BEFORE navigating so Back from Intuit lands on a clean workspace URL
+    // instead of restarting the flow.
+    if (start) {
+      window.location.assign('/api/qbo/connect?workspaceId=' + encodeURIComponent(clientId));
+    }
+  }, [clientId]);
   // qboAutoSync is consumed the first time the user LEAVES the Statements tab.
   // The tab content unmounts on switch, so QboControls' autoOpenedRef guard is
   // lost — without clearing the flag, every return to Statements would

@@ -1,7 +1,28 @@
 # FinSight — Session Notes
 
-**Last updated:** 2026-07-22
+**Last updated:** 2026-07-23
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
+
+> **2026-07-23 — QBO connect discoverability (Derek's first-use feedback):
+> BUILT + verified in dev, NOT deployed.** The Connect entry point was buried
+> on the Statements tab; now (1) the new-client wizard's P&L step shows
+> "Connect QuickBooks instead" beside the manual-entry link — it creates the
+> workspace immediately (including any manually-entered accounts) and lands on
+> `/workspace/<id>?qbo=start`, a new param the workspace page handles by
+> stripping it (replaceState, so Back from Intuit is clean) and handing off to
+> `/api/qbo/connect`; (2) the Overview empty state advertises the integration
+> with a "Connect QuickBooks" button + reworded copy. Gating: NO new
+> client-side authz — the wizard link hides via `canOfferQboConnect()`
+> (`src/lib/qbo/entry-gate.ts`, mirrors getQboStatus().canManage; fed by a new
+> server-computed `isDemoFirm` on loadFirmApp/FirmContext), the Overview
+> button hides via the server's own `getQboStatus().canManage` (+ hides when
+> already connected); `/api/qbo/connect` remains the sole authority and
+> bounces hand-typed `?qbo=start` with the existing `?qbo_error` toast. New
+> check suite `qbo-entry-gate.check.ts` pins the visibility matrix (12 suites
+> now). tsc + all suites green; lint delta zero. Click-verified in dev against
+> real Intuit sandbox keys with throwaway users (created + DELETED, firm
+> `42c2cea4…`): owner sees both affordances and the full chain reaches
+> Intuit's authorize page; demo user and member-role user see NEITHER.
 
 > **2026-07-23 — QBO INTEGRATION LIVE IN PRODUCTION (version `4851acc2`).**
 > Intuit production approval came through 2026-07-22 night; prod redirect URI
