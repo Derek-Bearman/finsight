@@ -3,6 +3,42 @@
 **Last updated:** 2026-07-23
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
 
+> **2026-07-23 — TAB UX BATCH + FRANCHISE PRACTICE DATA LIVE (version `e320c4f1`).**
+> Three UX improvements from Derek's real-use feedback, one release:
+> (U1) a shared from/to **date-range control** (From/To month selects +
+> All time / This year / Last 12 months presets + Reset) scoping the embedded
+> Overview / Statements / Reports / Operational tabs — Monthly/Quarterly/Annual
+> is the granularity within the range. Default {from:null,to:null};
+> `filterValuesByRange(v,null,null) === v` by reference, so non-scoped views
+> are byte-identical (Overview's per-tab Fiscal Year dropdown was replaced by
+> the shared range; its old latest-FY default is the "This year" preset). The
+> ExecutiveSummary now honors the range too (scoped values passed in) so the
+> narrative and the KPI cards describe the same window.
+> (U2) Projections now always **display the growth rate** in use (manual /
+> model-implied-from-revenue / per-account-trend fallback) with an inline
+> "applied to each account's trend; revenue and net income follow" note.
+> (U3) a **live What-If projection preview** (WhatIfLivePreview) on the full
+> What-If page: projected revenue/net income + delta-vs-base + 12-month chart,
+> recomputed live as scenarios/sliders change (applyScenario + projectWorkspace).
+> Built via parallel workflows; adversarial review (8 agents) found 1 major
+> (exec-summary-not-scoped, FIXED) + minors; 14 suites + tsc + build green;
+> prod click-verified (range scopes cards+summary to Dec 2024 test, presets
+> mutually exclusive, reset restores all-time, growth rate shows 6.1%, live
+> preview Base $1.1M→Best $1.26M, zero console errors).
+> DEFERRED minors (documented, not blockers): partial Quarterly/Annual buckets
+> under a narrow range aren't labeled "(partial)"; PDF export + FranchiseComparison
+> are always all-time (no range cue); the standalone full-page /reports,
+> /operational routes aren't range-scoped yet.
+>
+> **Franchise PRACTICE DATA seeded to prod** (`scripts/seed/build-franchise-demo.ts`):
+> firm "Pizza Palace Franchising (Practice)" owned by
+> bearman.derek+franchise@gmail.com (OTP login) — a corporate franchise
+> "Pizza Palace Co." with a 7-metric benchmark set + 31-account SCOA, and 5
+> franchisees x 60 months (varied performance + COA drift so the SCOA audit
+> shows missing/extra/discrepancy). Upload-practice CSVs in
+> scripts/seed/franchise-demo-assets/ (corporate-benchmark.csv, corporate-scoa.csv,
+> sample franchisee P&L/BS). seed.json is gitignored (835KB, regenerable).
+
 > **2026-07-23 — FRANCHISE BENCHMARKING + SCOA SYSTEM LIVE (version `946b2492`).**
 > The "Qvinci-killer": franchisors' clients compared to corporate benchmarks
 > and to each other. Full spec + status in `FRANCHISE_BENCHMARKS_PLAN.md`.
