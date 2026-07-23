@@ -882,6 +882,15 @@ export function StatementsView({
             </p>
           )}
         </div>
+      ) : embedded && range && workspace.values.length > 0 && displayValues.length === 0 ? (
+        // Embedded with a shared date range that excludes all of the workspace's
+        // data: show a scoped-empty prompt instead of header-only $0 tables.
+        // Standalone (no range) is unaffected — displayValues === workspace.values.
+        <div className="rounded-xl border p-8 text-center" style={{ borderColor: 'hsl(var(--border))' }}>
+          <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            No financial data in this range. Adjust the date range above.
+          </p>
+        </div>
       ) : (
         <>
           {hasPnL && <StatementTable title={`Profit & Loss${embedded ? '' : ' — ' + workspace.name}`} buckets={buckets} rows={pnlRows} />}

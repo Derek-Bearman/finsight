@@ -7,7 +7,7 @@
  */
 
 import { useMemo } from 'react';
-import type { ClientWorkspace } from '@/types';
+import type { AccountValue, ClientWorkspace } from '@/types';
 import { buildExecutiveSummary, type SummaryLine } from '@/lib/insights/executive-summary';
 import { useEffectiveTargets } from '@/lib/franchise/useEffectiveTargets';
 
@@ -18,13 +18,29 @@ const TONE_COLORS: Record<SummaryLine['tone'], string> = {
   watch: 'hsl(38 92% 50%)',
 };
 
-export function ExecutiveSummary({ workspace }: { workspace: ClientWorkspace }) {
+export function ExecutiveSummary({
+  workspace,
+  values,
+}: {
+  workspace: ClientWorkspace;
+  /** Optional scoped value set (the shared date-range window). When provided,
+   *  the summary narrates from these values instead of the full workspace.
+   *  Omitted = today's behavior exactly (the full workspace flows through). */
+  values?: AccountValue[];
+}) {
   // Composed targets (client > corporate set > industry pack) — falls back to
-  // plain workspace targets for non-franchise workspaces.
+  // plain workspace targets for non-franchise workspaces. Kept keyed on the
+  // REAL workspace so targets/franchise resolution is unaffected by scoping.
   const { targets: effectiveTargets } = useEffectiveTargets(workspace);
+  // Only the buildExecutiveSummary input's values are scoped. No `values` prop
+  // passes the workspace straight through (byte-identical default).
+  const summaryWorkspace = useMemo(
+    () => (values ? { ...workspace, values } : workspace),
+    [workspace, values]
+  );
   const lines = useMemo(
-    () => buildExecutiveSummary(workspace, effectiveTargets),
-    [workspace, effectiveTargets]
+    () => buildExecutiveSummary(summaryWorkspace, effectiveTargets),
+    [summaryWorkspace, effectiveTargets]
   );
   if (lines.length === 0) return null;
 

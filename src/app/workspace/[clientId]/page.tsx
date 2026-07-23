@@ -690,8 +690,9 @@ function ReportsTab({
         </div>
       ) : (
         <>
-          {/* Plain-English read first */}
-          <ExecutiveSummary workspace={workspace} />
+          {/* Plain-English read first — scoped to the shared date range so the
+              narrative matches the KPI cards/statements below it. */}
+          <ExecutiveSummary workspace={workspace} values={scopedValues} />
 
           {/* P&L Table */}
           <PnLReport aggregations={aggregations} granularity={granularity} />
@@ -966,6 +967,11 @@ function OverviewTab({
   if (!workspace) return null;
 
   const hasData = workspace.values.length > 0 && workspace.accounts.length > 0;
+  // The workspace has data overall but the scoped date range may exclude all of
+  // it. Distinguish so an empty range shows a "no data in this range" prompt
+  // instead of a grid of $0 cards. A null/null range ⇒ scopedValues === values,
+  // so hasScopedData === hasData (byte-identical until a range is picked).
+  const hasScopedData = hasData && scopedValues.length > 0;
   const latestPeriodLabel =
     periodAggs.length > 0 ? periodAggs[periodAggs.length - 1]!.label : null;
 
@@ -1007,8 +1013,9 @@ function OverviewTab({
         )}
       </div>
 
-      {/* Section 1.5: Executive summary — the plain-English read first */}
-      {hasData && <ExecutiveSummary workspace={workspace} />}
+      {/* Section 1.5: Executive summary — the plain-English read first, scoped
+          to the shared date range so it matches the KPI cards below. */}
+      {hasScopedData && <ExecutiveSummary workspace={workspace} values={scopedValues} />}
 
       {/* Section 2: KPI Cards */}
       {!hasData ? (
@@ -1048,6 +1055,15 @@ function OverviewTab({
               Import data
             </button>
           </div>
+        </div>
+      ) : !hasScopedData ? (
+        <div
+          className="rounded-xl border p-8 text-center"
+          style={{ borderColor: 'hsl(var(--border))' }}
+        >
+          <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            No financial data in this range. Adjust the date range above.
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">

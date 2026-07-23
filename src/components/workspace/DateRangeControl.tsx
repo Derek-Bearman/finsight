@@ -87,6 +87,14 @@ export function DateRangeControl({ values, range, onRangeChange }: DateRangeCont
 
   const isAllTime = range.from === null && range.to === null;
 
+  // At most ONE preset pill highlights. Some data shapes make two presets
+  // resolve to the same {from,to} (e.g. a workspace whose data sits inside one
+  // calendar year, where "This year" and "Last 12 months" both clamp to the
+  // full span). Pick the first preset in declaration order whose exact range
+  // equals the current range, so "This year" deterministically wins over "Last
+  // 12 months". "All time" ({from:null,to:null}) only matches the true default.
+  const activePresetId = presets.find((p) => rangeEquals(range, p.range))?.id ?? null;
+
   function handleFromChange(value: string) {
     const from = parsePeriodString(value);
     if (!from) return;
@@ -154,7 +162,7 @@ export function DateRangeControl({ values, range, onRangeChange }: DateRangeCont
       {/* Quick presets */}
       <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: 'hsl(var(--muted))' }}>
         {presets.map((p) => {
-          const active = rangeEquals(range, p.range);
+          const active = p.id === activePresetId;
           return (
             <button
               key={p.id}
