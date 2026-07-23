@@ -137,8 +137,11 @@ export interface KpiTarget {
   /** Threshold in the metric's native unit (percents as 0–1 fractions). */
   value: number;
   direction: 'at_least' | 'at_most';
-  /** Where the number comes from — drives the provenance label. */
-  source: 'corporate' | 'custom';
+  /** Where the number comes from — drives the provenance label.
+   *  'corporate' = franchise mandate (uploaded set or hand-entered),
+   *  'custom' = client-specific goal, 'industry' = curated benchmark pack
+   *  overlay (opt-in, always disclaimed, superseded by the other two). */
+  source: 'corporate' | 'custom' | 'industry';
   note?: string;
 }
 
@@ -147,6 +150,55 @@ export interface WorkspaceTargets {
   ratios: Record<string, KpiTarget>;
   /** Operational-metric targets keyed by OperationalMetricDef id. */
   metrics: Record<string, KpiTarget>;
+}
+
+// ─────────────────────────────────────────────
+// Franchise config (stored in franchises.config jsonb; see
+// FRANCHISE_BENCHMARKS_PLAN.md and lib/data/franchises.ts)
+// ─────────────────────────────────────────────
+
+/** One metric row inside a corporate benchmark set. metricId matches the
+ *  ratio registry keys (lib/targets) or operational metric ids. */
+export interface FranchiseBenchmarkMetric {
+  metricId: string;
+  target: number;
+  /** Pass direction: gte = at-or-above target is good, lte = at-or-below. */
+  direction: 'gte' | 'lte';
+  notes?: string;
+}
+
+/** A versioned corporate benchmark upload. Exactly one set is active; older
+ *  sets are kept for history and can be re-activated. */
+export interface FranchiseBenchmarkSet {
+  id: string;
+  label: string;
+  /** Optional corporate effective date (informational). */
+  effectiveDate?: string;
+  uploadedAt: string;
+  uploadedBy?: string;
+  active: boolean;
+  metrics: FranchiseBenchmarkMetric[];
+}
+
+/** One account in the corporate standard chart of accounts. */
+export interface FranchiseScoaAccount {
+  number: string;
+  name: string;
+  /** Optional account type/classification hints from the SCOA file. */
+  type?: string;
+  statementType?: 'pnl' | 'balance';
+  parentNumber?: string;
+}
+
+export interface FranchiseScoa {
+  uploadedAt: string;
+  uploadedBy?: string;
+  accounts: FranchiseScoaAccount[];
+}
+
+export interface FranchiseConfig {
+  benchmarkSets?: FranchiseBenchmarkSet[];
+  scoa?: FranchiseScoa;
 }
 
 // ─────────────────────────────────────────────

@@ -22,8 +22,9 @@ export interface RatioSparklineProps {
    *  the default reads like a settable target. */
   thresholdText?: string | null;
   /** Where the active benchmark comes from — always shown so a corporate
-   *  mandate is never confused with a loose FinSight default. */
-  provenance?: 'corporate' | 'custom' | 'default' | 'none';
+   *  mandate is never confused with a loose FinSight default. 'industry'
+   *  renders with an asterisk + disclaimer tooltip (see lib/benchmarks). */
+  provenance?: 'corporate' | 'custom' | 'industry' | 'default' | 'none';
   /** Plain-English "what this means" — surfaces as a hover tooltip. */
   explainer?: string;
 }

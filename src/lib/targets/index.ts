@@ -11,7 +11,13 @@
  * Pure data + pure functions. No I/O, no React.
  */
 
-import type { BenchmarkRange, KpiTarget, MetricFormat, WorkspaceTargets } from '@/types';
+import type {
+  BenchmarkRange,
+  FranchiseBenchmarkMetric,
+  KpiTarget,
+  MetricFormat,
+  WorkspaceTargets,
+} from '@/types';
 import { formatMetricValue } from '@/lib/utils/format';
 
 // ─────────────────────────────────────────────
@@ -113,11 +119,14 @@ export const RATIO_DEF_MAP: Record<string, RatioDef> = Object.fromEntries(
 // Target helpers
 // ─────────────────────────────────────────────
 
-export type TargetProvenance = 'corporate' | 'custom' | 'default' | 'none';
+export type TargetProvenance = 'corporate' | 'custom' | 'industry' | 'default' | 'none';
 
 export const PROVENANCE_LABELS: Record<TargetProvenance, string> = {
   corporate: 'Corporate target',
   custom: 'Custom target',
+  // Rendered with an asterisk + hover disclaimer wherever it appears — see
+  // INDUSTRY_BENCHMARK_DISCLAIMER in lib/benchmarks/packs.
+  industry: 'Industry benchmark',
   default: 'FinSight default benchmark',
   none: '',
 };
@@ -182,6 +191,77 @@ export function resolveRatioBenchmark(
     thresholdText: defaultBenchmarkThreshold(def),
     target: null,
   };
+}
+
+// ─────────────────────────────────────────────
+// Effective-target composition (FRANCHISE_BENCHMARKS_PLAN.md §F2)
+// ─────────────────────────────────────────────
+
+/**
+ * Compose the targets a workspace ACTUALLY renders against, by precedence:
+ *
+ *   per-client target  >  franchise corporate set  >  industry pack overlay
+ *
+ * (and anything absent from all three falls through to the FinSight default
+ * benchmark inside resolveRatioBenchmark / the operational calculator, which
+ * is unchanged). Pure: callers fetch the franchise config + resolve the pack
+ * and pass the pieces in; this just layers maps.
+ *
+ * The pack overlay only participates when the caller passes it — i.e. the
+ * workspace's industryBenchmarksEnabled toggle is on — and an uploaded
+ * corporate set automatically supersedes it per metric, which is Derek's
+ * required behavior. A per-client target (custom OR hand-entered corporate)
+ * supersedes both: it is the accountant's explicit word for THIS client.
+ */
+export function composeEffectiveTargets(
+  base: WorkspaceTargets | undefined,
+  franchise: { setLabel: string; metrics: FranchiseBenchmarkMetric[] } | null | undefined,
+  packRatios: Partial<Record<string, KpiTarget>> | null | undefined
+): WorkspaceTargets {
+  const ratios: Record<string, KpiTarget> = {};
+  const metrics: Record<string, KpiTarget> = {};
+
+  // Tier 3: industry pack (ratios only; opt-in).
+  if (packRatios) {
+    for (const [key, t] of Object.entries(packRatios)) {
+      if (t) ratios[key] = t;
+    }
+  }
+
+  // Tier 2: active corporate benchmark set from the linked franchise.
+  if (franchise) {
+    for (const m of franchise.metrics) {
+      const target: KpiTarget = {
+        value: m.target,
+        direction: m.direction === 'gte' ? 'at_least' : 'at_most',
+        source: 'corporate',
+        note: m.notes ?? franchise.setLabel,
+      };
+      if (RATIO_DEF_MAP[m.metricId]) ratios[m.metricId] = target;
+      else metrics[m.metricId] = target;
+    }
+  }
+
+  // Tier 1: per-client targets win outright.
+  for (const [key, t] of Object.entries(base?.ratios ?? {})) ratios[key] = t;
+  for (const [key, t] of Object.entries(base?.metrics ?? {})) metrics[key] = t;
+
+  return { ratios, metrics };
+}
+
+/** The active corporate set of a franchise config, or null. */
+export function activeBenchmarkSet(
+  config: { benchmarkSets?: FranchiseBenchmarkSetLike[] } | null | undefined
+): FranchiseBenchmarkSetLike | null {
+  return config?.benchmarkSets?.find((s) => s.active) ?? null;
+}
+
+/** Structural subset of FranchiseBenchmarkSet (avoids importing server code). */
+export interface FranchiseBenchmarkSetLike {
+  id: string;
+  label: string;
+  active: boolean;
+  metrics: FranchiseBenchmarkMetric[];
 }
 
 /** Is a value on the right side of a target? */

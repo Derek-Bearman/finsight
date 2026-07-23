@@ -14,56 +14,20 @@
 // Server-only by construction (imports next/headers via ./server).
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import type { Tables, Json } from '@/lib/supabase/database.types';
+import type { FranchiseConfig } from '@/types';
 
 type FranchiseRow = Tables<'franchises'>;
 
-// ─────────────────────────────────────────────
-// Config shapes stored in franchises.config (jsonb)
-// ─────────────────────────────────────────────
-
-/** One metric row inside a corporate benchmark set. metricId matches the
- *  ratio/metric registry ids used by lib/targets. */
-export interface FranchiseBenchmarkMetric {
-  metricId: string;
-  target: number;
-  /** Pass direction: gte = at-or-above target is good, lte = at-or-below. */
-  direction: 'gte' | 'lte';
-  notes?: string;
-}
-
-/** A versioned corporate benchmark upload. Exactly one set is active; older
- *  sets are kept for history and can be re-activated. */
-export interface FranchiseBenchmarkSet {
-  id: string;
-  label: string;
-  /** Optional corporate effective date (informational). */
-  effectiveDate?: string;
-  uploadedAt: string;
-  uploadedBy?: string;
-  active: boolean;
-  metrics: FranchiseBenchmarkMetric[];
-}
-
-/** One account in the corporate standard chart of accounts. */
-export interface FranchiseScoaAccount {
-  number: string;
-  name: string;
-  /** Optional account type/classification hints from the SCOA file. */
-  type?: string;
-  statementType?: 'pnl' | 'balance';
-  parentNumber?: string;
-}
-
-export interface FranchiseScoa {
-  uploadedAt: string;
-  uploadedBy?: string;
-  accounts: FranchiseScoaAccount[];
-}
-
-export interface FranchiseConfig {
-  benchmarkSets?: FranchiseBenchmarkSet[];
-  scoa?: FranchiseScoa;
-}
+// Config shapes (FranchiseConfig / FranchiseBenchmarkSet / FranchiseScoa …)
+// live in @/types so CLIENT code can import them without pulling in this
+// server-only module. Re-exported here for server-side convenience.
+export type {
+  FranchiseBenchmarkMetric,
+  FranchiseBenchmarkSet,
+  FranchiseScoaAccount,
+  FranchiseScoa,
+  FranchiseConfig,
+} from '@/types';
 
 /** Serializable franchise snapshot the client UI consumes. */
 export interface Franchise {
