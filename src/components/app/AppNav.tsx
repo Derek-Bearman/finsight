@@ -31,6 +31,15 @@ export function AppNav() {
       <Link href="/billing" className={linkClass} style={linkStyle} data-testid="nav-billing">
         Billing
       </Link>
+      {/* In-app support channel — cited in the Intuit app assessment; keep it. */}
+      <a
+        href="mailto:finsight@arktosmarketing.com?subject=FinSight%20Support"
+        className={linkClass}
+        style={linkStyle}
+        data-testid="nav-support"
+      >
+        Support
+      </a>
       {firm.isSuperAdmin && (
         <Link href="/admin" className={linkClass} style={linkStyle} data-testid="nav-admin">
           Admin

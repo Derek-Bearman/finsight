@@ -7,6 +7,18 @@ Work top to bottom; each section says when to do it.
 Companion doc: `QBO_INTEGRATION_PLAN.md` (the technical spec). You never need
 it to follow this runbook.
 
+> **STATUS 2026-07-22 (night) — QUESTIONNAIRE SUBMITTED.** Claude filled all 6
+> sections + the Accounting API sub-section in-browser from the implementation
+> facts (notable: App Info Q1 = both "from scratch" AND Claude Code disclosure;
+> Q4 = publicly available, ~100 anticipated connections; read-only Accounting
+> API; on-demand-only call pattern; all auth-error scenarios Yes; no webhooks/
+> CDC/multicurrency; Security = no breach/no team/secrets secure/no MFA/no
+> captcha/no websockets/data only for the original customer). Derek reviewed
+> and clicked Submit 2026-07-22. In-app Support mailto link added to AppNav
+> (cited in the assessment). **NEXT: check approval status (typically ~5 min,
+> Keys and credentials → Production), then add the production redirect URI,
+> then deploy day (§C).**
+>
 > **STATUS 2026-07-22 (evening) — sections A and most of B are DONE** (Derek
 > created the account + app; Claude drove the rest in-browser):
 > - ✅ Dev keys in `.env.development.local`, `QBO_ENVIRONMENT=sandbox`,
