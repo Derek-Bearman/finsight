@@ -1,27 +1,32 @@
 'use client';
 import { useState, useCallback, useEffect } from 'react';
+import { LEGACY_TOUR_KEY } from './keys';
 
-/** Legacy shared key (pre per-tour keys). Still honored as "seen everything"
- *  so existing users don't get re-toured after the split. */
-const LEGACY_STORAGE_KEY = 'finsight-tutorial-seen';
-
+/**
+ * Drives a single "main" tour (home or workspace). Each caller passes its own
+ * storageKey so tours are independent. `seen` is exposed reactively so page
+ * tours can gate on "the main tour is complete" and auto-run right after it
+ * finishes (not just on a later visit).
+ */
 export function useTour(opts: { autoOpen?: boolean; storageKey?: string } = {}) {
-  const { autoOpen = true, storageKey = LEGACY_STORAGE_KEY } = opts;
+  const { autoOpen = true, storageKey = LEGACY_TOUR_KEY } = opts;
   const [isOpen, setIsOpen] = useState(false);
   const [startStep, setStartStep] = useState(0);
+  // Whether this main tour has been completed/skipped (own key OR the legacy
+  // combined key). Resolved in an effect so the hydration pass matches SSR.
+  const [seen, setSeen] = useState(false);
 
-  // Auto-show on first visit. Each tour has its own storage key (home vs
-  // workspace) so completing one doesn't suppress the other; the legacy
-  // combined key is treated as "seen" for both.
   useEffect(() => {
-    if (!autoOpen) return;
+    let alreadySeen = false;
     try {
-      if (!localStorage.getItem(storageKey) && !localStorage.getItem(LEGACY_STORAGE_KEY)) {
-        setIsOpen(true);
-      }
+      alreadySeen = !!(
+        localStorage.getItem(storageKey) || localStorage.getItem(LEGACY_TOUR_KEY)
+      );
     } catch {
-      /* localStorage blocked */
+      /* localStorage blocked — treat as not seen, but don't force the tour */
     }
+    setSeen(alreadySeen);
+    if (autoOpen && !alreadySeen) setIsOpen(true);
   }, [autoOpen, storageKey]);
 
   const openTour = useCallback((step = 0) => {
@@ -29,19 +34,20 @@ export function useTour(opts: { autoOpen?: boolean; storageKey?: string } = {}) 
     setIsOpen(true);
   }, []);
 
-  const completeTour = useCallback(() => {
+  const markSeen = useCallback(() => {
     try {
       localStorage.setItem(storageKey, '1');
     } catch {}
+    setSeen(true);
     setIsOpen(false);
   }, [storageKey]);
 
-  const skipTour = useCallback(() => {
-    try {
-      localStorage.setItem(storageKey, '1');
-    } catch {}
-    setIsOpen(false);
-  }, [storageKey]);
-
-  return { isOpen, startStep, openTour, completeTour, skipTour };
+  return {
+    isOpen,
+    startStep,
+    seen,
+    openTour,
+    completeTour: markSeen,
+    skipTour: markSeen,
+  };
 }

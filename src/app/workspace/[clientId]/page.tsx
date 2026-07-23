@@ -2,7 +2,7 @@
 
 import React, { use, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { TourOverlay, useTour, HelpButton, WORKSPACE_TOUR_STEPS } from '@/components/tutorial';
+import { PageTutor, WORKSPACE_TOUR_KEY, WORKSPACE_TOUR_STEPS } from '@/components/tutorial';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { ALL_PROFILES, getProfile } from '@/lib/profiles';
 import { classifyAll, applyClassification } from '@/lib/classifiers';
@@ -671,7 +671,7 @@ function ReportsTab({
       {/* Header row */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         {/* Granularity toggle */}
-        <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: 'hsl(var(--muted))' }}>
+        <div className="flex items-center gap-1 rounded-lg p-1" style={{ background: 'hsl(var(--muted))' }} data-tour="reports-granularity">
           {GRANULARITIES.map(g => (
             <button
               key={g.id}
@@ -713,11 +713,13 @@ function ReportsTab({
           <ExecutiveSummary workspace={workspace} values={scopedValues} />
 
           {/* P&L Table */}
-          <PnLReport aggregations={aggregations} granularity={granularity} />
+          <div data-tour="reports-pnl">
+            <PnLReport aggregations={aggregations} granularity={granularity} />
+          </div>
 
           {/* Key Ratios summary cards */}
           {(latestBS || latestProf || latestHealth || latestAgg) && (
-            <div>
+            <div data-tour="reports-key-ratios">
               <h3 className="text-sm font-semibold mb-3" style={{ color: 'hsl(var(--foreground))' }}>
                 Key Ratios (Latest Period)
               </h3>
@@ -1084,7 +1086,7 @@ function OverviewTab({
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4" data-tour="overview-kpis">
           <SummaryCard
             label="Revenue"
             value={formatCurrency(annualPnL.revenue)}
@@ -1359,7 +1361,7 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
     <div className="flex flex-col gap-6">
       {/* Scenario selector pills */}
       {scenarios.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap" data-tour="whatif-scenarios">
           {scenarios.map((sc, idx) => {
             const color = SCENARIO_COLORS[idx % SCENARIO_COLORS.length]!;
             const isActive = sc.id === (activeScenario?.id ?? null);
@@ -1386,6 +1388,7 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
       <div
         className="rounded-xl border p-4 flex flex-col gap-4"
         style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
+        data-tour="whatif-sliders"
       >
         <h3 className="text-sm font-semibold" style={{ color: 'hsl(var(--foreground))' }}>
           Quick Adjustments — {activeScenario?.name ?? 'No scenario'}
@@ -1492,6 +1495,7 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
         <div
           className="rounded-xl border p-4 flex flex-col gap-2"
           style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
+          data-tour="whatif-impact"
         >
           <h3 className="text-sm font-semibold mb-0.5" style={{ color: 'hsl(var(--foreground))' }}>
             Impact vs Base Case
@@ -1529,6 +1533,7 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
       <div className="flex justify-end">
         <Link
           href={`/workspace/${clientId}/whatif`}
+          data-tour="whatif-fullpage"
           className="text-sm font-medium underline underline-offset-2"
           style={{ color: 'hsl(var(--primary))' }}
         >
@@ -1629,7 +1634,7 @@ function OperationalTabContent({ clientId, range }: { clientId: string; range: P
   return (
     <div className="flex flex-col gap-4">
       {/* Period selector + summary line */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex items-center justify-between gap-4 flex-wrap" data-tour="operational-controls">
         <PeriodSelector
           availablePeriods={availablePeriods}
           selectedPeriod={selectedPeriod}
@@ -1673,6 +1678,7 @@ function OperationalTabContent({ clientId, range }: { clientId: string; range: P
       <div className="flex justify-end">
         <Link
           href={`/workspace/${clientId}/operational`}
+          data-tour="operational-fullpage"
           className="text-sm font-medium underline underline-offset-2"
           style={{ color: 'hsl(var(--primary))' }}
         >
@@ -1779,7 +1785,6 @@ export default function WorkspacePage({ params }: PageProps) {
   // filterValuesByRange this is byte-identical to the pre-range behavior, so
   // every scoped tab renders exactly as before until the user picks a range.
   const [dateRange, setDateRange] = useState<PeriodRange>({ from: null, to: null });
-  const tourHook = useTour();
 
   const showHeaderToast = useCallback((msg: string) => {
     setHeaderToast(msg);
@@ -1840,15 +1845,6 @@ export default function WorkspacePage({ params }: PageProps) {
 
   return (
     <div className="min-h-screen" style={{ background: 'hsl(var(--background))' }}>
-      {tourHook.isOpen && (
-        <TourOverlay
-          steps={WORKSPACE_TOUR_STEPS}
-          onComplete={tourHook.completeTour}
-          onSkip={tourHook.skipTour}
-          startAtStep={tourHook.startStep}
-          tourLabel="Workspace tour"
-        />
-      )}
       {/* Header */}
       <header
         className="border-b px-6 py-4"
@@ -1880,7 +1876,11 @@ export default function WorkspacePage({ params }: PageProps) {
 
           <div className="flex flex-wrap items-center gap-3">
             <AppNav />
-            <HelpButton onOpen={() => tourHook.openTour(0)} />
+            <PageTutor
+              mainTour={{ steps: WORKSPACE_TOUR_STEPS, storageKey: WORKSPACE_TOUR_KEY, label: 'Workspace tour', autoOpen: true }}
+              pageId={activeTab}
+              pageTitle={TABS.find((t) => t.id === activeTab)?.label ?? 'Workspace'}
+            />
             {/* Scenarios count — informational badge, intentionally non-button styling */}
             <span
               className="inline-flex items-center gap-1 px-2 py-1 text-xs"

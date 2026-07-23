@@ -3,6 +3,58 @@
 **Last updated:** 2026-07-23
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
 
+>  **2026-07-23 (latest) — GUIDED-TOUR + IN-APP HELP REBUILD LIVE (version `036fd681`).**
+> The tutorials now cover every recent feature and there are per-page tours + a
+> page-scoped FAQ help panel. Built via two agent workflows (9-agent content
+> authoring read the real components + a critic returned "ship, zero missing
+> topics"; then a 6-dimension adversarial review, 2 minor findings fixed).
+> WHAT SHIPPED:
+> - **Per-page tours**: `src/components/tutorial/content/pageTours.ts` (PAGE_TOURS,
+>   8 tours = 7 workspace tabs + `/franchises`). Each auto-runs ONCE the first
+>   time that tab/page is opened, but ONLY after the main tour is complete
+>   (gated in `usePageTour.ts`), keyed per-page in localStorage
+>   (`finsight-pagetour-<id>-seen`). Never two overlays at once; never before
+>   the main tour; persists so it doesn't loop.
+> - **Page FAQ help panel**: the "?" now opens `HelpPanel.tsx` (page-scoped Q&A
+>   from `content/faq.ts`, keys = home + the 8 page ids) instead of restarting a
+>   tour. Footer has TWO controls: "Restart the app tour" (main tour) +
+>   "Restart this page's tour" (current page tour; hidden on home which has no
+>   page tour). Focus-trapped, theme-token styled, mobile sheet.
+> - **`PageTutor.tsx`** is one self-contained controller (main-tour hook +
+>   page-tour hook + "?" button + help panel + both overlays) used on home
+>   (pageId=null), workspace (pageId=activeTab), and the `/franchises` page
+>   (a SERVER component now renders it as a client child — it had NO "?" before).
+> - **localStorage-key coupling FIXED** (the gotcha): each tour has a distinct
+>   key (`keys.ts`: HOME_TOUR_KEY / WORKSPACE_TOUR_KEY); the workspace tour no
+>   longer writes the legacy `finsight-tutorial-seen`. The legacy key is still
+>   honored as "main tours seen" so existing users are NOT re-onboarded.
+>   `useTour` now exposes a reactive `seen` so a page tour fires right after the
+>   main tour finishes.
+> - **Main tours updated** (`TourSteps.ts`): HOME + WORKSPACE now name
+>   Franchises, corporate benchmarks, QBO connect, the shared date range, SCOA,
+>   Driver-based projections, and the What-If live preview. Added the missing
+>   Statements/QBO step (workspace tour is 9 steps now).
+> - **14 new `data-tour` anchors** added where features lacked one (no testids
+>   renamed): overview-kpis, reports-granularity/pnl/key-ratios,
+>   whatif-scenarios/sliders/impact/fullpage, operational-controls/metrics/fullpage,
+>   mapping-view-toggle, projection-model.
+> - **What-If page-tour scope fix**: the live preview (`whatif-live-*`) lives on
+>   the STANDALONE `/whatif` page, NOT the embedded What-If tab, so that page
+>   tour targets the embedded-tab anchors and points to "View Full What-If" for
+>   the live chart.
+> - New check `scripts/checks/tutorial-content.check.ts` (16 suites now): every
+>   page tour has a center welcome+closing, every `data-tour` target exists in
+>   source, every surface has FAQ, and NO em dashes in any tour/FAQ copy.
+> Prod-verified on the demo (Bella Roma, member role): home tour auto-opens for
+> a fresh visitor; workspace tour auto-opens; overview page tour is gated OFF
+> until the workspace tour is done then auto-runs; per-tab auto-run
+> (overview -> mapping) each once; skip persists (no loop); "?" opens the page
+> FAQ with both restart buttons (only the app-tour button on home); "Restart
+> this page's tour" reopens even after seen; `/franchises` now has a "?" + tour +
+> FAQ; owner/franchise-only anchors auto-skip for the member demo with zero
+> console errors; spotlight + tooltip render correctly. tsc + 16 checks +
+> cf:build all green; ONE cf:deploy. See memory `project-finsight-tutorial`.
+>
 >  **2026-07-23 (later) — Driver-based projection mode LIVE (version `c13cdbee`).**
 > New 'driver' ProjectionModel (cost-behavior-aware): projects revenue at the
 > growth rate, then variable costs scale with revenue, fixed costs stay flat,

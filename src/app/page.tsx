@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { TourOverlay, useTour, HelpButton, HOME_TOUR_STEPS } from '@/components/tutorial';
+import { PageTutor, HOME_TOUR_KEY, HOME_TOUR_STEPS } from '@/components/tutorial';
 import { ALL_PROFILES, PROFILE_MAP } from '@/lib/profiles';
 import { useWorkspaceStore, isPrivacyMode, setPrivacyMode } from '@/store/workspace-store';
 import { FileDropzone } from '@/components/upload/FileDropzone';
@@ -467,7 +467,6 @@ export default function HomePage() {
   const canConnectQbo = canOfferQboConnect(firm);
   // Home tour auto-opens for brand-new users (own storage key — completing it
   // must not suppress the workspace tour, which keeps the legacy key).
-  const tourHook = useTour({ storageKey: 'finsight-tour-home-seen' });
 
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -979,15 +978,6 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen" style={{ background: 'hsl(var(--background))' }}>
-      {tourHook.isOpen && (
-        <TourOverlay
-          steps={HOME_TOUR_STEPS}
-          onComplete={tourHook.completeTour}
-          onSkip={tourHook.skipTour}
-          startAtStep={tourHook.startStep}
-          tourLabel="Home tour"
-        />
-      )}
       {/* Header */}
       <header
         className="sticky top-0 z-10 border-b px-6 py-3 flex flex-wrap items-center justify-between gap-y-2"
@@ -1038,7 +1028,11 @@ export default function HomePage() {
               </span>
             )}
           </button>
-          <HelpButton onOpen={() => tourHook.openTour(0)} />
+          <PageTutor
+            mainTour={{ steps: HOME_TOUR_STEPS, storageKey: HOME_TOUR_KEY, label: 'Getting started', autoOpen: true }}
+            pageId={null}
+            pageTitle="Home"
+          />
           {/* Sign out — POST to /auth/signout so the proxy can clear the cookie
               and bounce back to /login. POST (not GET) so a malicious <img>
               tag can't trigger it. */}

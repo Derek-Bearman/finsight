@@ -47,6 +47,7 @@ export function MetricGrid({ results, customMetrics, operationalData, period }: 
       <div
         className="rounded-xl border p-8 text-center"
         style={{ borderColor: 'hsl(var(--border))' }}
+        data-tour="operational-metrics"
       >
         <p className="text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
           No metrics defined for this profile
@@ -59,7 +60,7 @@ export function MetricGrid({ results, customMetrics, operationalData, period }: 
   const categories = Array.from(grouped.keys());
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8" data-tour="operational-metrics">
       {/* Profile metrics grouped by category */}
       {categories.map((category) => {
         const categoryResults = grouped.get(category) ?? [];

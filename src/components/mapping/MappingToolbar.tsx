@@ -85,6 +85,7 @@ export function MappingToolbar({
           style={{ borderColor: 'hsl(var(--border))' }}
           role="group"
           aria-label="Mapping view"
+          data-tour="mapping-view-toggle"
         >
           <button
             type="button"

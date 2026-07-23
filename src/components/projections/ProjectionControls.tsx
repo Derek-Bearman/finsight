@@ -125,7 +125,7 @@ export function ProjectionControls({
   return (
     <div className="flex flex-wrap items-center gap-3">
       {/* Model selector */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2" data-tour="projection-model">
         <span className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>
           Model
         </span>
