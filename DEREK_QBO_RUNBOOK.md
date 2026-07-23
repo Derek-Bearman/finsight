@@ -7,6 +7,23 @@ Work top to bottom; each section says when to do it.
 Companion doc: `QBO_INTEGRATION_PLAN.md` (the technical spec). You never need
 it to follow this runbook.
 
+> **STATUS 2026-07-23 — §C DEPLOY DAY DONE. QBO IS LIVE IN PRODUCTION.**
+> feature/qbo-integration merged into phase-2a-tenancy (fast-forward, pushed)
+> after a fresh 6-agent merge-readiness review (0 blockers; 11 suites + tsc
+> green same-day). All four secrets set (QBO_CLIENT_ID/QBO_CLIENT_SECRET from
+> the portal — Derek pasted the secret via clipboard pipe; QBO_TOKEN_KEY/
+> QBO_STATE_SECRET generated and piped, backup left at
+> ~/qbo-keys-BACKUP-move-to-password-manager.txt for the password manager,
+> DELETE after stashing). Deployed version 4851acc2 to
+> finsight.arktosmarketing.com. Smoke-verified: /login + /legal/* 200, mock
+> Intuit routes 404 in prod, /api/qbo/connect auth-bounces to /login, demo
+> click-through to Statements clean with zero console errors and no QBO chip
+> for the demo user (by design). Gotcha hit on the way: the interactive shell
+> exports the bookforge-scoped CLOUDFLARE_API_TOKEN which cannot write Worker
+> secrets — prefix `env -u CLOUDFLARE_API_TOKEN` to use the wrangler OAuth
+> login. **NEXT: section D — Derek signs into prod with his real firm account
+> and connects his own QBO company as the first real multi-year backfill.**
+>
 > **STATUS 2026-07-22 (late night) — PRODUCTION APPROVED, portal work COMPLETE.**
 > Intuit approved the assessment (app card shows IN PRODUCTION; production
 > Client ID/Secret live on Keys and credentials → Production — Derek copies

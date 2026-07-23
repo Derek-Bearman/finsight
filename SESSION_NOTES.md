@@ -3,8 +3,19 @@
 **Last updated:** 2026-07-22
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
 
+> **2026-07-23 — QBO INTEGRATION LIVE IN PRODUCTION (version `4851acc2`).**
+> Intuit production approval came through 2026-07-22 night; prod redirect URI
+> registered (only `https://finsight.arktosmarketing.com/api/qbo/callback`);
+> `feature/qbo-integration` fast-forward-merged into `phase-2a-tenancy` after
+> a fresh 6-agent merge-readiness review (0 blockers, 11 check suites + tsc
+> green on merge day); all 4 QBO secrets set and `cf:deploy` run per runbook
+> §C; smoke-verified (login/legal 200, mock routes 404 in prod, connect
+> auth-bounces, demo Statements click-through clean). Remaining: runbook §D
+> (Derek's first real QBO connect) + post-merge polish chip (4 minor fixes:
+> revoke-on-reconnect, sync-stamp race, dangling parentId, 2 error messages).
+>
 > **2026-07-22 — QuickBooks Online integration BUILT on branch
-> `feature/qbo-integration` (NOT deployed — live app untouched by design).**
+> `feature/qbo-integration` (now merged; original build notes follow).**
 > Full direct-QBO import: per-client OAuth connect (one QBO company per
 > workspace — Intuit has NO bulk/firm-level consent, verified), multi-year
 > monthly P&L+BS backfill via the Reports API chunked one year per call,
