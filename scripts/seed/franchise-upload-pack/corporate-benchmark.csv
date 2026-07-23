@@ -1,0 +1,8 @@
+# HandyPro Home Services corporate benchmark set
+# Percent metrics (gross_margin, net_margin, roe) are whole percents; ratios use their native unit.
+metric_id,target,direction,notes
+gross_margin,48,gte,Corporate minimum gross margin
+net_margin,10,gte,Corporate minimum net margin
+current_ratio,1.5,gte,Liquidity floor
+debt_to_equity,1.8,lte,Leverage ceiling
+roe,18,gte,Owner return target

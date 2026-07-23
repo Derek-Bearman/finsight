@@ -1,0 +1,34 @@
+# HandyPro Home Services corporate standard chart of accounts
+number,name,statement,type
+4000,Service Call Revenue,pnl,revenue
+4100,Project Revenue,pnl,revenue
+4200,Maintenance Plan Revenue,pnl,revenue
+4300,Materials Markup,pnl,revenue
+5000,Subcontractor Labor,pnl,cogs
+5100,Materials & Parts,pnl,cogs
+5200,Equipment Rental,pnl,cogs
+5300,Disposal & Permit Fees,pnl,cogs
+6000,Field Technician Wages,pnl,expense
+6100,Payroll Taxes & Benefits,pnl,expense
+6200,Vehicle & Fuel,pnl,expense
+6300,Shop Rent,pnl,expense
+6400,Utilities,pnl,expense
+6500,Marketing & Advertising,pnl,expense
+6600,Franchise Royalty Fees,pnl,expense
+6650,Corporate Ad Fund Contribution,pnl,expense
+6700,Insurance,pnl,expense
+6800,Tools & Small Equipment,pnl,expense
+6900,Software & Dispatch,pnl,expense
+7000,Interest Expense,pnl,expense
+1010,Operating Checking,balance,asset
+1100,Accounts Receivable,balance,asset
+1300,Materials Inventory,balance,asset
+1500,Vehicles (Net),balance,asset
+1600,Tools & Equipment (Net),balance,asset
+2010,Accounts Payable,balance,liability
+2100,Credit Card Payable,balance,liability
+2200,Accrued Payroll,balance,liability
+2400,Customer Deposits,balance,liability
+2600,Vehicle Loans (Long Term),balance,liability
+3000,Owner Capital,balance,equity
+3900,Retained Earnings,balance,equity
