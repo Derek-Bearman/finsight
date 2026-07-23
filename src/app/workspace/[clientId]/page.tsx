@@ -14,7 +14,8 @@ import type { HorizonKey } from '@/components/projections/ProjectionControls';
 import type { ProjectionChartDataPoint } from '@/components/projections/ProjectionChart';
 import { periodLabel, periodSortKey } from '@/lib/utils/period';
 import { computePnL, toFinancialSummary } from '@/lib/calculations/pnl';
-import { getUniquePeriods } from '@/lib/calculations/period-aggregation';
+import { getUniquePeriods, filterValuesByRange, type PeriodRange } from '@/lib/calculations/period-aggregation';
+import { DateRangeControl } from '@/components/workspace/DateRangeControl';
 import { computeMetricsForPeriod, getBenchmarkStatus } from '@/lib/operational';
 import { PeriodSelector, MetricGrid, FunnelChart } from '@/components/operational';
 import {
@@ -79,19 +80,6 @@ import { RATIO_DEF_MAP, resolveRatioBenchmark, type RatioKey } from '@/lib/targe
 import { useEffectiveTargets } from '@/lib/franchise/useEffectiveTargets';
 import { INDUSTRY_BENCHMARK_DISCLAIMER } from '@/lib/benchmarks/packs';
 
-// ── Helper: years available in values ────────────────────────────────────────
-
-function getAvailableYears(values: AccountValue[]): number[] {
-  if (values.length === 0) return [];
-  const years = new Set(values.map((v) => v.period.year));
-  return Array.from(years).sort((a, b) => b - a);
-}
-
-function getLatestYear(values: AccountValue[]): number | null {
-  if (values.length === 0) return null;
-  return Math.max(...values.map((v) => v.period.year));
-}
-
 // ── Nav tabs ─────────────────────────────────────────────────────────────────
 
 type Tab = 'overview' | 'statements' | 'mapping' | 'reports' | 'projections' | 'whatif' | 'operational';
@@ -105,6 +93,11 @@ const TABS: { id: Tab; label: string; phase: string | null }[] = [
   { id: 'whatif', label: 'What-If', phase: null },
   { id: 'operational', label: 'Operational', phase: null },
 ];
+
+// Tabs scoped by the shared date-range control. Overview, Statements, Reports,
+// and Operational all read the same from/to window; Mapping, Projections, and
+// What-If are intentionally excluded (they operate on the full dataset).
+const SCOPED_TABS: Tab[] = ['overview', 'statements', 'reports', 'operational'];
 
 // ── QBO OAuth return handling ────────────────────────────────────────────────
 
@@ -604,10 +597,13 @@ function ReportsTab({
   clientId,
   granularity,
   onGranularityChange,
+  range,
 }: {
   clientId: string;
   granularity: Granularity;
   onGranularityChange: (g: Granularity) => void;
+  /** Shared from/to window scoping every scoped tab. null/null = all data. */
+  range: PeriodRange;
 }) {
   const workspace = useWorkspaceStore(s => s.workspaces.find(w => w.id === clientId));
   const setGranularity = onGranularityChange;
@@ -615,21 +611,30 @@ function ReportsTab({
   // Falls back to plain workspace.targets semantics for non-franchise clients.
   const { targets: effectiveTargets } = useEffectiveTargets(workspace);
 
+  // Scope to the shared date range before any aggregation. null/null returns
+  // workspace.values unchanged, so this is byte-identical to the old "all data"
+  // behavior until a range is picked. This is the inconsistency Derek flagged:
+  // Reports used workspace.values directly while Overview scoped by fiscal year.
+  const scopedValues = useMemo(
+    () => (workspace ? filterValuesByRange(workspace.values, range.from, range.to) : []),
+    [workspace?.values, range] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   const { aggregations, bsSeries, profSeries, healthSeries } = useMemo(() => {
     if (!workspace || workspace.accounts.length === 0) {
       return { aggregations: [], bsSeries: [], profSeries: [], healthSeries: [] };
     }
     return {
-      aggregations: buildPeriodAggregations(workspace.accounts, workspace.values, granularity, workspace.fiscalYearStart),
-      bsSeries: computeBalanceSheetSeries(workspace.accounts, workspace.values, granularity),
-      profSeries: computeProfitabilitySeries(workspace.accounts, workspace.values, granularity),
-      healthSeries: computeHealthSeries(workspace.accounts, workspace.values, granularity),
+      aggregations: buildPeriodAggregations(workspace.accounts, scopedValues, granularity, workspace.fiscalYearStart),
+      bsSeries: computeBalanceSheetSeries(workspace.accounts, scopedValues, granularity),
+      profSeries: computeProfitabilitySeries(workspace.accounts, scopedValues, granularity),
+      healthSeries: computeHealthSeries(workspace.accounts, scopedValues, granularity),
     };
-  }, [workspace?.accounts, workspace?.values, granularity]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [workspace?.accounts, scopedValues, granularity]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!workspace) return null;
 
-  const hasData = workspace.accounts.length > 0 && workspace.values.length > 0;
+  const hasData = workspace.accounts.length > 0 && scopedValues.length > 0;
 
   // Latest period key ratios
   const latestBS = bsSeries.length > 0 ? bsSeries[bsSeries.length - 1] : null;
@@ -756,40 +761,38 @@ function OverviewTab({
   granularity,
   onGranularityChange,
   onImportData,
+  range,
 }: {
   clientId: string;
   granularity: Granularity;
   onGranularityChange: (g: Granularity) => void;
   /** Opens this workspace's own import surface (the Statements tab) */
   onImportData: () => void;
+  /** Shared from/to window scoping every scoped tab. null/null = all data. */
+  range: PeriodRange;
 }) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
   // Composed targets: client target > franchise corporate set > industry pack.
   // Falls back to plain workspace.targets semantics for non-franchise clients.
   const { targets: effectiveTargets, corporateSetLabel } = useEffectiveTargets(workspace);
 
-  const availableYears = useMemo(
-    () => (workspace ? getAvailableYears(workspace.values) : []),
-    [workspace?.values] // eslint-disable-line react-hooks/exhaustive-deps
-  );
-
-  const defaultYear = availableYears[0] ?? null;
-  const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const setGranularity = onGranularityChange;
 
-  const effectiveYear = selectedYear ?? defaultYear;
-
-  // ── Filter values to selected year ──────────────────────────────────────
-  const yearValues = useMemo(() => {
-    if (!workspace || effectiveYear === null) return [];
-    return workspace.values.filter((v) => v.period.year === effectiveYear);
-  }, [workspace?.values, effectiveYear]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ── Scope values to the shared date range ───────────────────────────────
+  // Replaces the old per-Overview "Fiscal Year" dropdown: the shared range
+  // supersedes it (the "This year" preset covers the old default). A null/null
+  // range returns workspace.values unchanged, so this is a no-op until a range
+  // is picked.
+  const scopedValues = useMemo(
+    () => (workspace ? filterValuesByRange(workspace.values, range.from, range.to) : []),
+    [workspace?.values, range] // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   // ── Period aggregations for charts ──────────────────────────────────────
   const periodAggs = useMemo(() => {
-    if (!workspace || workspace.accounts.length === 0 || yearValues.length === 0) return [];
-    return buildPeriodAggregations(workspace.accounts, yearValues, granularity, workspace.fiscalYearStart);
-  }, [workspace?.accounts, yearValues, granularity, workspace?.fiscalYearStart]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!workspace || workspace.accounts.length === 0 || scopedValues.length === 0) return [];
+    return buildPeriodAggregations(workspace.accounts, scopedValues, granularity, workspace.fiscalYearStart);
+  }, [workspace?.accounts, scopedValues, granularity, workspace?.fiscalYearStart]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Annual KPI totals ────────────────────────────────────────────────────
   const annualPnL = useMemo(() => {
@@ -807,9 +810,9 @@ function OverviewTab({
 
   // ── Breakeven series ─────────────────────────────────────────────────────
   const breakevenSeries = useMemo(() => {
-    if (!workspace || workspace.accounts.length === 0 || yearValues.length === 0) return [];
-    return computeBreakevenSeries(workspace.accounts, yearValues, granularity);
-  }, [workspace?.accounts, yearValues, granularity]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!workspace || workspace.accounts.length === 0 || scopedValues.length === 0) return [];
+    return computeBreakevenSeries(workspace.accounts, scopedValues, granularity);
+  }, [workspace?.accounts, scopedValues, granularity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Revenue/Breakeven chart data ─────────────────────────────────────────
   const revenueBreakevenData = useMemo(() => {
@@ -853,14 +856,14 @@ function OverviewTab({
 
   // ── Balance sheet + health for ratio dashboard ───────────────────────────
   const { bsSeries, healthSeries } = useMemo(() => {
-    if (!workspace || workspace.accounts.length === 0 || yearValues.length === 0) {
+    if (!workspace || workspace.accounts.length === 0 || scopedValues.length === 0) {
       return { bsSeries: [], healthSeries: [] };
     }
     return {
-      bsSeries: computeBalanceSheetSeries(workspace.accounts, yearValues, granularity),
-      healthSeries: computeHealthSeries(workspace.accounts, yearValues, granularity),
+      bsSeries: computeBalanceSheetSeries(workspace.accounts, scopedValues, granularity),
+      healthSeries: computeHealthSeries(workspace.accounts, scopedValues, granularity),
     };
-  }, [workspace?.accounts, yearValues, granularity]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [workspace?.accounts, scopedValues, granularity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Ratio dashboard cards ────────────────────────────────────────────────
   const ratioCards = useMemo((): RatioSparklineProps[] => {
@@ -969,37 +972,10 @@ function OverviewTab({
   return (
     <div className="flex flex-col gap-8">
 
-      {/* Section 1: Header row — Year selector + Granularity */}
+      {/* Section 1: Header row — Granularity (date range is the shared control
+          rendered once above the tab panels). */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3 flex-wrap">
-          {/* FY Selector */}
-          {availableYears.length > 0 && (
-            <div className="flex items-center gap-2">
-              <label
-                className="text-xs font-medium"
-                style={{ color: 'hsl(var(--muted-foreground))' }}
-              >
-                Fiscal Year:
-              </label>
-              <select
-                value={effectiveYear ?? ''}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                className="rounded-md border px-2 py-1 text-sm font-medium"
-                style={{
-                  borderColor: 'hsl(var(--border))',
-                  background: 'hsl(var(--card))',
-                  color: 'hsl(var(--foreground))',
-                }}
-              >
-                {availableYears.map((yr) => (
-                  <option key={yr} value={yr}>
-                    FY{yr}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
           {/* Granularity toggle */}
           <div
             className="flex items-center gap-1 rounded-lg p-1"
@@ -1024,7 +1000,7 @@ function OverviewTab({
           </div>
         </div>
 
-        {effectiveYear && (
+        {hasData && (
           <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
             {workspace.accounts.length} accounts · {workspace.values.length} data points
           </span>
@@ -1551,37 +1527,50 @@ function WhatIfTab({ clientId }: { clientId: string }) {
 
 // ── Operational Tab ────────────────────────────────────────────────────────
 
-function OperationalTabContent({ clientId }: { clientId: string }) {
+function OperationalTabContent({ clientId, range }: { clientId: string; range: PeriodRange }) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
   const profile = workspace ? getProfile(workspace.industryProfileId) : null;
   // Composed targets — corporate metric mandates apply to operational metrics.
   const { targets: effectiveTargets } = useEffectiveTargets(workspace);
 
+  // Scope to the shared date range. null/null returns workspace.values
+  // unchanged (non-regression); a range narrows both the period list and the
+  // financial summary feeding the metrics.
+  const scopedValues = useMemo(
+    () => (workspace ? filterValuesByRange(workspace.values, range.from, range.to) : []),
+    [workspace?.values, range] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
   const availablePeriods = useMemo(() => {
-    if (!workspace) return [];
-    const periods = getUniquePeriods(workspace.values);
+    const periods = getUniquePeriods(scopedValues);
     return [...periods].sort((a, b) => periodSortKey(b) - periodSortKey(a));
-  }, [workspace?.values]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scopedValues]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const defaultPeriod = availablePeriods[0] ?? null;
   const [selectedPeriod, setSelectedPeriod] = useState<import('@/types').Period | null>(defaultPeriod);
 
+  // Keep the selected period inside the scoped window. When the range changes
+  // (or on first load) and the current selection is no longer available, snap
+  // to the most recent scoped period. With a null/null range the available set
+  // is unchanged, so the initial selection stays put.
   useEffect(() => {
-    if (selectedPeriod === null && availablePeriods.length > 0) {
-      setSelectedPeriod(availablePeriods[0] ?? null);
-    }
-  }, [availablePeriods.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (availablePeriods.length === 0) return;
+    const stillValid =
+      selectedPeriod !== null &&
+      availablePeriods.some((p) => p.year === selectedPeriod.year && p.month === selectedPeriod.month);
+    if (!stillValid) setSelectedPeriod(availablePeriods[0] ?? null);
+  }, [availablePeriods]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const financialSummary = useMemo(() => {
     if (!workspace || !selectedPeriod) {
       return toFinancialSummary(
-        computePnL(workspace?.accounts ?? [], workspace?.values ?? [], { year: 0, month: 0 }),
+        computePnL(workspace?.accounts ?? [], scopedValues, { year: 0, month: 0 }),
         undefined
       );
     }
-    const pnl = computePnL(workspace.accounts, workspace.values, selectedPeriod);
+    const pnl = computePnL(workspace.accounts, scopedValues, selectedPeriod);
     return toFinancialSummary(pnl, selectedPeriod);
-  }, [workspace?.accounts, workspace?.values, selectedPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [workspace?.accounts, scopedValues, selectedPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const metricResults = useMemo(() => {
     if (!workspace || !profile || !selectedPeriod) return [];
@@ -1599,7 +1588,9 @@ function OperationalTabContent({ clientId }: { clientId: string }) {
 
   if (!workspace || !profile) return null;
 
-  const noFinancialData = workspace.values.length === 0;
+  // Empty within the scoped window reads as "no data" (with a null/null range
+  // this is identical to workspace.values.length === 0).
+  const noFinancialData = scopedValues.length === 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -1658,10 +1649,10 @@ function OperationalTabContent({ clientId }: { clientId: string }) {
   );
 }
 
-function OperationalTab({ clientId }: { clientId: string }) {
+function OperationalTab({ clientId, range }: { clientId: string; range: PeriodRange }) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
   if (!workspace) return null;
-  return <OperationalTabContent clientId={clientId} />;
+  return <OperationalTabContent clientId={clientId} range={range} />;
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -1749,6 +1740,11 @@ export default function WorkspacePage({ params }: PageProps) {
   // Shared period granularity across Overview + Reports so switching tabs
   // doesn't silently reset the period a user is reviewing.
   const [sharedGranularity, setSharedGranularity] = useState<Granularity>('monthly');
+  // Shared from/to date range scoping Overview, Statements, Reports, and
+  // Operational uniformly. Default {from:null,to:null} = all data — via
+  // filterValuesByRange this is byte-identical to the pre-range behavior, so
+  // every scoped tab renders exactly as before until the user picks a range.
+  const [dateRange, setDateRange] = useState<PeriodRange>({ from: null, to: null });
   const tourHook = useTour();
 
   const showHeaderToast = useCallback((msg: string) => {
@@ -2051,17 +2047,34 @@ export default function WorkspacePage({ params }: PageProps) {
       <main
         className={isMappingTab ? 'px-6 py-6' : 'mx-auto max-w-6xl px-6 py-8'}
       >
+        {/* Shared date-range control — rendered ONCE, scopes the four scoped
+            tabs uniformly. Hidden on Mapping/Projections/What-If and until
+            there is data to scope. */}
+        {SCOPED_TABS.includes(activeTab) && workspace.values.length > 0 && (
+          <div
+            className="mb-6 flex items-center rounded-xl border px-4 py-3"
+            style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
+            data-testid="shared-date-range"
+          >
+            <DateRangeControl
+              values={workspace.values}
+              range={dateRange}
+              onRangeChange={setDateRange}
+            />
+          </div>
+        )}
         {activeTab === 'overview' && (
           <OverviewTab
             clientId={clientId}
             granularity={sharedGranularity}
             onGranularityChange={setSharedGranularity}
             onImportData={() => setActiveTab('statements')}
+            range={dateRange}
           />
         )}
         {activeTab === 'statements' && (
           <ReadOnlyGuard>
-            <StatementsView clientId={clientId} embedded qboAutoSync={qboAutoSync} />
+            <StatementsView clientId={clientId} embedded qboAutoSync={qboAutoSync} range={dateRange} />
           </ReadOnlyGuard>
         )}
         {activeTab === 'mapping' && (
@@ -2074,6 +2087,7 @@ export default function WorkspacePage({ params }: PageProps) {
             clientId={clientId}
             granularity={sharedGranularity}
             onGranularityChange={setSharedGranularity}
+            range={dateRange}
           />
         )}
         {activeTab === 'projections' && <ProjectionsTab clientId={clientId} />}
@@ -2084,7 +2098,7 @@ export default function WorkspacePage({ params }: PageProps) {
         )}
         {activeTab === 'operational' && (
           <ReadOnlyGuard>
-            <OperationalTab clientId={clientId} />
+            <OperationalTab clientId={clientId} range={dateRange} />
           </ReadOnlyGuard>
         )}
       </main>

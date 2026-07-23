@@ -388,6 +388,74 @@ function check(cond: boolean, label: string): void {
   );
 }
 
+// ── Shared date-range scoping (filterValuesByRange / workspaceDataRange) ──────
+// The workspace's four scoped tabs (Overview, Statements, Reports, Operational)
+// all funnel workspace.values through filterValuesByRange before aggregating.
+// The non-regression guarantee is that a null/null range is byte-identical to
+// the unfiltered values, so every tab renders exactly as before until a range
+// is picked.
+{
+  const values: AccountValue[] = [];
+  for (const year of [2023, 2024]) {
+    for (let m = 1; m <= 12; m++) {
+      values.push({ accountId: 'r1', period: { year, month: m }, amount: 100 });
+    }
+  }
+
+  // Non-regression: both bounds null returns the SAME array reference.
+  check(
+    periodAgg.filterValuesByRange(values, null, null) === values,
+    'range: null/null must return the original array by reference (non-regression)'
+  );
+
+  // Inclusive window across a year boundary.
+  const win = periodAgg.filterValuesByRange(
+    values,
+    { year: 2023, month: 11 },
+    { year: 2024, month: 2 }
+  );
+  check(win.length === 4, `range: Nov 2023–Feb 2024 should keep 4 months, got ${win.length}`);
+
+  // Open bounds.
+  check(
+    periodAgg.filterValuesByRange(values, { year: 2024, month: 1 }, null).length === 12,
+    'range: open-ended "to" should keep all of 2024 (12 months)'
+  );
+  check(
+    periodAgg.filterValuesByRange(values, null, { year: 2023, month: 12 }).length === 12,
+    'range: open-ended "from" should keep all of 2023 (12 months)'
+  );
+
+  // from > to yields empty.
+  check(
+    periodAgg.filterValuesByRange(values, { year: 2024, month: 6 }, { year: 2024, month: 1 }).length === 0,
+    'range: from>to must be empty'
+  );
+
+  // Scoping equivalence: aggregating a scoped year through the SAME calc entry
+  // point the tabs call (buildPeriodAggregations) equals aggregating a value
+  // set that only ever contained that year — proves the shared range scopes
+  // uniformly.
+  const scoped2024 = periodAgg.filterValuesByRange(values, { year: 2024, month: 1 }, { year: 2024, month: 12 });
+  const only2024 = values.filter((v) => v.period.year === 2024);
+  const accounts = [acc('r1', 'Sales', 'revenue')];
+  const aggScoped = pnl.buildPeriodAggregations(accounts, scoped2024, 'annual');
+  const aggOnly = pnl.buildPeriodAggregations(accounts, only2024, 'annual');
+  check(
+    aggScoped.length === 1 && aggOnly.length === 1 &&
+      aggScoped[0]!.revenue === 1200 && aggOnly[0]!.revenue === 1200,
+    `range: scoped-2024 annual revenue should equal an all-2024 dataset (1200), got ${aggScoped[0]?.revenue} vs ${aggOnly[0]?.revenue}`
+  );
+
+  // workspaceDataRange spans the full imported set.
+  const dr = periodAgg.workspaceDataRange(values);
+  check(
+    dr !== null && dr.min.year === 2023 && dr.min.month === 1 && dr.max.year === 2024 && dr.max.month === 12,
+    `range: workspaceDataRange should span Jan 2023–Dec 2024, got ${JSON.stringify(dr)}`
+  );
+  check(periodAgg.workspaceDataRange([]) === null, 'range: workspaceDataRange of empty values must be null');
+}
+
 if (failures > 0) {
   console.error(`\n${failures} calculation check(s) FAILED`);
   process.exit(1);

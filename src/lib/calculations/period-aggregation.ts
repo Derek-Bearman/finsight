@@ -267,6 +267,61 @@ export function getTrailingPeriods(values: AccountValue[], n: number): Period[] 
 }
 
 // ─────────────────────────────────────────────
+// Date-range scoping (shared workspace control)
+// ─────────────────────────────────────────────
+
+/** A from/to date-range selection. A null bound is open on that side. */
+export interface PeriodRange {
+  from: Period | null;
+  to: Period | null;
+}
+
+/** Total-months ordinal used for range comparisons (year*12 + month). */
+function periodOrdinal(p: Period): number {
+  return p.year * 12 + p.month;
+}
+
+/**
+ * Earliest and latest period present in a value set, or null if empty.
+ * Used to populate the shared date-range control from the workspace's actual
+ * data (you can only scope to months that exist).
+ */
+export function workspaceDataRange(values: AccountValue[]): { min: Period; max: Period } | null {
+  if (values.length === 0) return null;
+  let min = values[0]!.period;
+  let max = values[0]!.period;
+  for (const v of values) {
+    if (comparePeriods(v.period, min) < 0) min = v.period;
+    if (comparePeriods(v.period, max) > 0) max = v.period;
+  }
+  return { min: { ...min }, max: { ...max } };
+}
+
+/**
+ * Inclusive filter of values to a from/to range. A null bound is open on that
+ * side; from > to yields an empty set. Comparison is by (year*12 + month).
+ *
+ * NON-REGRESSION GUARANTEE: when BOTH bounds are null the ORIGINAL array is
+ * returned by reference (not a copy), so a null/null range is byte-identical
+ * to passing the unfiltered values — every tab renders exactly as it does
+ * today until the user picks a range.
+ */
+export function filterValuesByRange(
+  values: AccountValue[],
+  from: Period | null,
+  to: Period | null
+): AccountValue[] {
+  if (from === null && to === null) return values;
+  const lo = from === null ? -Infinity : periodOrdinal(from);
+  const hi = to === null ? Infinity : periodOrdinal(to);
+  if (lo > hi) return [];
+  return values.filter((v) => {
+    const o = periodOrdinal(v.period);
+    return o >= lo && o <= hi;
+  });
+}
+
+// ─────────────────────────────────────────────
 // Unit Tests
 // ─────────────────────────────────────────────
 
@@ -414,6 +469,47 @@ export function runTests(): void {
     ];
     const result = getTrailingPeriods(vals, 0);
     console.assert(result.length === 0, 'n=0 should return empty');
+  }
+
+  // ── workspaceDataRange ──
+  {
+    console.assert(workspaceDataRange([]) === null, 'empty data range should be null');
+    const vals: AccountValue[] = [
+      { accountId: 'a1', period: { year: 2024, month: 6 }, amount: 1 },
+      { accountId: 'a2', period: { year: 2023, month: 11 }, amount: 2 },
+      { accountId: 'a1', period: { year: 2024, month: 2 }, amount: 3 },
+    ];
+    const r = workspaceDataRange(vals);
+    console.assert(r !== null, 'data range should not be null');
+    console.assert(r!.min.year === 2023 && r!.min.month === 11, `min should be Nov 2023, got ${r!.min.year}-${r!.min.month}`);
+    console.assert(r!.max.year === 2024 && r!.max.month === 6, `max should be Jun 2024, got ${r!.max.year}-${r!.max.month}`);
+  }
+
+  // ── filterValuesByRange ──
+  {
+    const vals: AccountValue[] = [
+      { accountId: 'a1', period: { year: 2024, month: 1 }, amount: 1 },
+      { accountId: 'a1', period: { year: 2024, month: 2 }, amount: 2 },
+      { accountId: 'a1', period: { year: 2024, month: 3 }, amount: 3 },
+      { accountId: 'a1', period: { year: 2024, month: 4 }, amount: 4 },
+    ];
+    // Non-regression: null/null returns the SAME reference (byte-identical).
+    console.assert(filterValuesByRange(vals, null, null) === vals, 'null/null must return the same array reference');
+    // Inclusive both bounds.
+    const mid = filterValuesByRange(vals, { year: 2024, month: 2 }, { year: 2024, month: 3 });
+    console.assert(mid.length === 2 && mid[0]!.amount === 2 && mid[1]!.amount === 3, `inclusive from/to should keep Feb+Mar, got ${mid.map(v => v.amount)}`);
+    // Open lower bound (to only).
+    const upTo = filterValuesByRange(vals, null, { year: 2024, month: 2 });
+    console.assert(upTo.length === 2, `open-from should keep Jan+Feb, got ${upTo.length}`);
+    // Open upper bound (from only).
+    const fromOn = filterValuesByRange(vals, { year: 2024, month: 3 }, null);
+    console.assert(fromOn.length === 2, `open-to should keep Mar+Apr, got ${fromOn.length}`);
+    // from > to yields empty.
+    const empty = filterValuesByRange(vals, { year: 2024, month: 4 }, { year: 2024, month: 1 });
+    console.assert(empty.length === 0, `from>to should be empty, got ${empty.length}`);
+    // Single-month range (from === to) is inclusive.
+    const one = filterValuesByRange(vals, { year: 2024, month: 3 }, { year: 2024, month: 3 });
+    console.assert(one.length === 1 && one[0]!.amount === 3, `single-month range should keep Mar only, got ${one.map(v => v.amount)}`);
   }
 
   console.log('period-aggregation tests passed');

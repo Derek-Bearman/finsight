@@ -10,6 +10,7 @@
 
 import { useMemo, useRef, useState } from 'react';
 import type { Account, AccountValue, Period } from '@/types';
+import { filterValuesByRange, type PeriodRange } from '@/lib/calculations/period-aggregation';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { getProfile } from '@/lib/profiles';
 import { parseImportFile } from '@/lib/data/import-pipeline';
@@ -339,12 +340,18 @@ export function StatementsView({
   clientId,
   embedded = false,
   qboAutoSync = false,
+  range,
 }: {
   clientId: string;
   embedded?: boolean;
   /** Set once by the workspace page on a ?qbo=connected landing so the sync
    *  dialog auto-opens right after the first connect. */
   qboAutoSync?: boolean;
+  /** Shared from/to window from the embedding workspace page. When provided,
+   *  the P&L/BS columns are scoped to it. Absent (the standalone /statements
+   *  page) or null/null = the full dataset, byte-identical to before. Import
+   *  and dataset operations always use the full workspace.values regardless. */
+  range?: PeriodRange;
 }) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
@@ -360,7 +367,17 @@ export function StatementsView({
   const [qboRefreshKey, setQboRefreshKey] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const buckets = useMemo(() => (workspace ? bucketPeriods(workspace.values, gran) : []), [workspace?.values, gran]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Values shown in the statement tables, scoped to the shared date range when
+  // the embedding page provides one. A null/null (or absent) range returns
+  // workspace.values by reference, so the standalone /statements page and the
+  // default embedded view are byte-identical to before. Import/dataset flows
+  // below deliberately keep using workspace.values (the full set).
+  const displayValues = useMemo(
+    () => (workspace ? (range ? filterValuesByRange(workspace.values, range.from, range.to) : workspace.values) : []),
+    [workspace?.values, range] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const buckets = useMemo(() => (workspace ? bucketPeriods(displayValues, gran) : []), [displayValues, gran, workspace]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasPnL = useMemo(
     () => !!workspace && workspace.accounts.some((a) => !a.isExcluded && ['revenue', 'cogs', 'expense'].includes(a.type)),
@@ -371,8 +388,8 @@ export function StatementsView({
     [workspace?.accounts]
   );
 
-  const pnlRows = useMemo(() => (workspace && hasPnL ? buildPnLRows(workspace.accounts, workspace.values, buckets) : []), [workspace?.accounts, workspace?.values, buckets, hasPnL]); // eslint-disable-line react-hooks/exhaustive-deps
-  const bsRows = useMemo(() => (workspace && hasBS ? buildBalanceSheetRows(workspace.accounts, workspace.values, buckets) : []), [workspace?.accounts, workspace?.values, buckets, hasBS]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pnlRows = useMemo(() => (workspace && hasPnL ? buildPnLRows(workspace.accounts, displayValues, buckets) : []), [workspace?.accounts, displayValues, buckets, hasPnL]); // eslint-disable-line react-hooks/exhaustive-deps
+  const bsRows = useMemo(() => (workspace && hasBS ? buildBalanceSheetRows(workspace.accounts, displayValues, buckets) : []), [workspace?.accounts, displayValues, buckets, hasBS]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!workspace) return null;
 
