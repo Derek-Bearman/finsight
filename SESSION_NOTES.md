@@ -3,6 +3,17 @@
 **Last updated:** 2026-07-23
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
 
+>  **2026-07-23 (later) — Driver-based projection mode LIVE (version `c13cdbee`).**
+> New 'driver' ProjectionModel (cost-behavior-aware): projects revenue at the
+> growth rate, then variable costs scale with revenue, fixed costs stay flat,
+> mixed costs split by mixedFixedPercent. So the on-card mixed split now drives
+> projected net income + What-If (model persists on the workspace so both
+> surfaces share it). Non-driver modes unchanged; default = profile default.
+> driver-projection.check.ts + adversarial review (2 fixes: read-only persist
+> guard, PDF honors persisted model). Prod-verified: variable costs grow with
+> revenue, fixed flat, selection persists. See memory
+> finsight-projection-cost-behavior.md.
+>
 > **2026-07-23 (later) — Mixed cost split moved onto the card (version `3513e718`).**
 > The fixed/variable split for mixed-behavior accounts is now an inline slider
 > ON each Mixed-bucket card (Cost Behavior view) instead of a separate section
