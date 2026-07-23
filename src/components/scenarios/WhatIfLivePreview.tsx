@@ -138,6 +138,21 @@ export function WhatIfLivePreview({
 
   const profileDefaultModel = getProfile(workspace.industryProfileId).defaultProjectionModel;
 
+  // Persisted projection settings win over the profile default. When the user
+  // has selected Driver-based on the Projections view, the What-If preview
+  // projects in driver mode too, so the mixed fixed/variable split and the
+  // scenario sliders both flow into the projected numbers. Fields absent =
+  // profile default = today's behavior.
+  const effectiveModel = workspace.projectionModel ?? profileDefaultModel;
+  const growthOverride = workspace.projectionGrowthOverride ?? undefined;
+
+  // Value signature of every mixed account's fixed/variable split. Added to the
+  // projection memo deps so the preview recomputes when a split changes.
+  const mixedSplitKey = workspace.accounts
+    .filter((a) => a.costBehavior === 'mixed')
+    .map((a) => `${a.id}:${a.mixedFixedPercent ?? 0.5}`)
+    .join('|');
+
   const uniqueMonths = useMemo(
     () => new Set(workspace.values.map((v) => `${v.period.year}-${v.period.month}`)).size,
     [workspace.values]
@@ -151,10 +166,16 @@ export function WhatIfLivePreview({
     return projectWorkspace(
       workspace.accounts,
       workspace.values,
-      { horizonMonths: HORIZON_MONTHS },
-      profileDefaultModel
+      { horizonMonths: HORIZON_MONTHS, model: effectiveModel, growthRateOverride: growthOverride }
     );
-  }, [workspace.accounts, workspace.values, hasEnoughData, profileDefaultModel]);
+  }, [
+    workspace.accounts,
+    workspace.values,
+    hasEnoughData,
+    effectiveModel,
+    growthOverride,
+    mixedSplitKey,
+  ]);
 
   // A content signature of the adjustments — the scenario object identity
   // changes every parent render (the editor rebuilds it from slider state), so
@@ -173,13 +194,20 @@ export function WhatIfLivePreview({
     return projectWorkspace(
       workspace.accounts,
       adjustedValues,
-      { horizonMonths: HORIZON_MONTHS },
-      profileDefaultModel
+      { horizonMonths: HORIZON_MONTHS, model: effectiveModel, growthRateOverride: growthOverride }
     );
     // scenario is intentionally read through adjustmentsKey to avoid recomputing
     // on unrelated parent re-renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace.accounts, workspace.values, adjustmentsKey, hasEnoughData, profileDefaultModel]);
+  }, [
+    workspace.accounts,
+    workspace.values,
+    adjustmentsKey,
+    hasEnoughData,
+    effectiveModel,
+    growthOverride,
+    mixedSplitKey,
+  ]);
 
   const summary = useMemo(() => {
     if (!baseProjection || !scenarioProjection) return null;

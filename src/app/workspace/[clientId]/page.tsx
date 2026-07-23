@@ -392,17 +392,32 @@ function MappingTab({ clientId }: { clientId: string }) {
 
 function ProjectionsTab({ clientId }: { clientId: string }) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
-
-  const [model, setModel] = useState<ProjectionModel>('linear');
-  const [horizon, setHorizon] = useState<HorizonKey>('12m');
-  const [growthRateOverride, setGrowthRateOverride] = useState<number | null>(null);
+  const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
 
   const profile = workspace ? getProfile(workspace.industryProfileId) : null;
 
-  // Set default model from profile on mount
-  useEffect(() => {
-    if (profile) setModel(profile.defaultProjectionModel);
-  }, [profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Initialize from the persisted workspace settings so Projections and What-If
+  // agree; absent fields fall back to today's behavior (profile default, no
+  // override). Local state stays the render source of truth for responsiveness.
+  const [model, setModel] = useState<ProjectionModel>(
+    () => workspace?.projectionModel ?? profile?.defaultProjectionModel ?? 'linear'
+  );
+  const [horizon, setHorizon] = useState<HorizonKey>('12m');
+  const [growthRateOverride, setGrowthRateOverride] = useState<number | null>(
+    workspace?.projectionGrowthOverride ?? null
+  );
+
+  // Change handlers: update local state (responsive render) and persist to the
+  // store so the setting survives navigation and is shared with What-If.
+  function handleModelChange(m: ProjectionModel) {
+    setModel(m);
+    updateWorkspace(clientId, { projectionModel: m });
+  }
+
+  function handleGrowthRateChange(v: number | null) {
+    setGrowthRateOverride(v);
+    updateWorkspace(clientId, { projectionGrowthOverride: v });
+  }
 
   const horizonMonths = HORIZON_MONTHS[horizon];
 
@@ -460,11 +475,11 @@ function ProjectionsTab({ clientId }: { clientId: string }) {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <ProjectionControls
           model={model}
-          onModelChange={setModel}
+          onModelChange={handleModelChange}
           horizon={horizon}
           onHorizonChange={setHorizon}
           growthRateOverride={growthRateOverride}
-          onGrowthRateChange={setGrowthRateOverride}
+          onGrowthRateChange={handleGrowthRateChange}
           profileDefaultModel={profile?.defaultProjectionModel ?? 'linear'}
           impliedGrowthRate={impliedGrowthRate}
         />

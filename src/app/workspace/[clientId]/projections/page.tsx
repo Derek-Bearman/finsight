@@ -35,10 +35,30 @@ function ProjectionsContent({
   workspace: ClientWorkspace;
 }) {
   const profile = getProfile(workspace.industryProfileId);
+  const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
 
-  const [model, setModel] = useState<ProjectionModel>(profile.defaultProjectionModel);
+  // Initialize from the persisted workspace settings so Projections and What-If
+  // agree; absent fields fall back to today's behavior (profile default, no
+  // override). Local state stays the render source of truth for responsiveness.
+  const [model, setModel] = useState<ProjectionModel>(
+    workspace.projectionModel ?? profile.defaultProjectionModel
+  );
   const [horizon, setHorizon] = useState<HorizonKey>('12m');
-  const [growthRateOverride, setGrowthRateOverride] = useState<number | null>(null);
+  const [growthRateOverride, setGrowthRateOverride] = useState<number | null>(
+    workspace.projectionGrowthOverride ?? null
+  );
+
+  // Change handlers: update local state (responsive render) and persist to the
+  // store so the setting survives navigation and is shared with What-If.
+  function handleModelChange(m: ProjectionModel) {
+    setModel(m);
+    updateWorkspace(clientId, { projectionModel: m });
+  }
+
+  function handleGrowthRateChange(v: number | null) {
+    setGrowthRateOverride(v);
+    updateWorkspace(clientId, { projectionGrowthOverride: v });
+  }
 
   const horizonMonths = HORIZON_MONTHS[horizon];
   const uniqueMonths = new Set(workspace.values.map((v) => `${v.period.year}-${v.period.month}`)).size;
@@ -141,11 +161,11 @@ function ProjectionsContent({
           style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}>
           <ProjectionControls
             model={model}
-            onModelChange={setModel}
+            onModelChange={handleModelChange}
             horizon={horizon}
             onHorizonChange={setHorizon}
             growthRateOverride={growthRateOverride}
-            onGrowthRateChange={setGrowthRateOverride}
+            onGrowthRateChange={handleGrowthRateChange}
             profileDefaultModel={profile.defaultProjectionModel}
             impliedGrowthRate={impliedGrowthRate}
           />

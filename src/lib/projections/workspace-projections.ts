@@ -91,47 +91,65 @@ export function projectWorkspace(
   const historicalPeriods = getUniquePeriods(values).sort(comparePeriods);
   const lastHistoricalPeriod = historicalPeriods[historicalPeriods.length - 1];
 
-  for (const account of accounts) {
-    // Get this account's historical values
-    const acctValues = values
-      .filter((v) => v.accountId === account.id)
-      .sort((a, b) => comparePeriods(a.period, b.period));
+  if (model === 'driver') {
+    // ── Driver (cost-behavior-aware) path ──────────────────────────────────────
+    // Growth drives total revenue; costs scale by their cost behavior. This
+    // populates the SAME accountProjections + projectedByAccount structures the
+    // per-account path fills, so the rollup/aggregation code below is shared and
+    // unchanged. The linear/seasonal/yoy branch is left byte-identical.
+    const driven = projectDriverAccounts({
+      accounts,
+      values,
+      historicalPeriods,
+      lastHistoricalPeriod,
+      horizonMonths,
+      growthRateOverride,
+    });
+    for (const ap of driven.accountProjections) accountProjections.push(ap);
+    for (const [accountId, pts] of driven.projectedByAccount) projectedByAccount.set(accountId, pts);
+  } else {
+    for (const account of accounts) {
+      // Get this account's historical values
+      const acctValues = values
+        .filter((v) => v.accountId === account.id)
+        .sort((a, b) => comparePeriods(a.period, b.period));
 
-    if (acctValues.length < 3) {
-      // Not enough history — carry forward last known value
-      const lastVal = acctValues[acctValues.length - 1];
-      if (!lastVal || !lastHistoricalPeriod) continue;
+      if (acctValues.length < 3) {
+        // Not enough history — carry forward last known value
+        const lastVal = acctValues[acctValues.length - 1];
+        if (!lastVal || !lastHistoricalPeriod) continue;
 
-      const pts: ProjectionPoint[] = [];
-      for (let i = 1; i <= horizonMonths; i++) {
-        const p = addMonths(lastHistoricalPeriod, i);
-        pts.push({ period: p, value: lastVal.amount, lower80: lastVal.amount, upper80: lastVal.amount, isProjected: true });
+        const pts: ProjectionPoint[] = [];
+        for (let i = 1; i <= horizonMonths; i++) {
+          const p = addMonths(lastHistoricalPeriod, i);
+          pts.push({ period: p, value: lastVal.amount, lower80: lastVal.amount, upper80: lastVal.amount, isProjected: true });
+        }
+        accountProjections.push({ accountId: account.id, model, points: pts });
+        projectedByAccount.set(account.id, pts);
+        continue;
       }
-      accountProjections.push({ accountId: account.id, model, points: pts });
-      projectedByAccount.set(account.id, pts);
-      continue;
-    }
 
-    const history = acctValues.map((v) => ({ period: v.period, amount: v.amount }));
+      const history = acctValues.map((v) => ({ period: v.period, amount: v.amount }));
 
-    let result = project({ history, horizonMonths, model, growthRateOverride });
+      let result = project({ history, horizonMonths, model, growthRateOverride });
 
-    // Sanity check: if the first projected month is more than 80% below the
-    // average of the last 3 actual months, the model has gone badly wrong
-    // (typically from extreme seasonal indices or a regression dominated by
-    // old weak data). Fall back to linear in that case.
-    if (result.model !== 'linear' && result.projected.length > 0 && history.length >= 3) {
-      const lastThree = history.slice(-3);
-      const last3Avg = lastThree.reduce((s, h) => s + h.amount, 0) / lastThree.length;
-      const firstProjected = result.projected[0]!.value;
-      if (last3Avg > 0 && firstProjected < last3Avg * 0.2) {
-        // First projection is >80% below recent average — fall back to linear
-        result = project({ history, horizonMonths, model: 'linear', growthRateOverride });
+      // Sanity check: if the first projected month is more than 80% below the
+      // average of the last 3 actual months, the model has gone badly wrong
+      // (typically from extreme seasonal indices or a regression dominated by
+      // old weak data). Fall back to linear in that case.
+      if (result.model !== 'linear' && result.projected.length > 0 && history.length >= 3) {
+        const lastThree = history.slice(-3);
+        const last3Avg = lastThree.reduce((s, h) => s + h.amount, 0) / lastThree.length;
+        const firstProjected = result.projected[0]!.value;
+        if (last3Avg > 0 && firstProjected < last3Avg * 0.2) {
+          // First projection is >80% below recent average — fall back to linear
+          result = project({ history, horizonMonths, model: 'linear', growthRateOverride });
+        }
       }
-    }
 
-    accountProjections.push({ accountId: account.id, model: result.model, points: result.projected });
-    projectedByAccount.set(account.id, result.projected);
+      accountProjections.push({ accountId: account.id, model: result.model, points: result.projected });
+      projectedByAccount.set(account.id, result.projected);
+    }
   }
 
   // ── Build lookup for projected values by accountId + periodKey ────────────────
@@ -314,4 +332,202 @@ export function projectWorkspace(
     annualSummary,
     options: { ...options, model },
   };
+}
+
+// ─────────────────────────────────────────────
+// Driver projection (cost-behavior-aware)
+// ─────────────────────────────────────────────
+
+interface DriverAccountsInput {
+  /** Already filtered to !isExcluded by the caller. */
+  accounts: Account[];
+  values: AccountValue[];
+  /** Unique historical periods, sorted ascending. */
+  historicalPeriods: Period[];
+  lastHistoricalPeriod: Period | undefined;
+  horizonMonths: number;
+  growthRateOverride?: number;
+}
+
+/**
+ * Cost-behavior-aware ("driver") projection of every account.
+ *
+ * The growth rate drives REVENUE; costs then follow their classified behavior:
+ *   - variable      → projected[p] = (trailingAcct / trailingRev) * driver[p]
+ *   - fixed         → projected[p] = trailingAvg                       (flat)
+ *   - mixed(f)      → projected[p] = f*trailingAvg
+ *                                    + ((1 - f) * trailingAcct / trailingRev) * driver[p]
+ *   - unclassified  → projected[p] = trailingAvg                       (flat, safest)
+ * where, over the trailing window W = min(12, #historical periods):
+ *   trailingRev  = Σ total revenue over the last W periods
+ *   trailingAcct = Σ this account over the last W periods
+ *   trailingAvg  = trailingAcct / W
+ *   driver[p]    = Σ projected revenue-account values at period p
+ *   f            = account.mixedFixedPercent ?? 0.5
+ *
+ * Revenue accounts are projected with the linear model (honoring
+ * growthRateOverride) so the revenue breakdown persists; the DRIVER used for
+ * costs is the sum of those projected revenue accounts, keeping costs
+ * consistent with the revenue shown. If trailingRev is 0 every cost is treated
+ * as flat (trailingAvg) to avoid divide-by-zero. Balance-sheet accounts, and
+ * any account with < 3 historical points, carry their last actual value forward
+ * flat (matching the per-account path's fallback). Driver projections carry no
+ * confidence band: lower80 = upper80 = value throughout.
+ *
+ * Returns the same accountProjections + projectedByAccount structures the
+ * per-account path fills so the caller's rollup/aggregation code is shared.
+ */
+function projectDriverAccounts(input: DriverAccountsInput): {
+  accountProjections: AccountProjection[];
+  projectedByAccount: Map<string, ProjectionPoint[]>;
+} {
+  const { accounts, values, historicalPeriods, lastHistoricalPeriod, horizonMonths, growthRateOverride } = input;
+
+  const accountProjections: AccountProjection[] = [];
+  const projectedByAccount = new Map<string, ProjectionPoint[]>();
+
+  // No anchor period → nothing to project (matches the per-account fallback).
+  if (!lastHistoricalPeriod || historicalPeriods.length === 0) {
+    return { accountProjections, projectedByAccount };
+  }
+
+  // Future periods — identical to the caller's projectedPeriods derivation.
+  const futurePeriods: Period[] = [];
+  for (let i = 1; i <= horizonMonths; i++) {
+    futurePeriods.push(addMonths(lastHistoricalPeriod, i));
+  }
+
+  // Sorted history per account, computed once.
+  const valuesByAccount = new Map<string, AccountValue[]>();
+  for (const v of values) {
+    if (!valuesByAccount.has(v.accountId)) valuesByAccount.set(v.accountId, []);
+    valuesByAccount.get(v.accountId)!.push(v);
+  }
+  for (const list of valuesByAccount.values()) {
+    list.sort((a, b) => comparePeriods(a.period, b.period));
+  }
+
+  // Flat carry-forward of an account's last actual value (no floor, no band —
+  // mirrors the per-account path's < 3-points fallback).
+  const carryForward = (accountId: string): ProjectionPoint[] => {
+    const vals = valuesByAccount.get(accountId);
+    const lastVal = vals && vals.length > 0 ? vals[vals.length - 1] : undefined;
+    if (!lastVal) return [];
+    return futurePeriods.map((p) => ({
+      period: p,
+      value: lastVal.amount,
+      lower80: lastVal.amount,
+      upper80: lastVal.amount,
+      isProjected: true,
+    }));
+  };
+
+  // ── Trailing window ──
+  const W = Math.min(12, historicalPeriods.length);
+  const windowKeys = new Set(historicalPeriods.slice(-W).map(periodToKey));
+
+  const revenueAccountIds = new Set(accounts.filter((a) => a.type === 'revenue').map((a) => a.id));
+
+  // Trailing total revenue + per-account trailing sums over the window.
+  let trailingRev = 0;
+  const acctWindowSum = new Map<string, number>();
+  for (const v of values) {
+    if (!windowKeys.has(periodToKey(v.period))) continue;
+    acctWindowSum.set(v.accountId, (acctWindowSum.get(v.accountId) ?? 0) + v.amount);
+    if (revenueAccountIds.has(v.accountId)) trailingRev += v.amount;
+  }
+  const hasRev = trailingRev > 0;
+
+  // ── Pass 1: revenue accounts (these define the driver) ──
+  for (const account of accounts) {
+    if (account.type !== 'revenue') continue;
+    const vals = valuesByAccount.get(account.id) ?? [];
+
+    let pts: ProjectionPoint[];
+    if (vals.length < 3) {
+      pts = carryForward(account.id);
+      if (pts.length === 0) continue;
+    } else {
+      const history = vals.map((v) => ({ period: v.period, amount: v.amount }));
+      const out = project({ history, horizonMonths, model: 'linear', growthRateOverride });
+      // Linear already floors revenue at 0; strip its band for driver mode.
+      pts = out.projected.map((pt) => ({
+        period: pt.period,
+        value: pt.value,
+        lower80: pt.value,
+        upper80: pt.value,
+        isProjected: true,
+      }));
+    }
+    accountProjections.push({ accountId: account.id, model: 'driver', points: pts });
+    projectedByAccount.set(account.id, pts);
+  }
+
+  // Driver series: Σ projected revenue-account values at each future period.
+  const driverByKey = new Map<string, number>();
+  for (const p of futurePeriods) driverByKey.set(periodToKey(p), 0);
+  for (const id of revenueAccountIds) {
+    const pts = projectedByAccount.get(id);
+    if (!pts) continue;
+    for (const pt of pts) {
+      const key = periodToKey(pt.period);
+      driverByKey.set(key, (driverByKey.get(key) ?? 0) + pt.value);
+    }
+  }
+
+  // ── Pass 2: cost + balance-sheet accounts ──
+  for (const account of accounts) {
+    if (account.type === 'revenue') continue;
+    const vals = valuesByAccount.get(account.id) ?? [];
+
+    // Balance-sheet accounts carry the last actual value forward flat.
+    if (account.type === 'asset' || account.type === 'liability' || account.type === 'equity') {
+      const pts = carryForward(account.id);
+      if (pts.length === 0) continue;
+      accountProjections.push({ accountId: account.id, model: 'driver', points: pts });
+      projectedByAccount.set(account.id, pts);
+      continue;
+    }
+
+    // Cost accounts (cogs | expense). Too little history → carry forward.
+    if (vals.length < 3) {
+      const pts = carryForward(account.id);
+      if (pts.length === 0) continue;
+      accountProjections.push({ accountId: account.id, model: 'driver', points: pts });
+      projectedByAccount.set(account.id, pts);
+      continue;
+    }
+
+    const trailingAcct = acctWindowSum.get(account.id) ?? 0;
+    const trailingAvg = trailingAcct / W;
+    const behavior = account.costBehavior ?? 'unclassified';
+
+    const pts: ProjectionPoint[] = futurePeriods.map((p) => {
+      const driver = driverByKey.get(periodToKey(p)) ?? 0;
+      let value: number;
+      if (!hasRev) {
+        // No trailing revenue → treat every cost as flat (no divide-by-zero).
+        value = trailingAvg;
+      } else if (behavior === 'variable') {
+        value = (trailingAcct / trailingRev) * driver;
+      } else if (behavior === 'fixed') {
+        value = trailingAvg;
+      } else if (behavior === 'mixed') {
+        const f = account.mixedFixedPercent ?? 0.5;
+        value = f * trailingAvg + ((1 - f) * trailingAcct / trailingRev) * driver;
+      } else {
+        // 'unclassified' → flat (safest default).
+        value = trailingAvg;
+      }
+      // Floor computed costs at 0 (as the linear model floors); keep finite.
+      value = Math.max(0, value);
+      if (!Number.isFinite(value)) value = 0;
+      return { period: p, value, lower80: value, upper80: value, isProjected: true };
+    });
+
+    accountProjections.push({ accountId: account.id, model: 'driver', points: pts });
+    projectedByAccount.set(account.id, pts);
+  }
+
+  return { accountProjections, projectedByAccount };
 }

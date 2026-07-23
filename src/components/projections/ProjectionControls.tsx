@@ -29,6 +29,7 @@ const MODELS: { id: ProjectionModel; label: string }[] = [
   { id: 'linear', label: 'Linear' },
   { id: 'seasonal', label: 'Seasonal' },
   { id: 'yoy', label: 'YoY Growth' },
+  { id: 'driver', label: 'Driver-based' },
 ];
 
 const HORIZONS: { id: HorizonKey; label: string }[] = [
@@ -42,6 +43,12 @@ const HORIZONS: { id: HorizonKey; label: string }[] = [
 // account's projected trend, and both revenue and net income are re-derived from
 // those projected accounts (net income is not projected at the rate directly).
 const APPLIED_TO_NOTE = "Applied to each account's projected trend; revenue and net income follow.";
+
+// Driver-based mode answers a different mental model than the trend models: the
+// rate drives revenue, and each cost then follows its classified cost behavior
+// rather than extrapolating its own history.
+const DRIVER_NOTE =
+  'Growth rate drives revenue; variable costs scale with revenue, fixed costs stay flat, mixed costs split by their fixed/variable share.';
 
 // ─────────────────────────────────────────────
 // Pill group helper
@@ -202,7 +209,7 @@ export function ProjectionControls({
         </div>
 
         <span className="text-[10px] leading-tight" style={{ color: 'hsl(var(--muted-foreground))' }}>
-          {APPLIED_TO_NOTE}
+          {model === 'driver' ? DRIVER_NOTE : APPLIED_TO_NOTE}
         </span>
       </div>
     </div>

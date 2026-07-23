@@ -18,7 +18,7 @@ export type ConfidenceLevel = 'high' | 'medium' | 'low';
 
 export type MetricFormat = 'currency' | 'percent' | 'ratio' | 'number' | 'days';
 
-export type ProjectionModel = 'linear' | 'seasonal' | 'yoy';
+export type ProjectionModel = 'linear' | 'seasonal' | 'yoy' | 'driver';
 
 export type AdjustmentType = 'percent' | 'absolute' | 'replace';
 
@@ -291,6 +291,14 @@ export interface ClientWorkspace {
   benchmarkRegion?: string;
   /** Benchmark pack version last applied via "Refresh benchmarks". */
   benchmarkPackVersion?: string;
+  /**
+   * Persisted projection settings for the Projections view. Additive jsonb
+   * columns on the workspace record — no migration needed (legacy workspaces
+   * simply leave them undefined and fall back to the industry-profile default).
+   */
+  projectionModel?: ProjectionModel;
+  /** What-If growth-rate override (0.05 = 5%). null clears the override. */
+  projectionGrowthOverride?: number | null;
   customMetrics: CustomMetricDef[];
   auditLog: AuditEntry[];
   createdAt: string;
