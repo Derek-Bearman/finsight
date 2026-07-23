@@ -9,9 +9,14 @@
  *
  * Percent-format metrics are ENTERED as whole percents (30 = 30%) and STORED
  * as 0-1 fractions — the exact convention TargetsEditor uses — so composed
- * KpiTargets render correctly everywhere. Metric formats resolve through the
- * ratio registry first, then the franchise's industry profile's operational
- * metrics; free-text metric ids have no known format and are stored as typed.
+ * KpiTargets render correctly everywhere. Ratio-registry ids always convert by
+ * their registry format. For every other id the unit is EXPLICIT: manual
+ * custom-id rows carry a Percent/Number picker (defaulting to Percent only
+ * when the franchise profile resolves the id to a percent format) and the CSV
+ * accepts an optional `unit` column (percent|number). When the unit is absent
+ * and the id resolves through the franchise profile, that format converts it;
+ * otherwise the value is stored as typed (Number) — never guessed — and the id
+ * lands in the non-blocking unknown-id warning shown before Save.
  *
  * Every successful mutation invalidates the module-level franchise cache so
  * open workspaces recompose their effective targets.
@@ -29,6 +34,7 @@ import {
 import { invalidateFranchiseCache } from '@/lib/franchise/useEffectiveTargets';
 import { RATIO_DEFS, RATIO_DEF_MAP } from '@/lib/targets';
 import { getProfile } from '@/lib/profiles';
+import { formatMetricValue } from '@/lib/utils/format';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -58,6 +64,27 @@ function metricFormat(metricId: string, profileId: string | null): MetricFormat 
     if (op) return op.format;
   }
   return null;
+}
+
+/** Known display label for a metric id (registry, then profile), else null. */
+function metricLabel(metricId: string, profileId: string | null): string | null {
+  const ratio = RATIO_DEF_MAP[metricId];
+  if (ratio) return ratio.label;
+  if (profileId) {
+    const op = getProfile(profileId).operationalMetrics.find((m) => m.id === metricId);
+    if (op) return op.label;
+  }
+  return null;
+}
+
+/** Non-blocking warning for ids in neither the ratio registry nor the
+ *  franchise profile's operational metric defs (corporate SCOAs legitimately
+ *  carry ids meant for other industry profiles). */
+function unknownIdWarning(ids: string[]): string {
+  return (
+    "These metric ids do not match FinSight's ratio registry or this franchise's profile. " +
+    `They will only display for clients whose industry profile defines them: ${ids.join(', ')}`
+  );
 }
 
 /** As typed ("30" = 30% for percent metrics) → stored value (0.3). */
@@ -91,6 +118,10 @@ function buildTemplateCsv(): string {
     '# FinSight corporate benchmark template',
     '# Columns: metric_id,target,direction,notes (direction: gte = at-or-above passes, lte = at-or-below passes)',
     '# Percent metrics are entered as whole percents (30 = 30%). Ratios and scores use their native unit.',
+    '# Optional column: unit (percent or number) for ids outside the ratio registry below.',
+    '#   unit=percent stores the value as a fraction (30 becomes 0.30); unit=number stores it exactly as typed.',
+    '#   Ratio-registry ids always convert by their registry format, so they never need a unit.',
+    '#   Ids with no unit that are not in the registry or your industry profile are stored as typed (number).',
     '# Lines starting with # and blank lines are skipped. Example values below are FinSight defaults; replace with corporate numbers.',
     '# Financial ratio metric ids:',
     ...RATIO_DEFS.map((d) => `#   ${d.key} = ${d.label}`),
@@ -104,6 +135,8 @@ function buildTemplateCsv(): string {
 interface CsvParseOutcome {
   metrics: FranchiseBenchmarkMetric[];
   errors: string[];
+  /** Ids in neither the ratio registry nor the franchise profile (see b). */
+  unknownIds: string[];
 }
 
 function parseBenchmarkCsv(text: string, profileId: string | null): CsvParseOutcome {
@@ -121,10 +154,12 @@ function parseBenchmarkCsv(text: string, profileId: string | null): CsvParseOutc
   if (!fields.includes('metric_id') || !fields.includes('target') || !fields.includes('direction')) {
     return {
       metrics: [],
-      errors: ['The header row must include metric_id, target, and direction (notes is optional).'],
+      errors: ['The header row must include metric_id, target, and direction (notes and unit are optional).'],
+      unknownIds: [],
     };
   }
   const byId = new Map<string, FranchiseBenchmarkMetric>();
+  const unknownIds: string[] = [];
   parsed.data.forEach((row, i) => {
     // Data-row index + header row, 1-based. Comment/blank lines are not
     // counted by PapaParse, so this is approximate when they are interleaved.
@@ -132,6 +167,7 @@ function parseBenchmarkCsv(text: string, profileId: string | null): CsvParseOutc
     const metricId = (row.metric_id ?? '').trim();
     const rawTarget = (row.target ?? '').trim();
     const rawDirection = (row.direction ?? '').trim().toLowerCase();
+    const rawUnit = (row.unit ?? '').trim().toLowerCase();
     const notes = (row.notes ?? '').trim();
     if (!metricId && !rawTarget && !rawDirection) return; // effectively blank
     if (!metricId) {
@@ -147,11 +183,27 @@ function parseBenchmarkCsv(text: string, profileId: string | null): CsvParseOutc
       errors.push(`Row ${line} (${metricId}): direction must be gte or lte.`);
       return;
     }
-    if (byId.has(metricId)) {
-      errors.push(`Row ${line}: duplicate metric_id "${metricId}" — the last row wins.`);
+    if (rawUnit !== '' && rawUnit !== 'percent' && rawUnit !== 'number') {
+      errors.push(`Row ${line} (${metricId}): unit must be percent or number.`);
+      return;
     }
-    const format = metricFormat(metricId, profileId);
-    const target = format === 'percent' ? n / 100 : n;
+    if (byId.has(metricId)) {
+      errors.push(`Row ${line}: duplicate metric_id "${metricId}", the last row wins.`);
+    }
+    // Conversion: ratio-registry ids always convert by their registry format.
+    // Other ids convert by the explicit unit column when present, then by the
+    // franchise profile's format, and are otherwise stored as typed (number).
+    const registryFormat = RATIO_DEF_MAP[metricId]?.format ?? null;
+    const resolvedFormat = metricFormat(metricId, profileId);
+    let target: number;
+    if (registryFormat) {
+      target = registryFormat === 'percent' ? n / 100 : n;
+    } else if (rawUnit) {
+      target = rawUnit === 'percent' ? n / 100 : n;
+    } else {
+      target = resolvedFormat === 'percent' ? n / 100 : n;
+    }
+    if (resolvedFormat === null && !unknownIds.includes(metricId)) unknownIds.push(metricId);
     byId.set(metricId, {
       metricId,
       target,
@@ -159,7 +211,7 @@ function parseBenchmarkCsv(text: string, profileId: string | null): CsvParseOutc
       ...(notes ? { notes } : {}),
     });
   });
-  return { metrics: [...byId.values()], errors };
+  return { metrics: [...byId.values()], errors, unknownIds };
 }
 
 // ─────────────────────────────────────────────
@@ -174,10 +226,21 @@ interface EditorRow {
   raw: string;
   direction: 'gte' | 'lte';
   notes: string;
+  /** Explicit unit for custom non-registry ids; null = follow the default
+   *  (Percent when the franchise profile resolves the id to percent, else
+   *  Number). Ignored for dropdown options and registry ids. */
+  unit: 'percent' | 'number' | null;
 }
 
 function emptyRow(): EditorRow {
-  return { metricId: RATIO_DEFS[0]!.key, customId: '', raw: '', direction: 'gte', notes: '' };
+  return { metricId: RATIO_DEFS[0]!.key, customId: '', raw: '', direction: 'gte', notes: '', unit: null };
+}
+
+/** Effective unit for a custom non-registry id: the explicit toggle, else
+ *  Percent only when the franchise profile resolves the id to percent. */
+function customUnit(row: EditorRow, profileId: string | null): 'percent' | 'number' {
+  if (row.unit) return row.unit;
+  return metricFormat(row.customId.trim(), profileId) === 'percent' ? 'percent' : 'number';
 }
 
 interface MetricOption {
@@ -210,7 +273,10 @@ export function BenchmarkSetPanel({
   const [csvFileName, setCsvFileName] = useState<string | null>(null);
   const [csvMetrics, setCsvMetrics] = useState<FranchiseBenchmarkMetric[]>([]);
   const [csvErrors, setCsvErrors] = useState<string[]>([]);
+  const [csvUnknownIds, setCsvUnknownIds] = useState<string[]>([]);
   const [rows, setRows] = useState<EditorRow[]>([emptyRow()]);
+  // Which saved set is expanded to show its metric rows (read-only inspection).
+  const [expandedSetId, setExpandedSetId] = useState<string | null>(null);
 
   const [deleteTarget, setDeleteTarget] = useState<FranchiseBenchmarkSet | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -251,6 +317,7 @@ export function BenchmarkSetPanel({
     setCsvFileName(null);
     setCsvMetrics([]);
     setCsvErrors([]);
+    setCsvUnknownIds([]);
     setRows([emptyRow()]);
   }
 
@@ -281,9 +348,11 @@ export function BenchmarkSetPanel({
       const outcome = parseBenchmarkCsv(text, franchise.industryProfileId);
       setCsvMetrics(outcome.metrics);
       setCsvErrors(outcome.errors);
+      setCsvUnknownIds(outcome.unknownIds);
     } catch {
       setCsvMetrics([]);
       setCsvErrors(['Could not read that file. Save it as a plain .csv and try again.']);
+      setCsvUnknownIds([]);
     }
     // Allow re-selecting the same file after a fix.
     e.target.value = '';
@@ -298,8 +367,11 @@ export function BenchmarkSetPanel({
       const id = isCustom ? row.customId.trim() : row.metricId;
       if (!id && row.raw.trim() === '' && row.notes.trim() === '') continue; // untouched row
       if (!id) return { error: `Row ${i + 1}: enter a metric id.` };
-      const format = isCustom ? metricFormat(id, franchise.industryProfileId) : optionMap.get(id)?.format ?? null;
-      const value = fromRaw(row.raw, format);
+      // Known metrics convert by their resolved format; custom ids convert by
+      // the explicit Percent/Number toggle, never guessed from the profile.
+      const value = isCustom
+        ? fromRaw(row.raw, customUnit(row, franchise.industryProfileId) === 'percent' ? 'percent' : 'number')
+        : fromRaw(row.raw, optionMap.get(id)?.format ?? null);
       if (value === null || !Number.isFinite(value)) {
         return { error: `Row ${i + 1} (${id}): enter a numeric target.` };
       }
@@ -314,6 +386,21 @@ export function BenchmarkSetPanel({
     }
     return { metrics: [...byId.values()] };
   }
+
+  /** Ids in neither the ratio registry nor the franchise profile — displayed
+   *  as a non-blocking warning before Save (both CSV and manual paths). */
+  const manualUnknownIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const row of rows) {
+      if (row.metricId !== CUSTOM_METRIC) continue;
+      const id = row.customId.trim();
+      if (id && metricFormat(id, franchise.industryProfileId) === null && !ids.includes(id)) {
+        ids.push(id);
+      }
+    }
+    return ids;
+  }, [rows, franchise.industryProfileId]);
+  const activeUnknownIds = mode === 'csv' ? csvUnknownIds : manualUnknownIds;
 
   function handleSave() {
     setError(null);
@@ -394,46 +481,88 @@ export function BenchmarkSetPanel({
         </p>
       ) : (
         <div className="space-y-2">
-          {sets.map((s) => (
-            <div
-              key={s.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm"
-              data-testid="benchmark-set-row"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{s.label}</span>
-                {s.active && <Badge data-testid="benchmark-set-active-badge">Active</Badge>}
-                <span className="text-xs text-muted-foreground">
-                  {s.metrics.length} metric{s.metrics.length === 1 ? '' : 's'}
-                  {s.effectiveDate ? ` · Effective ${s.effectiveDate}` : ''}
-                  {' · Uploaded '}
-                  {new Date(s.uploadedAt).toLocaleDateString()}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                {!s.active && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleActivate(s)}
-                    disabled={pending}
-                    data-testid="benchmark-set-activate"
+          {sets.map((s) => {
+            const expanded = expandedSetId === s.id;
+            return (
+              <div
+                key={s.id}
+                className="rounded-md border border-border bg-background text-sm"
+                data-testid="benchmark-set-row"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedSetId(expanded ? null : s.id)}
+                    className="flex flex-wrap items-center gap-2 text-left"
+                    aria-expanded={expanded}
+                    data-testid="benchmark-set-toggle"
                   >
-                    Activate
-                  </Button>
+                    <span className="text-xs text-muted-foreground">{expanded ? '▾' : '▸'}</span>
+                    <span className="font-medium">{s.label}</span>
+                    {s.active && <Badge data-testid="benchmark-set-active-badge">Active</Badge>}
+                    <span className="text-xs text-muted-foreground">
+                      {s.metrics.length} metric{s.metrics.length === 1 ? '' : 's'}
+                      {s.effectiveDate ? ` · Effective ${s.effectiveDate}` : ''}
+                      {' · Uploaded '}
+                      {new Date(s.uploadedAt).toLocaleDateString()}
+                    </span>
+                  </button>
+                  <div className="flex items-center gap-2">
+                    {!s.active && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleActivate(s)}
+                        disabled={pending}
+                        data-testid="benchmark-set-activate"
+                      >
+                        Activate
+                      </Button>
+                    )}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => setDeleteTarget(s)}
+                      disabled={pending}
+                      data-testid="benchmark-set-delete"
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+                {expanded && (
+                  <div className="border-t border-border px-3 py-2" data-testid="benchmark-set-metrics">
+                    <table className="w-full text-xs">
+                      <thead className="text-muted-foreground">
+                        <tr className="text-left">
+                          <th className="py-1 pr-3 font-medium">Metric</th>
+                          <th className="py-1 pr-3 font-medium">Rule</th>
+                          <th className="py-1 pr-3 font-medium">Target</th>
+                          <th className="py-1 font-medium">Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {s.metrics.map((m) => {
+                          const fmt = metricFormat(m.metricId, franchise.industryProfileId);
+                          const label = metricLabel(m.metricId, franchise.industryProfileId);
+                          return (
+                            <tr key={m.metricId} className="border-t border-border/50">
+                              <td className="py-1 pr-3">
+                                {label ?? <code className="text-[11px]">{m.metricId}</code>}
+                              </td>
+                              <td className="py-1 pr-3">{m.direction === 'gte' ? '≥' : '≤'}</td>
+                              <td className="py-1 pr-3">{formatMetricValue(m.target, fmt ?? 'number')}</td>
+                              <td className="py-1 text-muted-foreground">{m.notes ?? ''}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setDeleteTarget(s)}
-                  disabled={pending}
-                  data-testid="benchmark-set-delete"
-                >
-                  Delete
-                </Button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -541,6 +670,13 @@ export function BenchmarkSetPanel({
                 const format = isCustom
                   ? metricFormat(row.customId.trim(), franchise.industryProfileId)
                   : optionMap.get(row.metricId)?.format ?? null;
+                // Custom ids show the suffix for their chosen unit; known ids
+                // use their resolved format's suffix.
+                const suffix = isCustom
+                  ? customUnit(row, franchise.industryProfileId) === 'percent'
+                    ? '%'
+                    : ''
+                  : unitSuffix(format);
                 return (
                   <div key={i} className="flex flex-wrap items-center gap-2" data-testid="benchmark-manual-row">
                     <select
@@ -575,6 +711,18 @@ export function BenchmarkSetPanel({
                         data-testid="benchmark-manual-custom-id"
                       />
                     )}
+                    {isCustom && (
+                      <select
+                        value={customUnit(row, franchise.industryProfileId)}
+                        onChange={(e) => patchRow(i, { unit: e.target.value as 'percent' | 'number' })}
+                        className="rounded-md border border-border bg-background px-1.5 py-1.5 text-sm"
+                        aria-label={`Row ${i + 1} unit`}
+                        data-testid="benchmark-manual-unit"
+                      >
+                        <option value="percent">Percent</option>
+                        <option value="number">Number</option>
+                      </select>
+                    )}
                     <select
                       value={row.direction}
                       onChange={(e) => patchRow(i, { direction: e.target.value as 'gte' | 'lte' })}
@@ -596,7 +744,7 @@ export function BenchmarkSetPanel({
                         aria-label={`Row ${i + 1} target value`}
                         data-testid="benchmark-manual-target"
                       />
-                      <span className="text-xs text-muted-foreground">{unitSuffix(format)}</span>
+                      <span className="text-xs text-muted-foreground">{suffix}</span>
                     </div>
                     <input
                       type="text"
@@ -636,6 +784,15 @@ export function BenchmarkSetPanel({
             </div>
           )}
 
+          {activeUnknownIds.length > 0 && (
+            <p
+              className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-400"
+              data-testid="benchmark-unknown-ids"
+            >
+              {unknownIdWarning(activeUnknownIds)}
+            </p>
+          )}
+
           <div className="flex items-center gap-2">
             <Button onClick={handleSave} disabled={pending} data-testid="benchmark-set-save">
               {pending ? 'Saving…' : 'Save benchmark set'}
@@ -663,7 +820,7 @@ export function BenchmarkSetPanel({
               {deleteTarget?.metrics.length ?? 0} metric{(deleteTarget?.metrics.length ?? 0) === 1 ? '' : 's'})
               from {franchise.name}.
               {deleteTarget?.active
-                ? ' It is the ACTIVE set — linked clients will fall back to industry packs or FinSight defaults until another set is activated.'
+                ? ' It is the ACTIVE set, so linked clients will fall back to industry packs or FinSight defaults until another set is activated.'
                 : ''}
             </DialogDescription>
           </DialogHeader>

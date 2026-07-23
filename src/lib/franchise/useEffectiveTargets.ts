@@ -47,9 +47,16 @@ async function loadFranchises(): Promise<Franchise[]> {
   if (!franchiseFetch) {
     franchiseFetch = getFranchiseState()
       .then((res) => {
-        franchiseCache = res.ok ? res.franchises : [];
-        subscribers.forEach((fn) => fn());
-        return franchiseCache;
+        if (res.ok) {
+          franchiseCache = res.franchises;
+          subscribers.forEach((fn) => fn());
+          return franchiseCache;
+        }
+        // Do NOT cache a failed response — a session-long empty cache would
+        // silently disable corporate benchmarks everywhere (F5 finding).
+        // Clearing the in-flight slot lets the next mount retry.
+        franchiseFetch = null;
+        return [];
       })
       .catch(() => {
         franchiseFetch = null; // allow retry on next mount

@@ -29,8 +29,12 @@ import {
   deleteFranchiseAction,
 } from '@/lib/data/franchise-actions';
 import type { Franchise } from '@/lib/data/franchises';
+import { invalidateFranchiseCache } from '@/lib/franchise/useEffectiveTargets';
 import { BenchmarkSetPanel } from '@/components/franchise/BenchmarkSetPanel';
 import { ScoaPanel } from '@/components/franchise/ScoaPanel';
+
+/** Shown when a server action rejects at the transport layer (offline, timeout). */
+const CONNECTION_ERROR = 'Connection problem. Check your network and try again.';
 
 type FranchiseWithLinks = Franchise & { linkedCount: number };
 
@@ -78,36 +82,55 @@ export function FranchiseManager() {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  // Bumped by the Retry button to re-run the mount fetch after a failure.
+  const [loadAttempt, setLoadAttempt] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const res = await getFranchiseState();
-      if (cancelled) return;
-      if (res.ok) {
-        setCanManage(res.canManage);
-        setIsDemo(res.isDemo);
-        setFranchises([...res.franchises].sort(byName));
-      } else {
-        setLoadError(res.error);
+      try {
+        const res = await getFranchiseState();
+        if (cancelled) return;
+        if (res.ok) {
+          setCanManage(res.canManage);
+          setIsDemo(res.isDemo);
+          setFranchises([...res.franchises].sort(byName));
+        } else {
+          setLoadError(res.error);
+        }
+      } catch {
+        if (cancelled) return;
+        setLoadError(CONNECTION_ERROR);
       }
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadAttempt]);
+
+  function handleRetryLoad() {
+    setLoadError(null);
+    setLoading(true);
+    setLoadAttempt((n) => n + 1);
+  }
 
   function handleCreate() {
     setError(null);
     startTransition(async () => {
-      const res = await createFranchiseAction({
-        name,
-        industryProfileId: profileId || null,
-      });
-      if (!res.ok) return setError(res.error);
-      setFranchises((prev) => [...prev, res.data].sort(byName));
-      setName('');
-      setProfileId('');
+      try {
+        const res = await createFranchiseAction({
+          name,
+          industryProfileId: profileId || null,
+        });
+        if (!res.ok) return setError(res.error);
+        setFranchises((prev) => [...prev, res.data].sort(byName));
+        setName('');
+        setProfileId('');
+        invalidateFranchiseCache();
+      } catch {
+        setError(CONNECTION_ERROR);
+      }
     });
   }
 
@@ -120,10 +143,15 @@ export function FranchiseManager() {
   function handleRename(f: FranchiseWithLinks) {
     setError(null);
     startTransition(async () => {
-      const res = await updateFranchiseAction({ id: f.id, name: renameValue });
-      if (!res.ok) return setError(res.error);
-      setFranchises((prev) => prev.map((x) => (x.id === f.id ? res.data : x)).sort(byName));
-      setRenamingId(null);
+      try {
+        const res = await updateFranchiseAction({ id: f.id, name: renameValue });
+        if (!res.ok) return setError(res.error);
+        setFranchises((prev) => prev.map((x) => (x.id === f.id ? res.data : x)).sort(byName));
+        setRenamingId(null);
+        invalidateFranchiseCache();
+      } catch {
+        setError(CONNECTION_ERROR);
+      }
     });
   }
 
@@ -136,10 +164,16 @@ export function FranchiseManager() {
     if (!target) return;
     setError(null);
     startTransition(async () => {
-      const res = await deleteFranchiseAction({ id: target.id });
-      setDeleteTarget(null);
-      if (!res.ok) return setError(res.error);
-      setFranchises((prev) => prev.filter((x) => x.id !== target.id));
+      try {
+        const res = await deleteFranchiseAction({ id: target.id });
+        setDeleteTarget(null);
+        if (!res.ok) return setError(res.error);
+        setFranchises((prev) => prev.filter((x) => x.id !== target.id));
+        invalidateFranchiseCache();
+      } catch {
+        setDeleteTarget(null);
+        setError(CONNECTION_ERROR);
+      }
     });
   }
 
@@ -153,9 +187,19 @@ export function FranchiseManager() {
 
   if (loadError) {
     return (
-      <p className="text-sm text-destructive" role="alert">
-        {loadError}
-      </p>
+      <Card data-testid="franchise-load-error">
+        <CardHeader>
+          <CardTitle>Could not load franchises</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-destructive" role="alert">
+            {loadError}
+          </p>
+          <Button variant="outline" onClick={handleRetryLoad} data-testid="franchise-load-retry">
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 

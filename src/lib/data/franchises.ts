@@ -101,9 +101,17 @@ export async function insertFranchise(params: {
   return rowToFranchise(data);
 }
 
+/**
+ * Optimistic concurrency: pass `expectedUpdatedAt` (the updated_at from the
+ * read that produced the patch) to make the UPDATE match only if the row is
+ * unchanged. updated_at is trigger-maintained (set_updated_at), so every
+ * successful write bumps it — a null return with the row still readable means
+ * someone else wrote in between (conflict), not an RLS denial.
+ */
 export async function updateFranchiseRow(
   id: string,
-  patch: { name?: string; industryProfileId?: string | null; config?: FranchiseConfig }
+  patch: { name?: string; industryProfileId?: string | null; config?: FranchiseConfig },
+  expectedUpdatedAt?: string
 ): Promise<Franchise | null> {
   const supabase = await createSupabaseServerClient();
   const update: {
@@ -114,19 +122,17 @@ export async function updateFranchiseRow(
   if (patch.name !== undefined) update.name = patch.name.trim();
   if (patch.industryProfileId !== undefined) update.industry_profile_id = patch.industryProfileId;
   if (patch.config !== undefined) update.config = patch.config as unknown as Json;
-  const { data, error } = await supabase
-    .from('franchises')
-    .update(update)
-    .eq('id', id)
-    .select('*')
-    .maybeSingle();
+  let query = supabase.from('franchises').update(update).eq('id', id);
+  if (expectedUpdatedAt !== undefined) query = query.eq('updated_at', expectedUpdatedAt);
+  const { data, error } = await query.select('*').maybeSingle();
   if (error) {
     if (error.code === '23505') {
       throw new Error('A franchise with that name already exists in your firm.');
     }
     throw new Error(`Failed to update franchise: ${error.message}`);
   }
-  // null = RLS filtered it out (not this firm, or caller lacks owner/admin).
+  // null = RLS filtered it out (not this firm, or caller lacks owner/admin),
+  // or the expectedUpdatedAt guard missed (concurrent write).
   return data ? rowToFranchise(data) : null;
 }
 

@@ -257,6 +257,9 @@ export function buildExecutiveSummary(
     let met = 0;
     let worst: { label: string; valueText: string; target: string } | null = null;
     for (const [key, target] of Object.entries(targets.ratios ?? {})) {
+      // Industry pack values are reference-only — never counted or narrated
+      // as the client's own goals. Corporate + custom only.
+      if (target.source === 'industry') continue;
       const def = RATIO_DEF_MAP[key];
       const value = ratioValues[key as RatioKey];
       if (!def || value === null || value === undefined) continue;
@@ -288,6 +291,7 @@ export function buildExecutiveSummary(
         ws.operationalInputs
       );
       for (const [metricId, target] of Object.entries(metricTargets)) {
+        if (target.source === 'industry') continue;
         const result = metricResults.find((r) => r.metricId === metricId);
         if (!result || result.value === null) continue;
         total++;
@@ -305,7 +309,7 @@ export function buildExecutiveSummary(
     if (total > 0) {
       let text = `${met} of ${total} client target${total === 1 ? ' is' : 's are'} met this month`;
       if (worst) {
-        text += ` — ${worst.label} is ${worst.valueText} against a target of ${worst.target}`;
+        text += `. ${worst.label} is ${worst.valueText} against a target of ${worst.target}`;
       }
       lines.push({ text: text + '.', tone: met === total ? 'positive' : 'watch' });
     }

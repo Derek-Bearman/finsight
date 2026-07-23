@@ -24,6 +24,7 @@ import {
   type Franchise,
   type FranchiseBenchmarkSet,
   type FranchiseConfig,
+  type FranchiseScoaAccount,
 } from '@/lib/data/franchises';
 import { getProfile } from '@/lib/profiles';
 
@@ -197,6 +198,38 @@ async function withLinkedCount(franchise: Franchise): Promise<FranchiseWithLinks
   return { ...franchise, linkedCount: counts[franchise.id] ?? 0 };
 }
 
+const CONFLICT_ERROR = 'Someone else changed this franchise at the same time. Reload and try again.';
+
+/**
+ * Read-modify-write on franchises.config with optimistic concurrency on
+ * updated_at (trigger-maintained, so every successful write bumps it).
+ * Overlapping admin saves (e.g. a SCOA upload racing a benchmark-set save)
+ * would otherwise silently clobber each other via last-write-wins.
+ *
+ * On a conflict (UPDATE matched 0 rows but the row is still readable) the
+ * whole cycle re-reads and retries ONCE — the config mutations are
+ * commutative on different keys, so a single retry on fresh data resolves
+ * the common race. A second conflict surfaces CONFLICT_ERROR to the UI.
+ */
+async function updateFranchiseConfig(
+  franchiseId: string,
+  build: (franchise: Franchise) => { config: FranchiseConfig } | { error: string }
+): Promise<FranchiseActionResult> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const franchise = await getFranchise(franchiseId);
+    if (!franchise) return { ok: false, error: 'Franchise not found (or you lack permission).' };
+    const built = build(franchise);
+    if ('error' in built) return { ok: false, error: built.error };
+    const updated = await updateFranchiseRow(franchiseId, { config: built.config }, franchise.updatedAt);
+    if (updated) return { ok: true, data: await withLinkedCount(updated) };
+    // 0 rows: either the row vanished / RLS filtered it, or updated_at moved.
+    const recheck = await getFranchise(franchiseId);
+    if (!recheck) return { ok: false, error: 'Franchise not found (or you lack permission).' };
+    // Still readable = concurrent write; loop retries once on fresh data.
+  }
+  return { ok: false, error: CONFLICT_ERROR };
+}
+
 /**
  * Insert or replace a corporate benchmark set (matched by set.id). When the
  * incoming set is active, every other set on the franchise is deactivated —
@@ -211,20 +244,17 @@ export async function saveBenchmarkSetAction(params: {
   const invalid = validateBenchmarkSet(params.set);
   if (invalid) return { ok: false, error: invalid };
   try {
-    const franchise = await getFranchise(params.franchiseId);
-    if (!franchise) return { ok: false, error: 'Franchise not found (or you lack permission).' };
     const clean = sanitizeBenchmarkSet(params.set, guard.ctx.email);
-    const existing = franchise.config.benchmarkSets ?? [];
-    let sets = existing.some((s) => s.id === clean.id)
-      ? existing.map((s) => (s.id === clean.id ? clean : s))
-      : [...existing, clean];
-    if (clean.active) {
-      sets = sets.map((s) => (s.id === clean.id ? s : { ...s, active: false }));
-    }
-    const config: FranchiseConfig = { ...franchise.config, benchmarkSets: sets };
-    const updated = await updateFranchiseRow(params.franchiseId, { config });
-    if (!updated) return { ok: false, error: 'Franchise not found (or you lack permission).' };
-    return { ok: true, data: await withLinkedCount(updated) };
+    return await updateFranchiseConfig(params.franchiseId, (franchise) => {
+      const existing = franchise.config.benchmarkSets ?? [];
+      let sets = existing.some((s) => s.id === clean.id)
+        ? existing.map((s) => (s.id === clean.id ? clean : s))
+        : [...existing, clean];
+      if (clean.active) {
+        sets = sets.map((s) => (s.id === clean.id ? s : { ...s, active: false }));
+      }
+      return { config: { ...franchise.config, benchmarkSets: sets } };
+    });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to save benchmark set.' };
   }
@@ -238,19 +268,18 @@ export async function activateBenchmarkSetAction(params: {
   const guard = await requireManageContext();
   if (!guard.ok) return { ok: false, error: guard.error };
   try {
-    const franchise = await getFranchise(params.franchiseId);
-    if (!franchise) return { ok: false, error: 'Franchise not found (or you lack permission).' };
-    const sets = franchise.config.benchmarkSets ?? [];
-    if (!sets.some((s) => s.id === params.setId)) {
-      return { ok: false, error: 'Benchmark set not found.' };
-    }
-    const config: FranchiseConfig = {
-      ...franchise.config,
-      benchmarkSets: sets.map((s) => ({ ...s, active: s.id === params.setId })),
-    };
-    const updated = await updateFranchiseRow(params.franchiseId, { config });
-    if (!updated) return { ok: false, error: 'Franchise not found (or you lack permission).' };
-    return { ok: true, data: await withLinkedCount(updated) };
+    return await updateFranchiseConfig(params.franchiseId, (franchise) => {
+      const sets = franchise.config.benchmarkSets ?? [];
+      if (!sets.some((s) => s.id === params.setId)) {
+        return { error: 'Benchmark set not found.' };
+      }
+      return {
+        config: {
+          ...franchise.config,
+          benchmarkSets: sets.map((s) => ({ ...s, active: s.id === params.setId })),
+        },
+      };
+    });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to activate benchmark set.' };
   }
@@ -265,19 +294,18 @@ export async function deleteBenchmarkSetAction(params: {
   const guard = await requireManageContext();
   if (!guard.ok) return { ok: false, error: guard.error };
   try {
-    const franchise = await getFranchise(params.franchiseId);
-    if (!franchise) return { ok: false, error: 'Franchise not found (or you lack permission).' };
-    const sets = franchise.config.benchmarkSets ?? [];
-    if (!sets.some((s) => s.id === params.setId)) {
-      return { ok: false, error: 'Benchmark set not found.' };
-    }
-    const config: FranchiseConfig = {
-      ...franchise.config,
-      benchmarkSets: sets.filter((s) => s.id !== params.setId),
-    };
-    const updated = await updateFranchiseRow(params.franchiseId, { config });
-    if (!updated) return { ok: false, error: 'Franchise not found (or you lack permission).' };
-    return { ok: true, data: await withLinkedCount(updated) };
+    return await updateFranchiseConfig(params.franchiseId, (franchise) => {
+      const sets = franchise.config.benchmarkSets ?? [];
+      if (!sets.some((s) => s.id === params.setId)) {
+        return { error: 'Benchmark set not found.' };
+      }
+      return {
+        config: {
+          ...franchise.config,
+          benchmarkSets: sets.filter((s) => s.id !== params.setId),
+        },
+      };
+    });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to delete benchmark set.' };
   }
@@ -322,7 +350,7 @@ export async function saveScoaAction(params: {
     return { ok: false, error: `A SCOA is limited to ${SCOA_ACCOUNTS_MAX} accounts.` };
   }
   const seen = new Set<string>();
-  const clean = [];
+  const clean: FranchiseScoaAccount[] = [];
   for (const r of rows) {
     const number = typeof r.number === 'string' ? r.number.trim() : '';
     const name = typeof r.name === 'string' ? r.name.trim() : '';
@@ -338,19 +366,16 @@ export async function saveScoaAction(params: {
     });
   }
   try {
-    const franchise = await getFranchise(params.franchiseId);
-    if (!franchise) return { ok: false, error: 'Franchise not found.' };
-    const config: FranchiseConfig = {
-      ...franchise.config,
-      scoa: {
-        uploadedAt: new Date().toISOString(),
-        ...(guard.ctx.email ? { uploadedBy: guard.ctx.email } : {}),
-        accounts: clean,
+    return await updateFranchiseConfig(params.franchiseId, (franchise) => ({
+      config: {
+        ...franchise.config,
+        scoa: {
+          uploadedAt: new Date().toISOString(),
+          ...(guard.ctx.email ? { uploadedBy: guard.ctx.email } : {}),
+          accounts: clean,
+        },
       },
-    };
-    const updated = await updateFranchiseRow(params.franchiseId, { config });
-    if (!updated) return { ok: false, error: 'Franchise not found (or you lack permission).' };
-    return { ok: true, data: await withLinkedCount(updated) };
+    }));
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to save the SCOA.' };
   }
@@ -360,13 +385,11 @@ export async function clearScoaAction(params: { franchiseId: string }): Promise<
   const guard = await requireManageContext();
   if (!guard.ok) return { ok: false, error: guard.error };
   try {
-    const franchise = await getFranchise(params.franchiseId);
-    if (!franchise) return { ok: false, error: 'Franchise not found.' };
-    const config: FranchiseConfig = { ...franchise.config };
-    delete config.scoa;
-    const updated = await updateFranchiseRow(params.franchiseId, { config });
-    if (!updated) return { ok: false, error: 'Franchise not found (or you lack permission).' };
-    return { ok: true, data: await withLinkedCount(updated) };
+    return await updateFranchiseConfig(params.franchiseId, (franchise) => {
+      const config: FranchiseConfig = { ...franchise.config };
+      delete config.scoa;
+      return { config };
+    });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to remove the SCOA.' };
   }

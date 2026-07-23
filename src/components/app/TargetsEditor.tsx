@@ -27,8 +27,11 @@ import {
   INDUSTRY_BENCHMARK_DISCLAIMER,
   PACK_VERSION,
   REGION_LABELS,
+  resolvePack,
   type BenchmarkRegion,
 } from '@/lib/benchmarks/packs';
+import { computePnL } from '@/lib/calculations/pnl';
+import { getTrailingPeriods } from '@/lib/calculations/period-aggregation';
 import {
   Dialog,
   DialogContent,
@@ -75,6 +78,29 @@ function unitSuffix(format: MetricFormat): string {
   return '';
 }
 
+/** Trailing-12 revenue for the pack size band (mirrors useEffectiveTargets). */
+function trailing12Revenue(ws: ClientWorkspace): number | null {
+  if (!ws.values.length) return null;
+  const periods = getTrailingPeriods(ws.values, 12);
+  if (!periods.length) return null;
+  return computePnL(ws.accounts, ws.values, periods).revenue;
+}
+
+/** Dialog-local draft of the workspace benchmark fields (staged until Save). */
+interface BenchmarkDraft {
+  enabled: boolean;
+  region: BenchmarkRegion;
+  packVersion: string | undefined;
+}
+
+function benchmarkDraftFrom(ws: ClientWorkspace): BenchmarkDraft {
+  return {
+    enabled: ws.industryBenchmarksEnabled ?? false,
+    region: (ws.benchmarkRegion as BenchmarkRegion | undefined) ?? 'national',
+    packVersion: ws.benchmarkPackVersion,
+  };
+}
+
 export function TargetsEditor({
   workspace,
   open,
@@ -89,15 +115,18 @@ export function TargetsEditor({
   const profile = getProfile(workspace.industryProfileId);
 
   // Benchmarks section (FRANCHISE_BENCHMARKS_PLAN.md §F2). The workspace-level
-  // benchmark fields write through the store's updateWorkspace path — the same
-  // mechanism the page's onSave uses for targets — so cloud-sync persists them.
-  // Unlike target rows they apply immediately rather than staging until Save:
-  // the pack caption below derives live from the workspace via
-  // useEffectiveTargets, and "Refresh benchmarks" is an explicit stamp action.
+  // benchmark fields are staged in a dialog-local draft — like the target rows,
+  // they only commit on "Save Targets" (via the store's updateWorkspace path,
+  // so cloud-sync persists them) and Cancel discards. The pack caption below
+  // previews the DRAFT via a direct resolvePack call (pure + cheap), and
+  // "Refresh benchmarks" stamps the draft's pack version.
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
-  const { corporateSetLabel, franchise, pack } = useEffectiveTargets(workspace);
-  const benchmarksEnabled = workspace.industryBenchmarksEnabled ?? false;
-  const packCurrent = workspace.benchmarkPackVersion === PACK_VERSION;
+  const { corporateSetLabel, franchise } = useEffectiveTargets(workspace);
+  const [benchDraft, setBenchDraft] = useState<BenchmarkDraft>(() =>
+    benchmarkDraftFrom(workspace)
+  );
+  const benchmarksEnabled = benchDraft.enabled;
+  const packCurrent = benchDraft.packVersion === PACK_VERSION;
   // Prefer the live franchise name (renames land server-side); fall back to
   // the name cached on the workspace at link time.
   const franchiseName = franchise?.name ?? workspace.franchiseName ?? 'franchise';
@@ -148,6 +177,32 @@ export function TargetsEditor({
     setState(next);
   }, [open, rows, workspace.targets]);
 
+  // Reseed the benchmark draft from the SAVED workspace fields on every open,
+  // for the same reason as the rows above.
+  useEffect(() => {
+    if (!open) return;
+    setBenchDraft(benchmarkDraftFrom(workspace));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the
+    // exact saved fields the draft is built from, like the row effect above
+  }, [
+    open,
+    workspace.industryBenchmarksEnabled,
+    workspace.benchmarkRegion,
+    workspace.benchmarkPackVersion,
+  ]);
+
+  // Pack preview for the caption — resolved from the DRAFT toggle/region so
+  // the scope label tracks unsaved edits.
+  const previewPack = useMemo(() => {
+    if (!benchDraft.enabled) return null;
+    return resolvePack({
+      profileId: workspace.industryProfileId,
+      profileLabel: profile.name,
+      trailing12Revenue: trailing12Revenue(workspace),
+      region: benchDraft.region,
+    });
+  }, [benchDraft.enabled, benchDraft.region, workspace, profile]);
+
   const patch = (row: RowDef, p: Partial<RowState>) =>
     setState((s) => ({ ...s, [stateKey(row)]: { ...s[stateKey(row)]!, ...p } }));
 
@@ -164,6 +219,14 @@ export function TargetsEditor({
         source: rs.source,
       };
     }
+    // Commit the staged benchmark fields in the same Save action as the
+    // targets (the page's onSave patches { targets } separately, so the two
+    // writes never clobber each other).
+    updateWorkspace(workspace.id, {
+      industryBenchmarksEnabled: benchDraft.enabled,
+      benchmarkRegion: benchDraft.region,
+      benchmarkPackVersion: benchDraft.packVersion,
+    });
     onSave(targets);
     onOpenChange(false);
   };
@@ -322,9 +385,7 @@ export function TargetsEditor({
               type="checkbox"
               data-testid="industry-benchmarks-toggle"
               checked={benchmarksEnabled}
-              onChange={(e) =>
-                updateWorkspace(workspace.id, { industryBenchmarksEnabled: e.target.checked })
-              }
+              onChange={(e) => setBenchDraft((d) => ({ ...d, enabled: e.target.checked }))}
             />
             <span className="text-sm" style={{ color: 'hsl(var(--foreground))' }}>
               Use industry benchmarks when no corporate or custom value applies
@@ -343,11 +404,9 @@ export function TargetsEditor({
               <select
                 id="benchmark-region"
                 data-testid="benchmark-region"
-                value={workspace.benchmarkRegion ?? 'national'}
+                value={benchDraft.region}
                 onChange={(e) =>
-                  updateWorkspace(workspace.id, {
-                    benchmarkRegion: e.target.value as BenchmarkRegion,
-                  })
+                  setBenchDraft((d) => ({ ...d, region: e.target.value as BenchmarkRegion }))
                 }
                 className="rounded-md border px-1.5 py-1 text-sm cursor-pointer"
                 style={{
@@ -365,9 +424,9 @@ export function TargetsEditor({
                   )
                 )}
               </select>
-              {pack && (
+              {previewPack && (
                 <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                  Pack {pack.packVersion} · {pack.scopeLabel}
+                  Pack {previewPack.packVersion} · {previewPack.scopeLabel}
                 </span>
               )}
               <Button
@@ -375,7 +434,7 @@ export function TargetsEditor({
                 size="sm"
                 data-testid="refresh-benchmarks"
                 disabled={packCurrent}
-                onClick={() => updateWorkspace(workspace.id, { benchmarkPackVersion: PACK_VERSION })}
+                onClick={() => setBenchDraft((d) => ({ ...d, packVersion: PACK_VERSION }))}
               >
                 {packCurrent ? `Up to date (pack ${PACK_VERSION})` : 'Refresh benchmarks'}
               </Button>

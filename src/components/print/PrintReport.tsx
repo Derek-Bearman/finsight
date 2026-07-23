@@ -16,7 +16,7 @@
  * pagination during the print render.
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import type { ClientWorkspace, Period, WorkspaceTargets } from '@/types';
 import { ALL_PROFILES } from '@/lib/profiles';
 import { ProfileIcon } from '@/components/ui/profile-icon';
@@ -43,6 +43,12 @@ import { INDUSTRY_BENCHMARK_DISCLAIMER } from '@/lib/benchmarks/packs';
 
 interface PrintReportProps {
   workspace: ClientWorkspace;
+  /**
+   * Fired once the franchise benchmark data behind useEffectiveTargets has
+   * loaded (immediately for workspaces where none applies). The print page
+   * uses it to hold auto-print until the corporate tier is in the render.
+   */
+  onBenchmarksReady?: () => void;
 }
 
 const MONTH_NAMES = [
@@ -68,7 +74,7 @@ function CoverSection({ workspace, profileName }: { workspace: ClientWorkspace; 
     <section className="avoid-break" style={{ minHeight: '8in', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div style={{ borderTop: '4px solid hsl(var(--primary))', paddingTop: '1.5rem' }}>
         <p style={{ fontSize: 12, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'hsl(var(--muted-foreground))', fontWeight: 600 }}>
-          FinSight — Financial Analysis Report
+          FinSight, Financial Analysis Report
         </p>
         <h1 style={{ fontSize: 40, fontWeight: 800, lineHeight: 1.1, margin: '0.5rem 0 0.25rem', color: 'hsl(var(--foreground))' }}>
           {workspace.name}
@@ -201,7 +207,7 @@ function PnLSection({ workspace }: { workspace: ClientWorkspace }) {
 
   return (
     <section className="page-break-before">
-      <SectionHeader title="Income Statement" subtitle={`FY${latestYear} — monthly`} />
+      <SectionHeader title="Income Statement" subtitle={`FY${latestYear}, monthly`} />
       {chunks.map((chunk, i) => (
         <div className="avoid-break" key={i}>
           <PnLReport
@@ -353,7 +359,7 @@ function RatiosSection({
       </table>
       {!hasBS && (
         <p style={{ fontSize: 11, color: 'hsl(var(--muted-foreground))', marginTop: '0.5rem', fontStyle: 'italic' }}>
-          Balance-sheet ratios unavailable — no balance sheet imported.
+          Balance-sheet ratios unavailable. No balance sheet imported.
         </p>
       )}
     </section>
@@ -393,14 +399,14 @@ function ProjectionSection({ workspace }: { workspace: ClientWorkspace }) {
     <section className="page-break-before avoid-break">
       <SectionHeader
         title="12-Month Revenue Projection"
-        subtitle="Linear model — confidence band widens with horizon"
+        subtitle="Linear model, confidence band widens with horizon"
       />
       <div className="print-chart">
         <ProjectionChart data={data} metric="revenue" height={300} />
       </div>
       <p style={{ fontSize: 11, color: 'hsl(var(--muted-foreground))', marginTop: '0.75rem', lineHeight: 1.5, maxWidth: '40em' }}>
         Solid line = historical actuals. Dashed line = projected. Shaded band = 80%
-        confidence interval. The model assumes the historical trend continues — it
+        confidence interval. The model assumes the historical trend continues. It
         does NOT account for known upcoming changes (new hires, marketing pushes,
         seasonality not yet observed). Re-run with the seasonal or YoY model in the
         live workspace if more recent data calls for it.
@@ -445,7 +451,7 @@ function OperationalSection({
     <section className="page-break-before avoid-break">
       <SectionHeader
         title="Operational Metrics"
-        subtitle={`${profile.name} — ${periodLabel(latest)}`}
+        subtitle={`${profile.name}, ${periodLabel(latest)}`}
       />
       <MetricGrid
         results={metricResults}
@@ -480,7 +486,7 @@ function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }
 // Top-level PrintReport
 // ─────────────────────────────────────────────
 
-export function PrintReport({ workspace }: PrintReportProps) {
+export function PrintReport({ workspace, onBenchmarksReady }: PrintReportProps) {
   const profile = ALL_PROFILES.find((p) => p.id === workspace.industryProfileId);
   const profileName = profile?.name ?? 'Generic SMB';
   const hasData = workspace.accounts.length > 0 && workspace.values.length > 0;
@@ -488,7 +494,13 @@ export function PrintReport({ workspace }: PrintReportProps) {
   // Non-franchise workspaces get plain workspace.targets semantics back.
   // pack is non-null only when the industry toggle is on — it drives the
   // asterisk footnote below.
-  const { targets: effectiveTargets, pack } = useEffectiveTargets(workspace);
+  const { targets: effectiveTargets, pack, loaded } = useEffectiveTargets(workspace);
+
+  // Signal benchmark readiness upward so the print page can gate auto-print
+  // (idempotent — the page latches the first call).
+  useEffect(() => {
+    if (loaded) onBenchmarksReady?.();
+  }, [loaded, onBenchmarksReady]);
 
   return (
     <div

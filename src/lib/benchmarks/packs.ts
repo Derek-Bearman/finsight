@@ -197,7 +197,9 @@ export function resolvePack(params: {
 }): PackResolution {
   const base = BASE[params.profileId] ?? BASE['generic-smb'];
   const sizeBand = sizeBandForRevenue(params.trailing12Revenue);
-  const region: BenchmarkRegion = params.region ?? 'national';
+  // Sanitize: an unknown persisted region string must not NaN the deltas.
+  const region: BenchmarkRegion =
+    params.region && params.region in REGION_MARGIN_DELTA ? params.region : 'national';
 
   const ratios: Partial<Record<RatioKey, KpiTarget>> = {};
   for (const [key, entry] of Object.entries(base) as [RatioKey, PackEntry][]) {

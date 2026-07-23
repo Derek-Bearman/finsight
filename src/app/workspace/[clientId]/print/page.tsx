@@ -12,7 +12,7 @@
  * on screen with a sticky "Generate PDF" button (no-print) to re-trigger.
  */
 
-import React, { use, useEffect, useState } from 'react';
+import React, { use, useCallback, useEffect, useState } from 'react';
 import { useWorkspaceStore } from '@/store/workspace-store';
 import { PrintReport } from '@/components/print/PrintReport';
 
@@ -21,12 +21,18 @@ interface PageProps {
 }
 
 const AUTO_PRINT_DELAY_MS = 1500;
+// Hard ceiling on waiting for franchise benchmarks before auto-print. If the
+// fetch hangs or fails, print anyway — never strand the user in a tab that
+// won't print.
+const BENCHMARKS_READY_TIMEOUT_MS = 8000;
 
 export default function WorkspacePrintPage({ params }: PageProps) {
   const { clientId } = use(params);
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
   const [hydrated, setHydrated] = useState(false);
   const [autoTriggered, setAutoTriggered] = useState(false);
+  const [benchmarksReady, setBenchmarksReady] = useState(false);
+  const handleBenchmarksReady = useCallback(() => setBenchmarksReady(true), []);
 
   // Wait for Zustand localStorage hydration before reading workspace
   useEffect(() => {
@@ -38,16 +44,30 @@ export default function WorkspacePrintPage({ params }: PageProps) {
     return unsub;
   }, []);
 
-  // Once hydrated AND workspace is found, fire window.print() after a settle delay
-  // so Recharts SVGs have time to lay out before the snapshot.
+  // Benchmark readiness gate: a franchise workspace's corporate tier (and the
+  // industry footnote) is fetched async by PrintReport's useEffectiveTargets —
+  // printing before it lands would silently omit it from the PDF. Non-franchise
+  // workspaces are ready immediately, so their timing is unchanged.
+  const readyToPrint = benchmarksReady || (workspace ? !workspace.franchiseId : false);
+
+  // Once hydrated AND workspace is found AND benchmarks are ready, fire
+  // window.print() after a settle delay so Recharts SVGs have time to lay out
+  // before the snapshot. If benchmarks never load, the hard fallback prints anyway.
   useEffect(() => {
     if (!hydrated || !workspace || autoTriggered) return;
+    if (!readyToPrint) {
+      const fallback = setTimeout(() => {
+        setAutoTriggered(true);
+        window.print();
+      }, BENCHMARKS_READY_TIMEOUT_MS);
+      return () => clearTimeout(fallback);
+    }
     setAutoTriggered(true);
     const t = setTimeout(() => {
       window.print();
     }, AUTO_PRINT_DELAY_MS);
     return () => clearTimeout(t);
-  }, [hydrated, workspace, autoTriggered]);
+  }, [hydrated, workspace, autoTriggered, readyToPrint]);
 
   if (!hydrated) {
     return (
@@ -136,7 +156,7 @@ export default function WorkspacePrintPage({ params }: PageProps) {
         </div>
       </div>
 
-      <PrintReport workspace={workspace} />
+      <PrintReport workspace={workspace} onBenchmarksReady={handleBenchmarksReady} />
     </div>
   );
 }

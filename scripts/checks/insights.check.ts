@@ -167,6 +167,68 @@ function mkWorkspace(over: Partial<ClientWorkspace>): ClientWorkspace {
   check(/Food Cost %/.test(all), `worst miss should name the metric: ${all}`);
 }
 
+// ── Summary: industry pack targets are reference-only, never client goals ───
+{
+  const accounts = [
+    acc('r1', 'Sales', 'revenue'),
+    acc('c1', 'Direct Costs', 'cogs', { costBehavior: 'variable' }),
+  ];
+  const values: AccountValue[] = [];
+  for (let m = 1; m <= 4; m++) {
+    values.push(val('r1', m, 50000));
+    values.push(val('c1', m, 15000)); // 70% gross margin, 70% net margin
+  }
+
+  // ONLY industry targets → the scorecard sentence must not render at all.
+  const industryOnly = mkWorkspace({
+    accounts,
+    values,
+    targets: {
+      ratios: {
+        gross_margin: { value: 0.6, direction: 'at_least', source: 'industry' },
+        net_margin: { value: 0.2, direction: 'at_least', source: 'industry' },
+      },
+      metrics: {},
+    },
+  });
+  const onlyAll = buildExecutiveSummary(industryOnly).map((l) => l.text).join(' | ');
+  check(!/client target/.test(onlyAll), `industry-only targets must not render a scorecard: ${onlyAll}`);
+  check(/Revenue/.test(onlyAll), `other summary lines still render without a scorecard: ${onlyAll}`);
+
+  // Mixed: the industry target (a miss, worst candidate) is excluded from the
+  // count AND from the worst-miss narration; only the client target counts.
+  const mixed = mkWorkspace({
+    accounts,
+    values,
+    targets: {
+      ratios: {
+        gross_margin: { value: 0.9, direction: 'at_least', source: 'industry' }, // misses — must be ignored
+        net_margin: { value: 0.5, direction: 'at_least', source: 'custom' }, // met
+      },
+      metrics: {},
+    },
+  });
+  const mixedAll = buildExecutiveSummary(mixed).map((l) => l.text).join(' | ');
+  check(/1 of 1 client target is met/.test(mixedAll), `industry target must not be counted: ${mixedAll}`);
+  check(
+    !/Gross Margin % is/.test(mixedAll),
+    `an industry-source miss must never be narrated as the worst miss: ${mixedAll}`
+  );
+
+  // Industry-source METRIC targets are excluded the same way.
+  const industryMetric = mkWorkspace({
+    accounts,
+    values,
+    industryProfileId: 'restaurant',
+    targets: {
+      ratios: {},
+      metrics: { food_cost_pct: { value: 0.2, direction: 'at_most', source: 'industry' } },
+    },
+  });
+  const metricAll = buildExecutiveSummary(industryMetric).map((l) => l.text).join(' | ');
+  check(!/client target/.test(metricAll), `industry-source metric targets must not be scored: ${metricAll}`);
+}
+
 // ── Summary: declining, loss-making month reads negative ────────────────────
 {
   const accounts = [acc('r1', 'Sales', 'revenue'), acc('e1', 'Payroll', 'expense', { costBehavior: 'fixed' })];
