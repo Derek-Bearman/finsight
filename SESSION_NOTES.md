@@ -3,6 +3,26 @@
 **Last updated:** 2026-07-23
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
 
+>  **2026-07-23 (latest+1) — Tour spotlight + step-count fixes (version `1aa2fed3`).**
+> Derek's first-use feedback on the new tours (tested on his franchise practice
+> firm) surfaced two `TourOverlay` bugs, both fixed:
+> (1) **Misaligned highlights** on any step that scrolls: the overlay measured
+> the target rect BEFORE `scrollIntoView` moved it, so the fixed-position
+> spotlight froze at the pre-scroll spot. Now `measure()` is a pure read that
+> re-runs on a capturing `scroll` listener + settle timers, so the ring stays
+> glued to the element through the scroll (verified: ring delta = the intended
+> -4px padding, forward AND Back). Plus `focus({preventScroll:true})` on the
+> bubble and an instant-scroll fallback if a target ends up off-screen (some
+> browsers no-op smooth scroll).
+> (2) **Skipped step numbers** (e.g. Statements 4->6->8, Mapping 4->7): steps
+> whose target is conditionally absent (a QBO button when not connected, the
+> mixed-split slider outside the Cost Behavior view, the impact panel on the
+> baseline scenario, franchise-only sections) auto-skipped, leaving visible gaps
+> in "Step X of N". The overlay now snapshots only present-target steps at open
+> and numbers off THAT set, so the sequence is gap-free and adapts to state
+> (verified: a non-franchise client's Reports tour is 5 steps not 7; a baseline
+> What-If tour is 5 not 6). tsc + 16 checks green; prod-verified on the demo.
+>
 >  **2026-07-23 (latest) — GUIDED-TOUR + IN-APP HELP REBUILD LIVE (version `036fd681`).**
 > The tutorials now cover every recent feature and there are per-page tours + a
 > page-scoped FAQ help panel. Built via two agent workflows (9-agent content

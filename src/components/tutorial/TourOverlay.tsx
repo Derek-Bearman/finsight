@@ -41,21 +41,26 @@ export function TourOverlay({ steps, onComplete, onSkip, startAtStep = 0, tourLa
   const [targetRadius, setTargetRadius] = useState(8);
   const [bubblePos, setBubblePos] = useState<BubblePosition>({ top: 0, left: 0, arrowSide: null });
   const bubbleRef = useRef<HTMLDivElement>(null);
-  const observerRef = useRef<ResizeObserver | null>(null);
 
-  const step = steps[currentIdx];
+  // Snapshot only the steps whose target actually exists right now. The tour
+  // opens after its surface has rendered, so conditionally-absent targets (a
+  // QBO button when not connected, the mixed-split slider outside the Cost
+  // Behavior view, the impact panel on the baseline scenario, franchise-only
+  // sections) are dropped up front. That keeps "Step X of N", the progress
+  // dots, and the Next/Back sequence gap-free instead of skipping numbers.
+  const [visibleSteps] = useState<TourStep[]>(() =>
+    steps.filter(
+      (s) => !s.target || (typeof document !== 'undefined' && !!document.querySelector(s.target))
+    )
+  );
 
-  // Find the target element and compute positions
-  const updatePositions = useCallback(() => {
+  const step = visibleSteps[currentIdx];
+
+  // Measure the target and place the bubble. Pure read — never scrolls, so it
+  // can run repeatedly while the page scrolls without fighting the animation.
+  const measure = useCallback(() => {
     if (!step) return;
-    if (!step.target) {
-      setTargetRect(null);
-      setTargetRadius(8);
-      const bh = bubbleRef.current?.offsetHeight ?? BUBBLE_H_ESTIMATE;
-      setBubblePos(computeBubblePosition(null, 'center', BUBBLE_W, bh));
-      return;
-    }
-    const el = document.querySelector(step.target);
+    const el = step.target ? document.querySelector(step.target) : null;
     if (!el) {
       setTargetRect(null);
       setTargetRadius(8);
@@ -64,55 +69,78 @@ export function TourOverlay({ steps, onComplete, onSkip, startAtStep = 0, tourLa
       return;
     }
     const rect = el.getBoundingClientRect();
-    const radius = getElementBorderRadius(el);
     setTargetRect(rect);
-    setTargetRadius(radius);
+    setTargetRadius(getElementBorderRadius(el));
     const bh = bubbleRef.current?.offsetHeight ?? BUBBLE_H_ESTIMATE;
     setBubblePos(computeBubblePosition(rect, step.position ?? 'below', BUBBLE_W, bh));
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [step]);
 
-  // Update positions when step changes
+  // On step change: scroll the target into view ONCE, then re-measure as the
+  // smooth scroll settles. Measuring only BEFORE the scroll (the old bug) left
+  // the fixed-position spotlight stuck at the pre-scroll location.
   useEffect(() => {
-    // Small delay so scroll settles
-    const t = setTimeout(updatePositions, 80);
-    return () => clearTimeout(t);
-  }, [updatePositions]);
+    if (!step) return;
+    const el = step.target ? (document.querySelector(step.target) as HTMLElement | null) : null;
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    measure();
+    const timers = [40, 160, 320, 520].map((d) => setTimeout(measure, d));
+    // Fallback: if the smooth scroll was a no-op (reduced motion, or a browser
+    // that ignores it) and the target is still off-screen, force it into view
+    // so the spotlight is never stranded below the fold.
+    const ensure = setTimeout(() => {
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const offScreen = r.bottom < 80 || r.top > window.innerHeight - 80;
+      if (offScreen) el.scrollIntoView({ block: 'center' });
+      measure();
+    }, 420);
+    return () => {
+      timers.forEach(clearTimeout);
+      clearTimeout(ensure);
+    };
+  }, [measure]);
 
-  // ResizeObserver for layout changes
+  // Keep the spotlight glued to the target through scroll, resize, and layout
+  // shifts. The scroll listener uses capture so it catches any scroll ancestor
+  // (including the one the smooth scrollIntoView is animating).
   useEffect(() => {
-    observerRef.current?.disconnect();
-    if (step?.target) {
+    const onMove = () => measure();
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    let ro: ResizeObserver | null = null;
+    if (step?.target && typeof ResizeObserver !== 'undefined') {
       const el = document.querySelector(step.target);
       if (el) {
-        observerRef.current = new ResizeObserver(updatePositions);
-        observerRef.current.observe(el);
+        ro = new ResizeObserver(onMove);
+        ro.observe(el);
       }
     }
-    window.addEventListener('resize', updatePositions);
     return () => {
-      observerRef.current?.disconnect();
-      window.removeEventListener('resize', updatePositions);
+      window.removeEventListener('scroll', onMove, true);
+      window.removeEventListener('resize', onMove);
+      ro?.disconnect();
     };
-  }, [updatePositions, step?.target]);
+  }, [measure, step?.target]);
 
-  // Find next valid step (skip steps whose targets aren't in DOM)
+  // Steps are pre-filtered to present targets (visibleSteps), but a target can
+  // still vanish mid-tour (e.g. a dialog the user closed), so skip any that
+  // disappeared when navigating.
   const findNextValidStep = useCallback(
     (fromIdx: number, direction: 1 | -1): number => {
       let idx = fromIdx + direction;
-      while (idx >= 0 && idx < steps.length) {
-        const s = steps[idx];
+      while (idx >= 0 && idx < visibleSteps.length) {
+        const s = visibleSteps[idx];
         if (!s) break;
         if (!s.target || document.querySelector(s.target)) return idx;
         idx += direction;
       }
       return -1;
     },
-    [steps]
+    [visibleSteps]
   );
 
   const handleNext = useCallback(() => {
-    if (currentIdx >= steps.length - 1) {
+    if (currentIdx >= visibleSteps.length - 1) {
       onComplete();
       return;
     }
@@ -122,7 +150,7 @@ export function TourOverlay({ steps, onComplete, onSkip, startAtStep = 0, tourLa
     } else {
       setCurrentIdx(next);
     }
-  }, [currentIdx, steps.length, findNextValidStep, onComplete]);
+  }, [currentIdx, visibleSteps.length, findNextValidStep, onComplete]);
 
   const handleBack = useCallback(() => {
     const prev = findNextValidStep(currentIdx, -1);
@@ -140,15 +168,16 @@ export function TourOverlay({ steps, onComplete, onSkip, startAtStep = 0, tourLa
     return () => window.removeEventListener('keydown', handler);
   }, [onSkip, handleNext, handleBack]);
 
-  // Focus trap
+  // Focus the bubble on each step. preventScroll so focusing it never fights
+  // the scrollIntoView that just moved the page to the target.
   useEffect(() => {
-    bubbleRef.current?.focus();
+    bubbleRef.current?.focus({ preventScroll: true });
   }, [currentIdx]);
 
   if (!step) return null;
 
   const isFirst = currentIdx === 0;
-  const isLast = currentIdx === steps.length - 1;
+  const isLast = currentIdx === visibleSteps.length - 1;
   const isCenter = !step.target || step.position === 'center';
   const { arrowSide } = bubblePos;
 
@@ -258,7 +287,7 @@ export function TourOverlay({ steps, onComplete, onSkip, startAtStep = 0, tourLa
             marginBottom: 8,
           }}
         >
-          {tourLabel ? `${tourLabel} · ` : ''}Step {currentIdx + 1} of {steps.length}
+          {tourLabel ? `${tourLabel} · ` : ''}Step {currentIdx + 1} of {visibleSteps.length}
         </div>
 
         {/* Title */}
@@ -288,7 +317,7 @@ export function TourOverlay({ steps, onComplete, onSkip, startAtStep = 0, tourLa
 
         {/* Progress dots */}
         <div style={{ display: 'flex', gap: 5, marginBottom: 14 }}>
-          {steps.map((_, i) => (
+          {visibleSteps.map((_, i) => (
             <div
               key={i}
               style={{
