@@ -1,0 +1,10 @@
+# Pizza Palace corporate benchmark set — practice upload
+# Percent metrics (gross_margin, net_margin, food_cost_pct, labor_cost_pct, prime_cost) are whole percents.
+metric_id,target,direction,notes
+gross_margin,68,gte,Corporate minimum gross margin
+net_margin,8,gte,Corporate minimum net margin
+current_ratio,1.2,gte,Liquidity floor
+debt_to_equity,2.5,lte,Leverage ceiling
+food_cost_pct,30,lte,Prime cost component
+labor_cost_pct,28,lte,Prime cost component
+prime_cost,58,lte,Food + labor ceiling

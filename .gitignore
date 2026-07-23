@@ -48,3 +48,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 test-results/
+
+# Large regenerable franchise practice seed payload
+scripts/seed/franchise-demo-assets/seed.json

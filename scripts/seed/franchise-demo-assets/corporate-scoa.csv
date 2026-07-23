@@ -1,0 +1,33 @@
+# Pizza Palace corporate standard chart of accounts
+number,name,statement,type
+4000,Food Sales,pnl,revenue
+4100,Beverage Sales,pnl,revenue
+4200,Catering Revenue,pnl,revenue
+4300,Delivery Revenue,pnl,revenue
+5000,Food Purchases,pnl,cogs
+5100,Beverage Cost,pnl,cogs
+5200,Paper Goods & To-Go Supplies,pnl,cogs
+5300,Third Party Delivery Commissions,pnl,cogs
+6000,Manager Salaries,pnl,expense
+6100,Hourly Wages,pnl,expense
+6200,Payroll Taxes & Benefits,pnl,expense
+6300,Base Rent,pnl,expense
+6400,Utilities,pnl,expense
+6500,Marketing & Advertising,pnl,expense
+6600,Franchise Royalty Fees,pnl,expense
+6650,Corporate Ad Fund Contribution,pnl,expense
+6700,Insurance,pnl,expense
+6800,Repairs & Maintenance,pnl,expense
+6900,POS & Processing Fees,pnl,expense
+7000,Interest Expense,pnl,expense
+1010,Business Checking,balance,asset
+1100,Accounts Receivable,balance,asset
+1300,Food Inventory,balance,asset
+1500,Kitchen Equipment (Net),balance,asset
+1600,Leasehold Improvements (Net),balance,asset
+2010,Accounts Payable,balance,liability
+2100,Credit Card Payable,balance,liability
+2200,Accrued Payroll,balance,liability
+2600,Equipment Loan (Long Term),balance,liability
+3000,Owner Capital,balance,equity
+3900,Retained Earnings,balance,equity
