@@ -833,7 +833,17 @@ export default function HomePage() {
       updatedAt: now,
     };
     setCreating(true);
-    const res = await saveNewWorkspace(workspace);
+    let res: Awaited<ReturnType<typeof saveNewWorkspace>>;
+    try {
+      res = await saveNewWorkspace(workspace);
+    } catch {
+      // Transport-level rejection (offline, stale tab after a deploy) skips
+      // the action's fail-closed result shape — without this catch `creating`
+      // would stick true forever and dead-end the wizard with no feedback.
+      setCreating(false);
+      setCreateError('Could not reach the server — check your connection and try again.');
+      return null;
+    }
     if (!res.ok) {
       setCreating(false);
       setCreateError(res.error);
@@ -1213,11 +1223,14 @@ export default function HomePage() {
             />
 
             <div className="flex justify-between">
-              <Button variant="outline" onClick={() => goToStep('profile')} data-testid="back-to-profile">
+              {/* disabled while the QBO-instead create is in flight — stepping
+                  away mid-create would hide the error banner (it only renders
+                  on this step and classify) or yank the user mid-edit. */}
+              <Button variant="outline" onClick={() => goToStep('profile')} disabled={creating} data-testid="back-to-profile">
                 ← Back
               </Button>
               {(pnlUpload.phase === 'done' || pnlUpload.phase === 'idle') && (
-                <Button onClick={handlePnlNext} data-testid="pnl-next">
+                <Button onClick={handlePnlNext} disabled={creating} data-testid="pnl-next">
                   Continue →
                 </Button>
               )}

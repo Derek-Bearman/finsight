@@ -3,6 +3,44 @@
 **Last updated:** 2026-07-23
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
 
+> **2026-07-23 — QBO post-merge polish: all 4 review chips + 2 prod-connect
+> findings FIXED, NOT deployed.** (1) `upsertConnection`'s different-realm
+> reconnect now retires the old connection through `deleteConnection`
+> (best-effort revoke at Intuit + 'qbo.disconnect' audit) instead of a bare
+> row delete that left the old company's grant live in Connected Apps.
+> (2) `onNextSuccessfulSave` registrations carry an updatedAt WATERMARK — a
+> debounced save already on the wire with a pre-commit payload no longer
+> releases the QBO last_synced_at stamp (new suite `cloud-sync.check.ts`
+> pins it; 12 `scripts/checks/*.check.ts` files on disk now). (3) `mergeNewPeriods`/`mergeOverwrite` remap
+> adopted accounts' `parentId` through idRemap (no more dangling parents;
+> inert today, matters for future tree features). (4) `QBO_ERROR_MESSAGES`
+> gained accurate `realm_in_use` (can NEVER succeed on retry — copy says
+> disconnect-or-pick-another) + `exchange_failed` entries. (5) **Derek's
+> first real connect finding:** a QBO backfill into an EMPTY workspace goes
+> verdict 'disjoint' → `handleMergeNewPeriods` → the bootstrap dataset kept
+> the label "Original import" (prod ws `b5ae4bc6`); `commitMergeNewPeriods`
+> now takes the same optional relabel as `commitOverwriteMerge` and
+> StatementsView passes "QuickBooks — <Company>" for QBO batches — all 4 QBO
+> commit paths now carry provenance (plan §2.8). (6) **Duplicate-workspace
+> guard:** the wizard re-enabled its buttons after a successful create while
+> `router.push` was still in flight — a second click created a duplicate
+> (Derek's twin 'Arktos Bookkeeping', empty `c2cb942c`); `creating` now
+> stays true through the navigation (the done step's "Create another" resets
+> it). Plus two hardening items from the review's info tier: the callback
+> route re-proves the BILLING 'full' gate (same as connect) via the service
+> client before storing, and `runQboSyncChunk` builds its API context inside
+> the try (a missing-env misconfig now returns the fail-closed shape instead
+> of throwing raw across the action boundary). All 12 check suites + tsc
+> green; lint delta zero. Known-minor (pre-deploy review): the watermark
+> orders registrations by wall-clock `updatedAt` — a BACKWARDS clock step in
+> the narrow in-flight window can re-open the race; if it ever matters, the
+> clean fix is a per-workspace monotonic mutation counter carried in the
+> save snapshot instead of parsed ISO strings. NOTE: the wizard-guard + error-message edits rode
+> along in commit `5d01ae5` (the discoverability session committed while
+> this pass was in flight); the rest of this pass is the working tree.
+> Derek will delete the leftover empty duplicate + relabel `b5ae4bc6`'s
+> dataset himself (prod rows untouched by policy).
+
 > **2026-07-23 — QBO connect discoverability (Derek's first-use feedback):
 > BUILT + verified in dev, NOT deployed.** The Connect entry point was buried
 > on the Statements tab; now (1) the new-client wizard's P&L step shows
@@ -18,8 +56,8 @@
 > button hides via the server's own `getQboStatus().canManage` (+ hides when
 > already connected); `/api/qbo/connect` remains the sole authority and
 > bounces hand-typed `?qbo=start` with the existing `?qbo_error` toast. New
-> check suite `qbo-entry-gate.check.ts` pins the visibility matrix (12 suites
-> now). tsc + all suites green; lint delta zero. Click-verified in dev against
+> check suite `qbo-entry-gate.check.ts` pins the visibility matrix. tsc +
+> all suites green; lint delta zero. Click-verified in dev against
 > real Intuit sandbox keys with throwaway users (created + DELETED, firm
 > `42c2cea4…`): owner sees both affordances and the full chain reaches
 > Intuit's authorize page; demo user and member-role user see NEITHER.
@@ -31,9 +69,10 @@
 > a fresh 6-agent merge-readiness review (0 blockers, 11 check suites + tsc
 > green on merge day); all 4 QBO secrets set and `cf:deploy` run per runbook
 > §C; smoke-verified (login/legal 200, mock routes 404 in prod, connect
-> auth-bounces, demo Statements click-through clean). Remaining: runbook §D
-> (Derek's first real QBO connect) + post-merge polish chip (4 minor fixes:
-> revoke-on-reconnect, sync-stamp race, dangling parentId, 2 error messages).
+> auth-bounces, demo Statements click-through clean). Runbook §D (Derek's
+> first real QBO connect) DONE same day (`939a05d`); the post-merge polish
+> chip (revoke-on-reconnect, sync-stamp race, dangling parentId, 2 error
+> messages) DONE in the polish entry above.
 >
 > **2026-07-22 — QuickBooks Online integration BUILT on branch
 > `feature/qbo-integration` (now merged; original build notes follow).**
