@@ -28,6 +28,12 @@ export interface AccountCardProps {
   isSelected?: boolean;
   /** When true, the keyboard focus indicator is shown on this card. */
   isFocused?: boolean;
+  /**
+   * When provided AND the account's cost behavior is 'mixed', an inline
+   * fixed/variable split slider renders on the card. Interacting with it does
+   * not start a drag or toggle selection (pointer/click are isolated).
+   */
+  onMixedSplitUpdate?: (accountId: string, fixedPercent: number) => void;
 }
 
 /**
@@ -70,9 +76,12 @@ function AccountCardInner({
   needsReview,
   isSelected,
   isFocused,
+  onMixedSplitUpdate,
   dragHandleProps,
 }: AccountCardProps & { dragHandleProps?: Record<string, unknown> }) {
   const [showTooltip, setShowTooltip] = useState(false);
+  const showMixedSplit = account.costBehavior === 'mixed' && !!onMixedSplitUpdate;
+  const fixedPct = Math.round((account.mixedFixedPercent ?? 0.5) * 100);
 
   // Visual treatment cascade: dragging > selected > focused > default
   const borderColor = isDragging
@@ -195,6 +204,44 @@ function AccountCardInner({
         </span>
         <ConfidenceBadge level={account.classificationConfidence} />
       </div>
+
+      {/* Inline fixed/variable split (mixed accounts only). Pointer + click are
+          isolated so adjusting the slider does not start a drag or select the
+          card. */}
+      {showMixedSplit && (
+        <div
+          className="mt-2 pt-2 border-t"
+          style={{ borderColor: 'hsl(var(--border))', cursor: 'default' }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px]" style={{ color: 'hsl(var(--muted-foreground))' }}>
+              Fixed / Variable
+            </span>
+            <span
+              className="text-[11px] tabular-nums font-medium"
+              style={{ color: 'hsl(var(--foreground))' }}
+            >
+              {fixedPct}% / {100 - fixedPct}%
+            </span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={fixedPct}
+            onChange={(e) => onMixedSplitUpdate?.(account.id, parseInt(e.target.value, 10) / 100)}
+            className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+            style={{
+              accentColor: 'hsl(var(--primary))',
+              background: `linear-gradient(to right, hsl(38 92% 50%) ${fixedPct}%, hsl(217 91% 60%) ${fixedPct}%)`,
+            }}
+            aria-label={`Fixed and variable split for ${account.name}`}
+            data-testid={`mixed-split-slider-${account.id}`}
+          />
+        </div>
+      )}
     </div>
   );
 }

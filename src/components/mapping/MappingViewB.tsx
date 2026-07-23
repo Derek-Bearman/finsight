@@ -19,7 +19,6 @@ import type {
 } from '@/types';
 import { DropColumn } from './DropColumn';
 import { AccountCard } from './AccountCard';
-import { MixedSplitSlider } from './MixedSplitSlider';
 import { getLatestAmounts, columnTotal } from '@/lib/utils/accounts';
 import type { SourceFilter } from './MappingToolbar';
 import { matchesSourceFilter } from './sourceFilter';
@@ -86,8 +85,6 @@ export function MappingViewB({
 
   const columnAccounts = (behavior: CostBehavior) =>
     eligible.filter((a) => (a.costBehavior ?? 'unclassified') === behavior);
-
-  const mixedAccounts = columnAccounts('mixed');
 
   function handleBehaviorChange(account: Account, newBehavior: CostBehavior) {
     const prev = account.costBehavior ?? 'unclassified';
@@ -203,34 +200,11 @@ export function MappingViewB({
               total={total}
               conflictWarnings={new Map()}
               searchQuery=""
+              onMixedSplitUpdate={handleMixedSplitUpdate}
             />
           );
         })}
       </div>
-
-      {/* Mixed splits section */}
-      {mixedAccounts.length > 0 && (
-        <div className="mt-6">
-          <h3
-            className="text-sm font-semibold mb-3"
-            style={{ color: 'hsl(var(--foreground))' }}
-          >
-            Mixed Cost Splits
-          </h3>
-          <p className="text-xs mb-3" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            Set the fixed vs. variable split for each mixed-behavior account.
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {mixedAccounts.map((account) => (
-              <MixedSplitSlider
-                key={account.id}
-                account={account}
-                onUpdate={handleMixedSplitUpdate}
-              />
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Drag overlay */}
       <DragOverlay>

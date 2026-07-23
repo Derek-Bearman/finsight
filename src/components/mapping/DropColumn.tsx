@@ -27,6 +27,9 @@ export interface DropColumnProps {
   selectedIds?: Set<string>;
   /** Id of the keyboard-focused account, if any. */
   focusedId?: string | null;
+  /** Forwarded to cards: renders the inline fixed/variable split slider on
+   *  mixed-behavior accounts. */
+  onMixedSplitUpdate?: (accountId: string, fixedPercent: number) => void;
 }
 
 export function DropColumn({
@@ -42,6 +45,7 @@ export function DropColumn({
   showNeedsReview = true,
   selectedIds,
   focusedId,
+  onMixedSplitUpdate,
 }: DropColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
@@ -124,6 +128,7 @@ export function DropColumn({
               needsReview={showNeedsReview && accountNeedsReview(account)}
               isSelected={selectedIds?.has(account.id)}
               isFocused={focusedId === account.id}
+              onMixedSplitUpdate={onMixedSplitUpdate}
             />
           ))
         )}
