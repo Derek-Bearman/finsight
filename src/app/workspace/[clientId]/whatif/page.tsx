@@ -23,6 +23,7 @@ import { formatCurrency, formatPercent } from '@/lib/utils/format';
 import { getUniquePeriods } from '@/lib/calculations/period-aggregation';
 import { getKeyAccounts } from '@/lib/utils/accounts';
 import { ScenarioComparisonChart } from '@/components/charts';
+import { WhatIfLivePreview } from '@/components/scenarios/WhatIfLivePreview';
 import { ReadOnlyGuard } from '@/components/app/ReadOnlyGuard';
 import { useReadOnly } from '@/components/app/firm-context';
 
@@ -888,6 +889,11 @@ function ScenarioEditor({ clientId, workspace, scenario, baseScenario }: Scenari
 
   const isBaseline = scenario.isBaseline ?? false;
 
+  // Accent color for the live-preview scenario line — matches the color the
+  // scenario's selector card uses (colorIndex = position in workspace.scenarios).
+  const scenarioIndex = workspace.scenarios.findIndex(s => s.id === scenario.id);
+  const accentColor = SCENARIO_COLORS[(scenarioIndex >= 0 ? scenarioIndex : 0) % SCENARIO_COLORS.length]!;
+
   return (
     <div className="flex flex-col gap-6">
       {/* Scenario name + description header */}
@@ -1068,6 +1074,13 @@ function ScenarioEditor({ clientId, workspace, scenario, baseScenario }: Scenari
           baseScenario={baseScenario}
         />
       </div>
+
+      {/* Live forward projection — updates in real time as the sliders move */}
+      <WhatIfLivePreview
+        workspace={workspace}
+        scenario={liveScenario}
+        accentColor={accentColor}
+      />
     </div>
   );
 }

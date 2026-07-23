@@ -38,6 +38,11 @@ const HORIZONS: { id: HorizonKey; label: string }[] = [
   { id: '10y', label: '10 Yr' },
 ];
 
+// Answers Derek's "revenue vs net profit?" question inline: the rate drives each
+// account's projected trend, and both revenue and net income are re-derived from
+// those projected accounts (net income is not projected at the rate directly).
+const APPLIED_TO_NOTE = "Applied to each account's projected trend; revenue and net income follow.";
+
 // ─────────────────────────────────────────────
 // Pill group helper
 // ─────────────────────────────────────────────
@@ -154,45 +159,51 @@ export function ProjectionControls({
         <PillGroup options={HORIZONS} value={horizon} onChange={onHorizonChange} />
       </div>
 
-      {/* Growth rate override */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={handleToggleOverride}
-          className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
-          style={{
-            background: isOverrideActive ? 'hsl(var(--primary))' : 'hsl(var(--muted))',
-            color: isOverrideActive ? 'hsl(var(--primary-foreground))' : 'hsl(var(--muted-foreground))',
-          }}
-        >
-          <span className="text-xs">{isOverrideActive ? '✓' : '+'}</span>
-          Growth Rate
-        </button>
+      {/* Growth rate: always surface the rate in effect + what it applies to */}
+      <div className="flex flex-col gap-0.5" data-testid="growth-rate-display">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleToggleOverride}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors"
+            style={{
+              background: isOverrideActive ? 'hsl(var(--primary))' : 'hsl(var(--muted))',
+              color: isOverrideActive ? 'hsl(var(--primary-foreground))' : 'hsl(var(--muted-foreground))',
+            }}
+          >
+            <span className="text-xs">{isOverrideActive ? '✓' : '+'}</span>
+            Growth Rate
+          </button>
 
-        {isOverrideActive ? (
-          <div className="flex items-center gap-1">
-            <input
-              type="number"
-              step="0.1"
-              value={inputValue}
-              onChange={handleInputChange}
-              className="w-16 rounded-md border px-2 py-0.5 text-xs text-right"
-              style={{
-                borderColor: 'hsl(var(--border))',
-                background: 'hsl(var(--card))',
-                color: 'hsl(var(--foreground))',
-              }}
-            />
+          {isOverrideActive ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                step="0.1"
+                value={inputValue}
+                onChange={handleInputChange}
+                className="w-16 rounded-md border px-2 py-0.5 text-xs text-right"
+                style={{
+                  borderColor: 'hsl(var(--border))',
+                  background: 'hsl(var(--card))',
+                  color: 'hsl(var(--foreground))',
+                }}
+              />
+              <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                %/yr (manual)
+              </span>
+            </div>
+          ) : (
             <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
-              %/yr
+              {impliedGrowthRate !== undefined
+                ? `${formatPercent(impliedGrowthRate)}/yr · model-implied from revenue history`
+                : 'Per-account model trend (not a single rate)'}
             </span>
-          </div>
-        ) : (
-          <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
-            {impliedGrowthRate !== undefined
-              ? `Model implies ${formatPercent(impliedGrowthRate)}/yr`
-              : 'No override'}
-          </span>
-        )}
+          )}
+        </div>
+
+        <span className="text-[10px] leading-tight" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          {APPLIED_TO_NOTE}
+        </span>
       </div>
     </div>
   );

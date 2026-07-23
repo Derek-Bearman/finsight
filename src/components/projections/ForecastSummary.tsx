@@ -20,11 +20,11 @@ function abbrev(v: number): string {
   return `${sign}$${a.toFixed(0)}`;
 }
 
-function Tile({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+function Tile({ label, value, sub, accent, testId }: { label: string; value: string; sub?: string; accent?: boolean; testId?: string }) {
   return (
     <div className="rounded-xl border p-4 flex flex-col gap-1" style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}>
       <p className="text-xs font-medium uppercase tracking-wide" style={{ color: 'hsl(var(--muted-foreground))' }}>{label}</p>
-      <p className="text-xl font-bold" style={{ color: accent ? 'hsl(217 91% 55%)' : 'hsl(var(--foreground))' }}>{value}</p>
+      <p className="text-xl font-bold" style={{ color: accent ? 'hsl(217 91% 55%)' : 'hsl(var(--foreground))' }} data-testid={testId}>{value}</p>
       {sub && <p className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>{sub}</p>}
     </div>
   );
@@ -96,8 +96,13 @@ export function ForecastSummary({
         />
         <Tile
           label="Implied Growth Rate"
-          value={impliedGrowth !== null ? formatPercent(impliedGrowth) : '—'}
-          sub={`Annualized · ${modelLabel} model`}
+          value={impliedGrowth !== null ? formatPercent(impliedGrowth) : 'Per-account trend'}
+          sub={
+            impliedGrowth !== null
+              ? `Annualized from revenue · ${modelLabel} model`
+              : `Not a single rate · ${modelLabel} model`
+          }
+          testId="implied-growth-rate-tile"
         />
       </div>
 
