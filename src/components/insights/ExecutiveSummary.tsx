@@ -9,6 +9,7 @@
 import { useMemo } from 'react';
 import type { ClientWorkspace } from '@/types';
 import { buildExecutiveSummary, type SummaryLine } from '@/lib/insights/executive-summary';
+import { useEffectiveTargets } from '@/lib/franchise/useEffectiveTargets';
 
 const TONE_COLORS: Record<SummaryLine['tone'], string> = {
   positive: 'hsl(142 71% 45%)',
@@ -18,7 +19,13 @@ const TONE_COLORS: Record<SummaryLine['tone'], string> = {
 };
 
 export function ExecutiveSummary({ workspace }: { workspace: ClientWorkspace }) {
-  const lines = useMemo(() => buildExecutiveSummary(workspace), [workspace]);
+  // Composed targets (client > corporate set > industry pack) — falls back to
+  // plain workspace targets for non-franchise workspaces.
+  const { targets: effectiveTargets } = useEffectiveTargets(workspace);
+  const lines = useMemo(
+    () => buildExecutiveSummary(workspace, effectiveTargets),
+    [workspace, effectiveTargets]
+  );
   if (lines.length === 0) return null;
 
   return (

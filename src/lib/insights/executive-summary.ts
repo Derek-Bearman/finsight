@@ -11,7 +11,7 @@
  * Reports, and the printed client report, and is unit-checkable headless.
  */
 
-import type { Account, AccountValue, ClientWorkspace, Period } from '@/types';
+import type { Account, AccountValue, ClientWorkspace, Period, WorkspaceTargets } from '@/types';
 import { buildPeriodAggregations, computePnL, toFinancialSummary } from '@/lib/calculations/pnl';
 import { computeBalanceSheetRatios } from '@/lib/calculations/balance-sheet';
 import { computeHealthScores } from '@/lib/calculations/health';
@@ -81,7 +81,17 @@ function isCashAccount(a: Account): boolean {
   return name.includes('cash') || name.includes('checking') || name.includes('savings');
 }
 
-export function buildExecutiveSummary(ws: ClientWorkspace): SummaryLine[] {
+/**
+ * @param effectiveTargets Composed targets from useEffectiveTargets (client
+ * target > franchise corporate set > industry pack). Optional so the function
+ * stays pure and non-franchise callers are byte-identical: when omitted, the
+ * workspace's own targets apply exactly as before.
+ */
+export function buildExecutiveSummary(
+  ws: ClientWorkspace,
+  effectiveTargets?: WorkspaceTargets
+): SummaryLine[] {
+  const targets = effectiveTargets ?? ws.targets;
   const lines: SummaryLine[] = [];
   const allAggs: PeriodAggregation[] = buildPeriodAggregations(ws.accounts, ws.values, 'monthly');
   if (allAggs.length === 0) return lines;
@@ -222,9 +232,9 @@ export function buildExecutiveSummary(ws: ClientWorkspace): SummaryLine[] {
 
   // ── 5. Targets scorecard (ratio AND operational-metric targets) ─────────
   if (
-    ws.targets &&
-    (Object.keys(ws.targets.ratios ?? {}).length > 0 ||
-      Object.keys(ws.targets.metrics ?? {}).length > 0)
+    targets &&
+    (Object.keys(targets.ratios ?? {}).length > 0 ||
+      Object.keys(targets.metrics ?? {}).length > 0)
   ) {
     const bs = computeBalanceSheetRatios(ws.accounts, ws.values, latest.period);
     const health = computeHealthScores(ws.accounts, ws.values, latest.period);
@@ -246,7 +256,7 @@ export function buildExecutiveSummary(ws: ClientWorkspace): SummaryLine[] {
     let total = 0;
     let met = 0;
     let worst: { label: string; valueText: string; target: string } | null = null;
-    for (const [key, target] of Object.entries(ws.targets.ratios ?? {})) {
+    for (const [key, target] of Object.entries(targets.ratios ?? {})) {
       const def = RATIO_DEF_MAP[key];
       const value = ratioValues[key as RatioKey];
       if (!def || value === null || value === undefined) continue;
@@ -263,7 +273,7 @@ export function buildExecutiveSummary(ws: ClientWorkspace): SummaryLine[] {
     }
     // Operational-metric targets (food cost %, CAC, …) count too — corporate
     // mandates live here for franchise clients.
-    const metricTargets = ws.targets.metrics ?? {};
+    const metricTargets = targets.metrics ?? {};
     if (Object.keys(metricTargets).length > 0) {
       const profile = getProfile(ws.industryProfileId);
       const summary = toFinancialSummary(

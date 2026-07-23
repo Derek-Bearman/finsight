@@ -4,6 +4,8 @@ import React from 'react';
 import { LineChart, Line } from 'recharts';
 import type { MetricFormat, BenchmarkRange } from '@/types';
 import { formatMetricValue } from '@/lib/utils/format';
+import { PROVENANCE_LABELS } from '@/lib/targets';
+import { INDUSTRY_BENCHMARK_DISCLAIMER } from '@/lib/benchmarks/packs';
 
 // ─────────────────────────────────────────────
 // Types
@@ -25,6 +27,9 @@ export interface RatioSparklineProps {
    *  mandate is never confused with a loose FinSight default. 'industry'
    *  renders with an asterisk + disclaimer tooltip (see lib/benchmarks). */
   provenance?: 'corporate' | 'custom' | 'industry' | 'default' | 'none';
+  /** Active corporate benchmark set label — shown subtly on corporate rows so
+   *  the caption says WHICH set mandates the number. */
+  setLabel?: string | null;
   /** Plain-English "what this means" — surfaces as a hover tooltip. */
   explainer?: string;
 }
@@ -90,13 +95,7 @@ function computeChange(trend: number[], format: MetricFormat): { text: string; p
 // Single Ratio Card
 // ─────────────────────────────────────────────
 
-const PROVENANCE_TEXT: Record<string, string> = {
-  corporate: 'Corporate target',
-  custom: 'Custom target',
-  default: 'FinSight default benchmark',
-};
-
-function RatioCard({ label, value, format, trend, benchmark, targetText, thresholdText, provenance, explainer }: RatioSparklineProps) {
+function RatioCard({ label, value, format, trend, benchmark, targetText, thresholdText, provenance, setLabel, explainer }: RatioSparklineProps) {
   const valueColor =
     value !== null && benchmark
       ? getBenchmarkColor(value, benchmark)
@@ -167,7 +166,9 @@ function RatioCard({ label, value, format, trend, benchmark, targetText, thresho
       )}
 
       {/* Target / benchmark provenance — always shows the active threshold so
-          the FinSight default reads like a target the user can override */}
+          the FinSight default reads like a target the user can override.
+          Industry benchmarks carry an asterisk + hover disclaimer; corporate
+          rows subtly name the mandating benchmark set when known. */}
       {provenance && provenance !== 'none' && (
         <p className="text-xs leading-snug" style={{ color: 'hsl(var(--muted-foreground))' }}>
           {thresholdText ? (
@@ -178,7 +179,11 @@ function RatioCard({ label, value, format, trend, benchmark, targetText, thresho
               {' · '}
             </>
           ) : null}
-          {PROVENANCE_TEXT[provenance]}
+          <span title={provenance === 'industry' ? INDUSTRY_BENCHMARK_DISCLAIMER : undefined}>
+            {PROVENANCE_LABELS[provenance]}
+            {provenance === 'industry' ? '*' : ''}
+            {provenance === 'corporate' && setLabel ? ` · ${setLabel}` : ''}
+          </span>
         </p>
       )}
     </div>

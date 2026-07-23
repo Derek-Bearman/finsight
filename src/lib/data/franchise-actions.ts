@@ -16,11 +16,14 @@
 import { resolveUserContext } from '@/lib/data/context';
 import {
   listFranchises,
+  getFranchise,
   insertFranchise,
   updateFranchiseRow,
   deleteFranchiseRow,
   countLinkedWorkspaces,
   type Franchise,
+  type FranchiseBenchmarkSet,
+  type FranchiseConfig,
 } from '@/lib/data/franchises';
 import { getProfile } from '@/lib/profiles';
 
@@ -123,6 +126,160 @@ export async function updateFranchiseAction(params: {
     return { ok: true, data: { ...updated, linkedCount: counts[updated.id] ?? 0 } };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Failed to update franchise.' };
+  }
+}
+
+// ─────────────────────────────────────────────
+// Corporate benchmark sets (FRANCHISE_BENCHMARKS_PLAN.md §F2)
+// Versioned sets live inside franchises.config.benchmarkSets (jsonb). All
+// three actions are read-modify-write on that array; RLS still gates the
+// UPDATE at the database.
+// ─────────────────────────────────────────────
+
+const SET_LABEL_MAX = 80;
+const SET_METRICS_MAX = 500;
+const METRIC_ID_MAX = 120;
+
+/** Returns an error string, or null when the set is valid. */
+function validateBenchmarkSet(set: FranchiseBenchmarkSet): string | null {
+  if (!set || typeof set.id !== 'string' || !set.id.trim()) {
+    return 'Benchmark set id is required.';
+  }
+  const label = typeof set.label === 'string' ? set.label.trim() : '';
+  if (label.length < 1 || label.length > SET_LABEL_MAX) {
+    return `Set label must be 1-${SET_LABEL_MAX} characters.`;
+  }
+  if (!Array.isArray(set.metrics) || set.metrics.length === 0) {
+    return 'A benchmark set needs at least one metric.';
+  }
+  if (set.metrics.length > SET_METRICS_MAX) {
+    return `A benchmark set is limited to ${SET_METRICS_MAX} metrics.`;
+  }
+  for (const m of set.metrics) {
+    const id = typeof m?.metricId === 'string' ? m.metricId.trim() : '';
+    if (!id) return 'Every metric row needs a metric id.';
+    if (id.length > METRIC_ID_MAX) return `Metric id "${id.slice(0, 40)}…" is too long (${METRIC_ID_MAX} max).`;
+    if (typeof m.target !== 'number' || !Number.isFinite(m.target)) {
+      return `Metric "${id}" needs a finite numeric target.`;
+    }
+    if (m.direction !== 'gte' && m.direction !== 'lte') {
+      return `Metric "${id}" has an invalid direction (use gte or lte).`;
+    }
+  }
+  return null;
+}
+
+/** Keep only known fields; stamp uploadedAt/uploadedBy server-side. */
+function sanitizeBenchmarkSet(set: FranchiseBenchmarkSet, uploadedBy: string | null): FranchiseBenchmarkSet {
+  const clean: FranchiseBenchmarkSet = {
+    id: set.id.trim(),
+    label: set.label.trim(),
+    uploadedAt: new Date().toISOString(),
+    active: set.active === true,
+    metrics: set.metrics.map((m) => {
+      const notes = typeof m.notes === 'string' ? m.notes.trim() : '';
+      return {
+        metricId: m.metricId.trim(),
+        target: m.target,
+        direction: m.direction,
+        ...(notes ? { notes } : {}),
+      };
+    }),
+  };
+  const effectiveDate = typeof set.effectiveDate === 'string' ? set.effectiveDate.trim() : '';
+  if (effectiveDate) clean.effectiveDate = effectiveDate;
+  if (uploadedBy) clean.uploadedBy = uploadedBy;
+  return clean;
+}
+
+async function withLinkedCount(franchise: Franchise): Promise<FranchiseWithLinks> {
+  const counts = await countLinkedWorkspaces();
+  return { ...franchise, linkedCount: counts[franchise.id] ?? 0 };
+}
+
+/**
+ * Insert or replace a corporate benchmark set (matched by set.id). When the
+ * incoming set is active, every other set on the franchise is deactivated —
+ * exactly one set can be active at a time.
+ */
+export async function saveBenchmarkSetAction(params: {
+  franchiseId: string;
+  set: FranchiseBenchmarkSet;
+}): Promise<FranchiseActionResult> {
+  const guard = await requireManageContext();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  const invalid = validateBenchmarkSet(params.set);
+  if (invalid) return { ok: false, error: invalid };
+  try {
+    const franchise = await getFranchise(params.franchiseId);
+    if (!franchise) return { ok: false, error: 'Franchise not found (or you lack permission).' };
+    const clean = sanitizeBenchmarkSet(params.set, guard.ctx.email);
+    const existing = franchise.config.benchmarkSets ?? [];
+    let sets = existing.some((s) => s.id === clean.id)
+      ? existing.map((s) => (s.id === clean.id ? clean : s))
+      : [...existing, clean];
+    if (clean.active) {
+      sets = sets.map((s) => (s.id === clean.id ? s : { ...s, active: false }));
+    }
+    const config: FranchiseConfig = { ...franchise.config, benchmarkSets: sets };
+    const updated = await updateFranchiseRow(params.franchiseId, { config });
+    if (!updated) return { ok: false, error: 'Franchise not found (or you lack permission).' };
+    return { ok: true, data: await withLinkedCount(updated) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Failed to save benchmark set.' };
+  }
+}
+
+/** Make one set active and deactivate the rest. */
+export async function activateBenchmarkSetAction(params: {
+  franchiseId: string;
+  setId: string;
+}): Promise<FranchiseActionResult> {
+  const guard = await requireManageContext();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  try {
+    const franchise = await getFranchise(params.franchiseId);
+    if (!franchise) return { ok: false, error: 'Franchise not found (or you lack permission).' };
+    const sets = franchise.config.benchmarkSets ?? [];
+    if (!sets.some((s) => s.id === params.setId)) {
+      return { ok: false, error: 'Benchmark set not found.' };
+    }
+    const config: FranchiseConfig = {
+      ...franchise.config,
+      benchmarkSets: sets.map((s) => ({ ...s, active: s.id === params.setId })),
+    };
+    const updated = await updateFranchiseRow(params.franchiseId, { config });
+    if (!updated) return { ok: false, error: 'Franchise not found (or you lack permission).' };
+    return { ok: true, data: await withLinkedCount(updated) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Failed to activate benchmark set.' };
+  }
+}
+
+/** Remove a set. Deleting the active set leaves no set active — linked
+ *  workspaces simply fall back to the next tier (pack or defaults). */
+export async function deleteBenchmarkSetAction(params: {
+  franchiseId: string;
+  setId: string;
+}): Promise<FranchiseActionResult> {
+  const guard = await requireManageContext();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  try {
+    const franchise = await getFranchise(params.franchiseId);
+    if (!franchise) return { ok: false, error: 'Franchise not found (or you lack permission).' };
+    const sets = franchise.config.benchmarkSets ?? [];
+    if (!sets.some((s) => s.id === params.setId)) {
+      return { ok: false, error: 'Benchmark set not found.' };
+    }
+    const config: FranchiseConfig = {
+      ...franchise.config,
+      benchmarkSets: sets.filter((s) => s.id !== params.setId),
+    };
+    const updated = await updateFranchiseRow(params.franchiseId, { config });
+    if (!updated) return { ok: false, error: 'Franchise not found (or you lack permission).' };
+    return { ok: true, data: await withLinkedCount(updated) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Failed to delete benchmark set.' };
   }
 }
 

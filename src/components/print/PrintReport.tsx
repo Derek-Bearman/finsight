@@ -17,7 +17,7 @@
  */
 
 import React from 'react';
-import type { ClientWorkspace, Period } from '@/types';
+import type { ClientWorkspace, Period, WorkspaceTargets } from '@/types';
 import { ALL_PROFILES } from '@/lib/profiles';
 import { ProfileIcon } from '@/components/ui/profile-icon';
 import { buildPeriodAggregations, computeBalanceSheetRatios } from '@/lib/calculations';
@@ -32,11 +32,14 @@ import { getUniquePeriods } from '@/lib/calculations/period-aggregation';
 import { formatCurrency, formatPercent, formatRatio } from '@/lib/utils/format';
 import { buildExecutiveSummary } from '@/lib/insights/executive-summary';
 import {
+  PROVENANCE_LABELS,
   RATIO_DEF_MAP,
   resolveRatioBenchmark,
   meetsTarget,
   type RatioKey,
 } from '@/lib/targets';
+import { useEffectiveTargets } from '@/lib/franchise/useEffectiveTargets';
+import { INDUSTRY_BENCHMARK_DISCLAIMER } from '@/lib/benchmarks/packs';
 
 interface PrintReportProps {
   workspace: ClientWorkspace;
@@ -127,7 +130,13 @@ function latestPeriod(periods: Period[]): Period {
   return periods[periods.length - 1]!;
 }
 
-function ExecSummarySection({ workspace }: { workspace: ClientWorkspace }) {
+function ExecSummarySection({
+  workspace,
+  effectiveTargets,
+}: {
+  workspace: ClientWorkspace;
+  effectiveTargets: WorkspaceTargets;
+}) {
   const periods = getUniquePeriods(workspace.values);
   if (periods.length === 0) return null;
   const latest = latestPeriod(periods);
@@ -147,7 +156,7 @@ function ExecSummarySection({ workspace }: { workspace: ClientWorkspace }) {
   const grossMargin = totals.revenue > 0 ? totals.grossProfit / totals.revenue : 0;
   const netMargin = totals.revenue > 0 ? totals.netIncome / totals.revenue : 0;
 
-  const narrative = buildExecutiveSummary(workspace);
+  const narrative = buildExecutiveSummary(workspace, effectiveTargets);
 
   return (
     <section className="page-break-before avoid-break" style={{ paddingTop: '0.5rem' }}>
@@ -215,7 +224,13 @@ function PnLSection({ workspace }: { workspace: ClientWorkspace }) {
 // Key Ratios
 // ─────────────────────────────────────────────
 
-function RatiosSection({ workspace }: { workspace: ClientWorkspace }) {
+function RatiosSection({
+  workspace,
+  effectiveTargets,
+}: {
+  workspace: ClientWorkspace;
+  effectiveTargets: WorkspaceTargets;
+}) {
   const periods = getUniquePeriods(workspace.values);
   if (periods.length === 0) return null;
   const latest = latestPeriod(periods);
@@ -260,18 +275,22 @@ function RatiosSection({ workspace }: { workspace: ClientWorkspace }) {
     key: RatioKey,
     value: number | null,
     fallbackGuidance: string
-  ): { label: string; value: string; benchmark: string; status: string } => {
+  ): { label: string; value: string; benchmark: string; benchmarkTitle?: string; status: string } => {
     const def = RATIO_DEF_MAP[key]!;
-    const resolved = resolveRatioBenchmark(key, workspace.targets);
+    const resolved = resolveRatioBenchmark(key, effectiveTargets);
     const fmt = (v: number) => (def.format === 'percent' ? formatPercent(v) : formatRatio(v));
     if (resolved.target) {
-      const provenance = resolved.provenance === 'corporate' ? 'Corporate target' : 'Custom target';
+      // 'industry' gets the asterisk; the disclaimer footnote sits at the
+      // bottom of the report (plus a hover title for the on-screen preview).
+      const isIndustry = resolved.provenance === 'industry';
+      const provenance = `${PROVENANCE_LABELS[resolved.provenance]}${isIndustry ? '*' : ''}`;
       const verdict =
         value !== null ? (meetsTarget(value, resolved.target) ? '✓ met' : '✗ off target') : '';
       return {
         label: def.label,
         value: value !== null ? fmt(value) : '—',
         benchmark: `${resolved.targetText} (${provenance})`,
+        ...(isIndustry ? { benchmarkTitle: INDUSTRY_BENCHMARK_DISCLAIMER } : {}),
         status: verdict,
       };
     }
@@ -327,7 +346,7 @@ function RatiosSection({ workspace }: { workspace: ClientWorkspace }) {
                   </span>
                 )}
               </td>
-              <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', color: 'hsl(var(--muted-foreground))', fontSize: 12 }}>{r.benchmark}</td>
+              <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', color: 'hsl(var(--muted-foreground))', fontSize: 12 }} title={r.benchmarkTitle}>{r.benchmark}</td>
             </tr>
           ))}
         </tbody>
@@ -394,7 +413,13 @@ function ProjectionSection({ workspace }: { workspace: ClientWorkspace }) {
 // Operational Metrics
 // ─────────────────────────────────────────────
 
-function OperationalSection({ workspace }: { workspace: ClientWorkspace }) {
+function OperationalSection({
+  workspace,
+  effectiveTargets,
+}: {
+  workspace: ClientWorkspace;
+  effectiveTargets: WorkspaceTargets;
+}) {
   const periods = getUniquePeriods(workspace.values);
   if (periods.length === 0) return null;
   const profile = ALL_PROFILES.find((p) => p.id === workspace.industryProfileId);
@@ -411,7 +436,7 @@ function OperationalSection({ workspace }: { workspace: ClientWorkspace }) {
     summary,
     latest,
     workspace.operationalInputs,
-    workspace.targets?.metrics
+    effectiveTargets.metrics
   );
   const withData = metricResults.filter((r) => r.value !== null);
   if (withData.length === 0) return null;
@@ -459,6 +484,11 @@ export function PrintReport({ workspace }: PrintReportProps) {
   const profile = ALL_PROFILES.find((p) => p.id === workspace.industryProfileId);
   const profileName = profile?.name ?? 'Generic SMB';
   const hasData = workspace.accounts.length > 0 && workspace.values.length > 0;
+  // Composed targets: client target > franchise corporate set > industry pack.
+  // Non-franchise workspaces get plain workspace.targets semantics back.
+  // pack is non-null only when the industry toggle is on — it drives the
+  // asterisk footnote below.
+  const { targets: effectiveTargets, pack } = useEffectiveTargets(workspace);
 
   return (
     <div
@@ -483,11 +513,11 @@ export function PrintReport({ workspace }: PrintReportProps) {
 
       {hasData ? (
         <>
-          <ExecSummarySection workspace={workspace} />
+          <ExecSummarySection workspace={workspace} effectiveTargets={effectiveTargets} />
           <PnLSection workspace={workspace} />
-          <RatiosSection workspace={workspace} />
+          <RatiosSection workspace={workspace} effectiveTargets={effectiveTargets} />
           <ProjectionSection workspace={workspace} />
-          <OperationalSection workspace={workspace} />
+          <OperationalSection workspace={workspace} effectiveTargets={effectiveTargets} />
         </>
       ) : (
         <section className="page-break-before avoid-break">
@@ -498,6 +528,17 @@ export function PrintReport({ workspace }: PrintReportProps) {
             to see KPIs, ratios, projections, and operational metrics.
           </p>
         </section>
+      )}
+
+      {/* Industry benchmark footnote — printed whenever the industry pack is
+          in play so every asterisked row above resolves to this disclaimer */}
+      {hasData && pack && (
+        <p
+          data-testid="print-industry-footnote"
+          style={{ marginTop: '2rem', fontSize: 10, color: 'hsl(var(--muted-foreground))', lineHeight: 1.5 }}
+        >
+          * Industry benchmark: {INDUSTRY_BENCHMARK_DISCLAIMER} Pack {pack.packVersion} ({pack.packUpdated}), scope: {pack.scopeLabel}
+        </p>
       )}
 
       {/* Footer */}

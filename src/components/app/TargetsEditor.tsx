@@ -21,6 +21,14 @@ import type {
 } from '@/types';
 import { RATIO_DEFS } from '@/lib/targets';
 import { getProfile } from '@/lib/profiles';
+import { useWorkspaceStore } from '@/store/workspace-store';
+import { useEffectiveTargets } from '@/lib/franchise/useEffectiveTargets';
+import {
+  INDUSTRY_BENCHMARK_DISCLAIMER,
+  PACK_VERSION,
+  REGION_LABELS,
+  type BenchmarkRegion,
+} from '@/lib/benchmarks/packs';
 import {
   Dialog,
   DialogContent,
@@ -79,6 +87,20 @@ export function TargetsEditor({
   onSave: (targets: WorkspaceTargets) => void;
 }) {
   const profile = getProfile(workspace.industryProfileId);
+
+  // Benchmarks section (FRANCHISE_BENCHMARKS_PLAN.md §F2). The workspace-level
+  // benchmark fields write through the store's updateWorkspace path — the same
+  // mechanism the page's onSave uses for targets — so cloud-sync persists them.
+  // Unlike target rows they apply immediately rather than staging until Save:
+  // the pack caption below derives live from the workspace via
+  // useEffectiveTargets, and "Refresh benchmarks" is an explicit stamp action.
+  const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
+  const { corporateSetLabel, franchise, pack } = useEffectiveTargets(workspace);
+  const benchmarksEnabled = workspace.industryBenchmarksEnabled ?? false;
+  const packCurrent = workspace.benchmarkPackVersion === PACK_VERSION;
+  // Prefer the live franchise name (renames land server-side); fall back to
+  // the name cached on the workspace at link time.
+  const franchiseName = franchise?.name ?? workspace.franchiseName ?? 'franchise';
 
   const rows: RowDef[] = useMemo(() => {
     const ratioRows: RowDef[] = RATIO_DEFS.map((d) => ({
@@ -265,6 +287,104 @@ export function TargetsEditor({
               })}
             </tbody>
           </table>
+        </div>
+
+        {/* Benchmarks — workspace-level benchmark wiring (§F2) */}
+        <div className="border-t pt-3" style={{ borderColor: 'hsl(var(--border))' }}>
+          <h3
+            className="text-xs uppercase tracking-wide font-semibold"
+            style={{ color: 'hsl(var(--muted-foreground))' }}
+          >
+            Benchmarks
+          </h3>
+
+          {corporateSetLabel ? (
+            <p
+              className="text-sm mt-2"
+              style={{ color: 'hsl(var(--foreground))' }}
+              data-testid="corporate-benchmark-status"
+            >
+              Corporate benchmarks applied:{' '}
+              <span className="font-semibold">{corporateSetLabel}</span> (via {franchiseName})
+            </p>
+          ) : workspace.franchiseId ? (
+            <p
+              className="text-sm mt-2"
+              style={{ color: 'hsl(var(--muted-foreground))' }}
+              data-testid="corporate-benchmark-status"
+            >
+              Franchise linked, no active benchmark set yet.
+            </p>
+          ) : null}
+
+          <label className="flex items-center gap-2 cursor-pointer mt-2">
+            <input
+              type="checkbox"
+              data-testid="industry-benchmarks-toggle"
+              checked={benchmarksEnabled}
+              onChange={(e) =>
+                updateWorkspace(workspace.id, { industryBenchmarksEnabled: e.target.checked })
+              }
+            />
+            <span className="text-sm" style={{ color: 'hsl(var(--foreground))' }}>
+              Use industry benchmarks when no corporate or custom value applies
+            </span>
+          </label>
+
+          {benchmarksEnabled && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 pl-6">
+              <label
+                className="text-xs font-medium flex-shrink-0"
+                style={{ color: 'hsl(var(--muted-foreground))' }}
+                htmlFor="benchmark-region"
+              >
+                Region:
+              </label>
+              <select
+                id="benchmark-region"
+                data-testid="benchmark-region"
+                value={workspace.benchmarkRegion ?? 'national'}
+                onChange={(e) =>
+                  updateWorkspace(workspace.id, {
+                    benchmarkRegion: e.target.value as BenchmarkRegion,
+                  })
+                }
+                className="rounded-md border px-1.5 py-1 text-sm cursor-pointer"
+                style={{
+                  borderColor: 'hsl(var(--border))',
+                  background: 'hsl(var(--background))',
+                  color: 'hsl(var(--foreground))',
+                }}
+                aria-label="Benchmark region"
+              >
+                {(Object.entries(REGION_LABELS) as [BenchmarkRegion, string][]).map(
+                  ([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  )
+                )}
+              </select>
+              {pack && (
+                <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                  Pack {pack.packVersion} · {pack.scopeLabel}
+                </span>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="refresh-benchmarks"
+                disabled={packCurrent}
+                onClick={() => updateWorkspace(workspace.id, { benchmarkPackVersion: PACK_VERSION })}
+              >
+                {packCurrent ? `Up to date (pack ${PACK_VERSION})` : 'Refresh benchmarks'}
+              </Button>
+            </div>
+          )}
+
+          <p className="text-xs mt-2" style={{ color: 'hsl(var(--muted-foreground))' }}>
+            * {INDUSTRY_BENCHMARK_DISCLAIMER}
+          </p>
         </div>
 
         <DialogFooter className="flex items-center justify-between gap-3 sm:justify-between">

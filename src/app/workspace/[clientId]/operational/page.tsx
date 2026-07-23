@@ -17,6 +17,7 @@ import {
 } from '@/components/operational';
 import type { DataEntrySave } from '@/components/operational';
 import { ReadOnlyGuard } from '@/components/app/ReadOnlyGuard';
+import { useEffectiveTargets } from '@/lib/franchise/useEffectiveTargets';
 import type { ClientWorkspace, Period, CustomMetricDef } from '@/types';
 
 // ── Inner content — all hooks here ─────────────────────────────────────────
@@ -32,6 +33,10 @@ function OperationalContent({ clientId, workspace }: OperationalContentProps) {
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
 
   const profile = getProfile(workspace.industryProfileId);
+
+  // Composed targets: client target > franchise corporate set > industry pack.
+  // Falls back to plain workspace.targets semantics for non-franchise clients.
+  const { targets: effectiveTargets } = useEffectiveTargets(workspace);
 
   // ── Available periods from financial data ─────────────────────────────────
   const availablePeriods = useMemo(() => {
@@ -74,13 +79,13 @@ function OperationalContent({ clientId, workspace }: OperationalContentProps) {
       financialSummary,
       selectedPeriod,
       workspace.operationalInputs,
-      workspace.targets?.metrics
+      effectiveTargets.metrics
     );
   }, [
     profile.operationalMetrics,
     workspace.operationalData,
     workspace.operationalInputs,
-    workspace.targets,
+    effectiveTargets,
     financialSummary,
     selectedPeriod,
   ]);

@@ -2,6 +2,8 @@
 
 import type { MetricResult } from '@/lib/operational/calculator';
 import { formatMetricValue } from '@/lib/utils/format';
+import { PROVENANCE_LABELS } from '@/lib/targets';
+import { INDUSTRY_BENCHMARK_DISCLAIMER } from '@/lib/benchmarks/packs';
 
 export interface MetricCardProps {
   result: MetricResult;
@@ -73,7 +75,8 @@ export function MetricCard({ result }: MetricCardProps) {
       )}
 
       {/* Target / benchmark provenance — a corporate mandate must never be
-          confused with a loose FinSight default */}
+          confused with a loose FinSight default. Industry benchmarks render
+          with an asterisk + hover disclaimer. */}
       {result.provenance !== 'none' && (
         <p className="text-xs leading-snug" style={{ color: 'hsl(var(--muted-foreground))' }}>
           {result.targetText ? (
@@ -84,11 +87,10 @@ export function MetricCard({ result }: MetricCardProps) {
               {' · '}
             </>
           ) : null}
-          {result.provenance === 'corporate'
-            ? 'Corporate target'
-            : result.provenance === 'custom'
-              ? 'Custom target'
-              : 'FinSight default benchmark'}
+          <span title={result.provenance === 'industry' ? INDUSTRY_BENCHMARK_DISCLAIMER : undefined}>
+            {PROVENANCE_LABELS[result.provenance]}
+            {result.provenance === 'industry' ? '*' : ''}
+          </span>
         </p>
       )}
 

@@ -75,6 +75,8 @@ import { ExecutiveSummary } from '@/components/insights/ExecutiveSummary';
 import { TargetsEditor } from '@/components/app/TargetsEditor';
 import { FranchiseLinkControl } from '@/components/franchise/FranchiseLinkControl';
 import { RATIO_DEF_MAP, resolveRatioBenchmark, type RatioKey } from '@/lib/targets';
+import { useEffectiveTargets } from '@/lib/franchise/useEffectiveTargets';
+import { INDUSTRY_BENCHMARK_DISCLAIMER } from '@/lib/benchmarks/packs';
 
 // ── Helper: years available in values ────────────────────────────────────────
 
@@ -525,11 +527,14 @@ function RatioCard({
   value,
   color,
   sub,
+  subTitle,
 }: {
   label: string;
   value: string;
   color?: string;
   sub?: string;
+  /** Hover tooltip for the sub line (industry benchmark disclaimer). */
+  subTitle?: string;
 }) {
   return (
     <div
@@ -543,7 +548,7 @@ function RatioCard({
         {value}
       </p>
       {sub && (
-        <p className="text-xs leading-snug" style={{ color: 'hsl(var(--muted-foreground))' }}>
+        <p className="text-xs leading-snug" style={{ color: 'hsl(var(--muted-foreground))' }} title={subTitle}>
           {sub}
         </p>
       )}
@@ -565,12 +570,20 @@ function zScoreZoneLabel(z: number | null): string {
   return `${z.toFixed(2)} (Distress)`;
 }
 
+/** Short provenance caption for the reports-tab ratio cards. 'industry'
+ *  carries the asterisk; the disclaimer rides the card's hover tooltip. */
+function shortProvenance(p: import('@/lib/targets').TargetProvenance): string {
+  if (p === 'corporate') return 'Corporate';
+  if (p === 'industry') return 'Industry benchmark*';
+  return 'Custom';
+}
+
 /** Reports-tab ratio card with target/provenance awareness. */
 function reportRatioCard(
   key: RatioKey,
   value: number | null,
   targets: import('@/types').WorkspaceTargets | undefined
-): { label: string; value: string; color?: string; sub: string } {
+): { label: string; value: string; color?: string; sub: string; subTitle?: string } {
   const def = RATIO_DEF_MAP[key]!;
   const resolved = resolveRatioBenchmark(key, targets);
   const status = getBenchmarkStatus(value, resolved.benchmark);
@@ -580,8 +593,9 @@ function reportRatioCard(
     color: value != null ? status.color : undefined,
     // Always show the active threshold; the default reads like a settable target.
     sub: resolved.targetText
-      ? `${resolved.targetText} · ${resolved.provenance === 'corporate' ? 'Corporate' : 'Custom'}`
+      ? `${resolved.targetText} · ${shortProvenance(resolved.provenance)}`
       : `${resolved.thresholdText} · FinSight default`,
+    ...(resolved.provenance === 'industry' ? { subTitle: INDUSTRY_BENCHMARK_DISCLAIMER } : {}),
   };
 }
 
@@ -596,6 +610,9 @@ function ReportsTab({
 }) {
   const workspace = useWorkspaceStore(s => s.workspaces.find(w => w.id === clientId));
   const setGranularity = onGranularityChange;
+  // Composed targets: client target > franchise corporate set > industry pack.
+  // Falls back to plain workspace.targets semantics for non-franchise clients.
+  const { targets: effectiveTargets } = useEffectiveTargets(workspace);
 
   const { aggregations, bsSeries, profSeries, healthSeries } = useMemo(() => {
     if (!workspace || workspace.accounts.length === 0) {
@@ -680,24 +697,27 @@ function ReportsTab({
                 Key Ratios (Latest Period)
               </h3>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <RatioCard {...reportRatioCard('gross_margin', latestAgg?.grossMarginPct ?? null, workspace.targets)} />
-                <RatioCard {...reportRatioCard('net_margin', latestAgg?.netMarginPct ?? null, workspace.targets)} />
-                <RatioCard {...reportRatioCard('current_ratio', latestBS?.currentRatio ?? null, workspace.targets)} />
-                <RatioCard {...reportRatioCard('debt_to_equity', latestBS?.debtToEquity ?? null, workspace.targets)} />
-                <RatioCard {...reportRatioCard('roe', latestProf?.roe ?? null, workspace.targets)} />
-                <RatioCard
-                  label="Altman Z''"
-                  value={zScoreZoneLabel(latestHealth?.altmanZScore ?? null)}
-                  color={zScoreZoneColor(latestHealth?.altmanZScore ?? null)}
-                  sub={
-                    (() => {
-                      const r = resolveRatioBenchmark('altman_z', workspace.targets);
-                      return r.targetText
-                        ? `${r.targetText} · ${r.provenance === 'corporate' ? 'Corporate' : 'Custom'}`
-                        : `${r.thresholdText} · FinSight default`;
-                    })()
-                  }
-                />
+                <RatioCard {...reportRatioCard('gross_margin', latestAgg?.grossMarginPct ?? null, effectiveTargets)} />
+                <RatioCard {...reportRatioCard('net_margin', latestAgg?.netMarginPct ?? null, effectiveTargets)} />
+                <RatioCard {...reportRatioCard('current_ratio', latestBS?.currentRatio ?? null, effectiveTargets)} />
+                <RatioCard {...reportRatioCard('debt_to_equity', latestBS?.debtToEquity ?? null, effectiveTargets)} />
+                <RatioCard {...reportRatioCard('roe', latestProf?.roe ?? null, effectiveTargets)} />
+                {(() => {
+                  const r = resolveRatioBenchmark('altman_z', effectiveTargets);
+                  return (
+                    <RatioCard
+                      label="Altman Z''"
+                      value={zScoreZoneLabel(latestHealth?.altmanZScore ?? null)}
+                      color={zScoreZoneColor(latestHealth?.altmanZScore ?? null)}
+                      sub={
+                        r.targetText
+                          ? `${r.targetText} · ${shortProvenance(r.provenance)}`
+                          : `${r.thresholdText} · FinSight default`
+                      }
+                      subTitle={r.provenance === 'industry' ? INDUSTRY_BENCHMARK_DISCLAIMER : undefined}
+                    />
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -731,6 +751,9 @@ function OverviewTab({
   onImportData: () => void;
 }) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
+  // Composed targets: client target > franchise corporate set > industry pack.
+  // Falls back to plain workspace.targets semantics for non-franchise clients.
+  const { targets: effectiveTargets, corporateSetLabel } = useEffectiveTargets(workspace);
 
   const availableYears = useMemo(
     () => (workspace ? getAvailableYears(workspace.values) : []),
@@ -843,7 +866,7 @@ function OverviewTab({
       trend: number[]
     ): RatioSparklineProps => {
       const def = RATIO_DEF_MAP[key]!;
-      const resolved = resolveRatioBenchmark(key, workspace?.targets);
+      const resolved = resolveRatioBenchmark(key, effectiveTargets);
       return {
         label: def.label,
         value,
@@ -853,6 +876,7 @@ function OverviewTab({
         targetText: resolved.targetText,
         thresholdText: resolved.thresholdText,
         provenance: resolved.provenance,
+        setLabel: corporateSetLabel,
         explainer: def.explainer,
       };
     };
@@ -865,7 +889,7 @@ function OverviewTab({
       card('contribution_margin', latestAgg?.contributionMarginPct ?? null, aggs.map((a) => a.contributionMarginPct)),
       card('altman_z', latestHealth?.altmanZScore ?? null, healthSlice.map((h) => h.altmanZScore ?? 0)),
     ];
-  }, [periodAggs, bsSeries, healthSeries, workspace?.targets]);
+  }, [periodAggs, bsSeries, healthSeries, effectiveTargets, corporateSetLabel]);
 
   // ── Scenario comparison data ─────────────────────────────────────────────
   const scenarioChartData = useMemo(() => {
@@ -1517,6 +1541,8 @@ function WhatIfTab({ clientId }: { clientId: string }) {
 function OperationalTabContent({ clientId }: { clientId: string }) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
   const profile = workspace ? getProfile(workspace.industryProfileId) : null;
+  // Composed targets — corporate metric mandates apply to operational metrics.
+  const { targets: effectiveTargets } = useEffectiveTargets(workspace);
 
   const availablePeriods = useMemo(() => {
     if (!workspace) return [];
@@ -1552,9 +1578,9 @@ function OperationalTabContent({ clientId }: { clientId: string }) {
       financialSummary,
       selectedPeriod,
       workspace.operationalInputs,
-      workspace.targets?.metrics
+      effectiveTargets.metrics
     );
-  }, [profile?.id, workspace?.operationalData, workspace?.operationalInputs, workspace?.targets, financialSummary, selectedPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [profile?.id, workspace?.operationalData, workspace?.operationalInputs, effectiveTargets, financialSummary, selectedPeriod]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const metricsWithData = metricResults.filter((r) => r.value !== null).length;
 

@@ -28,12 +28,21 @@ import {
   deleteFranchiseAction,
 } from '@/lib/data/franchise-actions';
 import type { Franchise } from '@/lib/data/franchises';
+import { BenchmarkSetPanel } from '@/components/franchise/BenchmarkSetPanel';
 
 type FranchiseWithLinks = Franchise & { linkedCount: number };
 
 function profileLabel(industryProfileId: string | null): string {
   if (!industryProfileId) return 'No profile';
   return PROFILE_MAP[industryProfileId]?.name ?? industryProfileId;
+}
+
+/** "2 benchmark sets · active: FY2027 targets" — read-only row summary. */
+function benchmarkSummary(f: FranchiseWithLinks): string {
+  const sets = f.config.benchmarkSets ?? [];
+  const active = sets.find((s) => s.active);
+  const count = `${sets.length} benchmark set${sets.length === 1 ? '' : 's'}`;
+  return active ? `${count} · active: ${active.label}` : count;
 }
 
 function byName(a: FranchiseWithLinks, b: FranchiseWithLinks) {
@@ -57,6 +66,9 @@ export function FranchiseManager() {
 
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<FranchiseWithLinks | null>(null);
+
+  // Per-row corporate-benchmarks panel (canManage only)
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -108,6 +120,10 @@ export function FranchiseManager() {
       setFranchises((prev) => prev.map((x) => (x.id === f.id ? res.data : x)).sort(byName));
       setRenamingId(null);
     });
+  }
+
+  function handleFranchiseUpdated(updated: FranchiseWithLinks) {
+    setFranchises((prev) => prev.map((x) => (x.id === updated.id ? updated : x)).sort(byName));
   }
 
   function handleDelete() {
@@ -256,12 +272,24 @@ export function FranchiseManager() {
                           {profileLabel(f.industryProfileId)}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
-                          {f.linkedCount} linked client{f.linkedCount === 1 ? '' : 's'} · Created{' '}
+                          {f.linkedCount} linked client{f.linkedCount === 1 ? '' : 's'} ·{' '}
+                          <span data-testid="franchise-benchmark-summary">{benchmarkSummary(f)}</span>
+                          {' · Created '}
                           {new Date(f.createdAt).toLocaleDateString()}
                         </span>
                       </div>
                       {canManage && (
                         <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setExpandedId(expandedId === f.id ? null : f.id)}
+                            disabled={pending}
+                            aria-expanded={expandedId === f.id}
+                            data-testid="franchise-benchmarks-toggle"
+                          >
+                            {expandedId === f.id ? 'Hide benchmarks' : 'Benchmarks'}
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"
@@ -283,6 +311,11 @@ export function FranchiseManager() {
                         </div>
                       )}
                     </>
+                  )}
+                  {canManage && !isRenaming && expandedId === f.id && (
+                    <div className="basis-full pt-1">
+                      <BenchmarkSetPanel franchise={f} onUpdated={handleFranchiseUpdated} />
+                    </div>
                   )}
                 </div>
               );
