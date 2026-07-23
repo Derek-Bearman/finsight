@@ -3,6 +3,7 @@
 import React, { use, useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useWorkspaceStore } from '@/store/workspace-store';
+import { useReadOnly } from '@/components/app/firm-context';
 import { getProfile } from '@/lib/profiles';
 import { projectWorkspace } from '@/lib/projections/workspace-projections';
 import type { WorkspaceProjectionOptions } from '@/lib/projections/workspace-projections';
@@ -36,6 +37,7 @@ function ProjectionsContent({
 }) {
   const profile = getProfile(workspace.industryProfileId);
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
+  const readOnly = useReadOnly();
 
   // Initialize from the persisted workspace settings so Projections and What-If
   // agree; absent fields fall back to today's behavior (profile default, no
@@ -52,12 +54,12 @@ function ProjectionsContent({
   // store so the setting survives navigation and is shared with What-If.
   function handleModelChange(m: ProjectionModel) {
     setModel(m);
-    updateWorkspace(clientId, { projectionModel: m });
+    if (!readOnly) updateWorkspace(clientId, { projectionModel: m });
   }
 
   function handleGrowthRateChange(v: number | null) {
     setGrowthRateOverride(v);
-    updateWorkspace(clientId, { projectionGrowthOverride: v });
+    if (!readOnly) updateWorkspace(clientId, { projectionGrowthOverride: v });
   }
 
   const horizonMonths = HORIZON_MONTHS[horizon];

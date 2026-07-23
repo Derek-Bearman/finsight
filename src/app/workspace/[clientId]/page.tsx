@@ -393,6 +393,7 @@ function MappingTab({ clientId }: { clientId: string }) {
 function ProjectionsTab({ clientId }: { clientId: string }) {
   const workspace = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === clientId));
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
+  const readOnly = useReadOnly();
 
   const profile = workspace ? getProfile(workspace.industryProfileId) : null;
 
@@ -408,15 +409,17 @@ function ProjectionsTab({ clientId }: { clientId: string }) {
   );
 
   // Change handlers: update local state (responsive render) and persist to the
-  // store so the setting survives navigation and is shared with What-If.
+  // store so the setting survives navigation and is shared with What-If. The
+  // persist is skipped while read-only (past_due grace) — it could never save
+  // and would dirty the sync state, same guard the What-If seed uses.
   function handleModelChange(m: ProjectionModel) {
     setModel(m);
-    updateWorkspace(clientId, { projectionModel: m });
+    if (!readOnly) updateWorkspace(clientId, { projectionModel: m });
   }
 
   function handleGrowthRateChange(v: number | null) {
     setGrowthRateOverride(v);
-    updateWorkspace(clientId, { projectionGrowthOverride: v });
+    if (!readOnly) updateWorkspace(clientId, { projectionGrowthOverride: v });
   }
 
   const horizonMonths = HORIZON_MONTHS[horizon];

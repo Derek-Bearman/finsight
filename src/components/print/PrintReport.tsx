@@ -18,7 +18,7 @@
 
 import React, { useEffect } from 'react';
 import type { ClientWorkspace, Period, WorkspaceTargets } from '@/types';
-import { ALL_PROFILES } from '@/lib/profiles';
+import { ALL_PROFILES, getProfile } from '@/lib/profiles';
 import { ProfileIcon } from '@/components/ui/profile-icon';
 import { buildPeriodAggregations, computeBalanceSheetRatios } from '@/lib/calculations';
 import { computePnL, toFinancialSummary } from '@/lib/calculations/pnl';
@@ -374,9 +374,12 @@ function ProjectionSection({ workspace }: { workspace: ClientWorkspace }) {
   const periods = getUniquePeriods(workspace.values);
   if (periods.length < 3) return null; // Projections need ≥3 months
 
+  // Use the workspace's persisted projection model/growth so the printed PDF
+  // matches what the app shows (Projections tab + What-If share these).
   const proj = projectWorkspace(workspace.accounts, workspace.values, {
     horizonMonths: 12,
-    model: 'linear',
+    model: workspace.projectionModel ?? getProfile(workspace.industryProfileId).defaultProjectionModel,
+    growthRateOverride: workspace.projectionGrowthOverride ?? undefined,
   });
 
   const data: ProjectionChartDataPoint[] = proj.rolledUp.map((r) => {
