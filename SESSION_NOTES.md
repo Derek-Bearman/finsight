@@ -1,8 +1,53 @@
 # FinSight — Session Notes
 
-**Last updated:** 2026-07-23
+**Last updated:** 2026-07-24
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
 
+>  **2026-07-24 — FULL ADVERSARIAL AUDIT + FIXES LIVE (version `e98e3e82`,
+> commit `8e3f6c2`).** Whole-app verify-first audit (multi-agent: 17 subsystem
+> readers + 8 cross-cutting sweeps, each finding refuted by 2 skeptics; then a
+> self-verify pass on my own fixes that CAUGHT + fixed 3 parser regressions I'd
+> introduced before they shipped — the self-verify is the reason this is safe).
+> Fixed every CONFIRMED defect + added a `scripts/checks` regression for each
+> money-math/parser fix (18 suites now incl. new `classifier.check.ts`;
+> `npm run check` is wired into `cf:build` so the suites gate every build).
+> **3 critical:** mapping page crashed to blank (useMemo after early returns —
+> Rules of Hooks; same latent fix in the What-If tab); CSV parser silently
+> DROPPED the QBO Equity "Net Income" leaf on balance-sheet imports (statement-
+> type-aware now, `AUDIT_CSV_PARSER_FOLLOWUP.md` item closed); franchise SCOA
+> rolled up balance-sheet lines by SUM (~12x) → now ending balance at a single
+> global ending month. **Money-math:** interest coverage was TIE−1 + Altman X3
+> understated (EBIT now adds interest back); Altman X4 no longer flags a
+> debt-free firm as distress; SaaS ARPU/LTV/CAC-payback dropped an erroneous /12;
+> breakeven interest/tax double-count; `efficiency.hasInventory` honors
+> isExcluded; operational calc treats a real 0 as data. **Parser (statement-type
+> aware):** BS quarter/annual columns keep the ending balance (no /divisor);
+> monthly+quarter no longer double-count (finest wins); `deduplicateParentRows`
+> uses a leaf-descendant value-sum + section guard so real leaves survive
+> (nested + wide-indent safe); full month names + trailing-minus negatives;
+> "Liabilities and Equity" section reset; hardened header-row detection (a lone
+> "December 2024" subtitle no longer picked as the header). **Projections:**
+> early-stopping accounts align to the global grid; driver-mode What-If revenue
+> scenario now lifts variable costs (baseline ratio denominator); partial-year
+> annual band. **Print/reports/statements:** report anchors on the latest P&L
+> period (a later BS-only month no longer blanks the year); empty COGS hidden;
+> BS shows blank (not $0) for uncovered periods AND still foots; PDF gross-margin
+> threshold from the registry; exec-summary ratio format canonical; scenario
+> chart colors match cards. **a11y/consistency:** TourOverlay focus trap + focus
+> restore + arrow-keys-while-typing guard; What-If scenario card keyboard-
+> operable; conflict-warning contrast; deduped `formatCurrency`; removed dead
+> Overview scenario chart; debounce flush on scenario switch.
+> tsc + all 18 checks + `cf:build` green; ONE `cf:deploy`. **Prod-verified on the
+> Pizza Palace franchise firm:** mapping page renders (crash gone, 0 console
+> errors); SCOA balance lines show ending balances ($1.2M checking, not ~$14M);
+> Altman debt-free = Safe; ratios/exec-summary/Statements clean, zero NaN; SSR
+> doctored-expiry probe still PASSES post-deploy.
+> **Accepted-as-is (Derek's call):** cloud-sync lost-ack reconcile (`cloud-sync.ts:355`
+> — rare; chip re-reads authoritative DB state) and the wizard column-mapping
+> no-op (`page.tsx:721`). **RECONCILED:** the SSR middleware snapshot bug is
+> FIXED (proven live, both before and after this deploy) — the memory index's
+> "FinSight has it (chip pending)" was STALE and is corrected.
+>
 >  **2026-07-24 — SCOA ROLL-UP + CORPORATE-LINE COMPARISON + BUCKET MAPPER LIVE
 > (version `1216fe7f`).** Turned the SCOA feature from a 1-to-1 audit into a real
 > many-to-one roll-up so a franchisee's granular COA (3 checking, 5 marketing, 2

@@ -1,5 +1,15 @@
 # CSV Parser — deferred audit findings (2026-07-18)
 
+> **RESOLVED 2026-07-24** (version `e98e3e82`, commit `8e3f6c2`). All three were
+> fixed exactly along the "Suggested approach" below: statement type is resolved
+> BEFORE the value loop (via BS section-header detection, not a substring, so a
+> P&L with a "…Assets" leaf isn't mis-typed); #1 keeps the Net-Income equity
+> family on a BS; #2 assigns the ending balance to the period-end month for BS
+> stock columns (no /divisor); #3 drops a parent only when it equals the sum of
+> its same-section LEAF descendants (relative depth). Fixtures added in
+> `scripts/checks/csv-parser.check.ts` (16 groups). A self-verify pass caught +
+> corrected an over-narrow first attempt at #3 before deploy. Kept for history.
+
 Three real balance-sheet import bugs surfaced in the overnight audit. They were
 **not fixed** because a correct fix needs statement-type awareness threaded into
 row-building plus regression tests, and rushing a change to the live financial
