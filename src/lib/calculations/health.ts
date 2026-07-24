@@ -2,6 +2,16 @@ import type { Account, AccountValue, Period, HealthScores } from '@/types';
 import { aggregateValuesStockAware, type Granularity } from './period-aggregation';
 import { computePnL } from './pnl';
 
+/**
+ * Altman X4 (equity/liabilities) sentinel for a debt-free firm with positive
+ * equity: it has no leverage risk, so it scores at the top of this axis rather
+ * than the div-by-zero fallback of 0. Bounded so the term (1.05·X4) doesn't
+ * swamp the composite; a debt-free firm with neutral other ratios lands safely
+ * in the "safe" zone (Z'' >= 2.6), while one bleeding cash (very negative X3)
+ * can still fall to grey/distress.
+ */
+const NO_DEBT_LEVERAGE_SCORE = 4.0;
+
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
@@ -89,13 +99,17 @@ function getAccountBalance(
  * Altman Z-Score — private company variant (Z''):
  * X1 = working capital / total assets
  * X2 = retained earnings / total assets
- * X3 = EBIT / total assets  (EBIT = operating income)
- * X4 = book value of equity / total liabilities
+ * X3 = EBIT / total assets  (EBIT = operating income + interest expense; see below)
+ * X4 = book value of equity / total liabilities (capped high when debt-free)
  * Z'' = 6.56*X1 + 3.26*X2 + 6.72*X3 + 1.05*X4
  * Zones: >= 2.6 = safe, 1.1–2.6 = grey, < 1.1 = distress
  *
  * interest coverage = EBIT / interest expense
  * (null if interest expense is 0 or not present)
+ *
+ * EBIT note: interest is an ordinary 'expense' account here, so operating
+ * income already nets it out. EBIT adds interest back so both X3 and interest
+ * coverage use the true pre-interest figure.
  */
 export function computeHealthScores(
   accounts: Account[],
@@ -107,8 +121,29 @@ export function computeHealthScores(
   const periodVals = values.filter(v => periodsEqual(v.period, period));
   const pnl = computePnL(accounts, periodVals, period);
 
-  // EBIT = operating income (before interest and tax in this model)
-  const ebit = pnl.operatingIncome;
+  // Per-account totals for this period (used for the interest add-back below
+  // and, later, the interest-coverage denominator).
+  const amountByAccount = new Map<string, number>();
+  for (const v of periodVals) {
+    amountByAccount.set(v.accountId, (amountByAccount.get(v.accountId) ?? 0) + v.amount);
+  }
+
+  // Interest expense for the period. In this model interest is an ordinary
+  // 'expense' account, so pnl.operatingIncome has ALREADY subtracted it. Add it
+  // back to form a PRE-INTEREST figure — both the interest-coverage ratio
+  // (EBIT / interest) and Altman X3 (EBIT / assets) are defined pre-interest.
+  // Without the add-back, interest coverage computes to TIE − 1 and X3 is
+  // understated by interest/assets. (Income tax is NOT separately isolated: an
+  // SMB P&L rarely carries a distinct income-tax line, and most "tax" accounts
+  // — property/payroll/sales tax — are operating costs that belong in EBIT. If
+  // a separate income-tax line exists, this is EBIT-before-interest, a small
+  // over-statement vs textbook EBIT but strictly closer than the pre-fix value.)
+  const interestAccounts = accounts.filter(a => !a.isExcluded && isInterestExpense(a));
+  const interestExpense = interestAccounts.reduce(
+    (s, a) => s + (amountByAccount.get(a.id) ?? 0),
+    0
+  );
+  const ebit = pnl.operatingIncome + interestExpense;
 
   // Balance sheet items (snapshot)
   const currentAssets = getAccountBalance(accounts, values, period, isCurrentAsset);
@@ -126,29 +161,27 @@ export function computeHealthScores(
     const X1 = workingCapital / totalAssets;
     const X2 = retainedEarnings / totalAssets;
     const X3 = ebit / totalAssets;
-    const X4 = totalLiabilities !== 0 ? totalEquity / totalLiabilities : 0;
+    // X4 = book equity / total liabilities. A debt-free firm has the STRONGEST
+    // leverage standing, not the weakest — the old `: 0` fallback scored a
+    // debt-free, positive-equity firm at the worst possible value and flagged
+    // it as distress. With no liabilities and positive equity, treat X4 as a
+    // capped high score (no leverage risk); zero/negative equity stays 0.
+    const X4 =
+      totalLiabilities !== 0
+        ? totalEquity / totalLiabilities
+        : totalEquity > 0
+          ? NO_DEBT_LEVERAGE_SCORE
+          : 0;
 
     altmanZScore = 6.56 * X1 + 3.26 * X2 + 6.72 * X3 + 1.05 * X4;
   }
 
-  // Interest coverage = EBIT / interest expense
-  // Find interest expense accounts
-  const interestAccounts = accounts.filter(a => !a.isExcluded && isInterestExpense(a));
-  const hasInterestAccounts = interestAccounts.length > 0;
-
+  // Interest coverage = EBIT / interest expense (interestExpense computed above,
+  // where it is also added back into EBIT). Null when no interest account or a
+  // zero interest total.
   let interestCoverageRatio: number | null = null;
-  if (hasInterestAccounts) {
-    const amountByAccount = new Map<string, number>();
-    for (const v of periodVals) {
-      amountByAccount.set(v.accountId, (amountByAccount.get(v.accountId) ?? 0) + v.amount);
-    }
-    const interestExpense = interestAccounts.reduce(
-      (s, a) => s + (amountByAccount.get(a.id) ?? 0),
-      0
-    );
-    if (interestExpense !== 0) {
-      interestCoverageRatio = ebit / interestExpense;
-    }
+  if (interestAccounts.length > 0 && interestExpense !== 0) {
+    interestCoverageRatio = ebit / interestExpense;
   }
 
   return {
@@ -296,16 +329,14 @@ export function runTests(): void {
 
     const result = computeHealthScores(accounts, values, { year: 2024, month: 1 });
 
-    // ebit = 10000 - 4000 - 500 = 5500 (interest is included in opex)
-    // interest expense = 500
-    // interest coverage = 5500 / 500 = 11
+    // operatingIncome = 10000 - 4000 - 500 = 5500 (interest sits in opex).
+    // EBIT adds the 500 interest back = 6000 (earnings BEFORE interest).
+    // interest coverage (Times Interest Earned) = EBIT / interest = 6000 / 500 = 12.
     console.assert(
       result.interestCoverageRatio !== null,
       'interestCoverageRatio should not be null'
     );
-    // Note: interest expense is part of opex, so ebit includes it
-    // interest coverage = operatingIncome / interestExpense
-    const expectedICR = (10000 - 4000 - 500) / 500;
+    const expectedICR = (10000 - 4000 - 500 + 500) / 500; // = 12 (true TIE, not 11)
     console.assert(
       Math.abs((result.interestCoverageRatio ?? 0) - expectedICR) < 1e-9,
       `interestCoverageRatio should be ${expectedICR}, got ${result.interestCoverageRatio}`

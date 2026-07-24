@@ -136,6 +136,22 @@ function latestPeriod(periods: Period[]): Period {
   return periods[periods.length - 1]!;
 }
 
+/**
+ * Latest period that actually carries P&L (revenue/cogs/expense) data. A later
+ * balance-sheet-only month (a BS snapshot imported after the last full P&L
+ * month) must NOT become the report year — that collapsed the Exec Summary and
+ * Income Statement to an all-$0 year. Falls back to null when there is no P&L.
+ */
+function latestPnLPeriod(workspace: ClientWorkspace): Period | null {
+  const pnlIds = new Set(
+    workspace.accounts
+      .filter((a) => a.type === 'revenue' || a.type === 'cogs' || a.type === 'expense')
+      .map((a) => a.id)
+  );
+  const pnlPeriods = getUniquePeriods(workspace.values.filter((v) => pnlIds.has(v.accountId)));
+  return pnlPeriods.length > 0 ? latestPeriod(pnlPeriods) : null;
+}
+
 function ExecSummarySection({
   workspace,
   effectiveTargets,
@@ -145,7 +161,8 @@ function ExecSummarySection({
 }) {
   const periods = getUniquePeriods(workspace.values);
   if (periods.length === 0) return null;
-  const latest = latestPeriod(periods);
+  // Use the latest P&L period so a later BS-only month doesn't blank the year.
+  const latest = latestPnLPeriod(workspace) ?? latestPeriod(periods);
   const yearValues = workspace.values.filter((v) => v.period.year === latest.year);
   const yearAggregations = buildPeriodAggregations(workspace.accounts, yearValues, 'monthly');
   // Roll up YTD totals
@@ -195,7 +212,8 @@ function ExecSummarySection({
 function PnLSection({ workspace }: { workspace: ClientWorkspace }) {
   const periods = getUniquePeriods(workspace.values);
   if (periods.length === 0) return null;
-  const latestYear = latestPeriod(periods).year;
+  // Latest P&L year, so a later BS-only month doesn't title an all-$0 statement.
+  const latestYear = (latestPnLPeriod(workspace) ?? latestPeriod(periods)).year;
   const yearValues = workspace.values.filter((v) => v.period.year === latestYear);
   const aggregations = buildPeriodAggregations(workspace.accounts, yearValues, 'monthly');
   if (aggregations.length === 0) return null;
@@ -242,33 +260,15 @@ function RatiosSection({
   const latest = latestPeriod(periods);
   const pnl = computePnL(workspace.accounts, workspace.values, latest);
 
-  // Balance-sheet snapshot at the latest period for current/debt ratios
-  const valuesUpToLatest = workspace.values.filter(
-    (v) => v.period.year < latest.year || (v.period.year === latest.year && v.period.month <= latest.month)
-  );
-  const assetTotals: Record<string, number> = {};
-  for (const v of valuesUpToLatest) {
-    const acc = workspace.accounts.find((a) => a.id === v.accountId);
-    if (!acc || acc.isExcluded) continue; // summary rows never count
-    if (acc.type === 'asset' || acc.type === 'liability' || acc.type === 'equity') {
-      // Balance-sheet accounts: take the LATEST period value (running balance)
-      assetTotals[acc.id] = v.amount;
-    }
-  }
-  let assets = 0, liabilities = 0, equity = 0;
-  for (const acc of workspace.accounts) {
-    if (acc.isExcluded) continue;
-    const val = assetTotals[acc.id] ?? 0;
-    if (acc.type === 'asset') assets += val;
-    else if (acc.type === 'liability') liabilities += val;
-    else if (acc.type === 'equity') equity += val;
-  }
-  const hasBS = assets > 0 || liabilities > 0 || equity > 0;
-
   // Same math as the on-screen ratio cards (current assets / current
   // liabilities) — the old totals-based shortcut disagreed with the app
   // and could mis-judge targets on the PDF.
   const bsRatios = computeBalanceSheetRatios(workspace.accounts, workspace.values, latest);
+  // hasBS reflects the ratios ACTUALLY rendered (period-exact at `latest`), not
+  // an array-order scan of some earlier balance — so the "no balance sheet
+  // imported" note shows exactly when the ratios are unavailable, and there is
+  // no dependence on workspace.values ordering.
+  const hasBS = bsRatios.currentRatio !== null || bsRatios.debtToEquity !== null;
   const currentRatio = hasBS ? bsRatios.currentRatio : null;
   const debtEquity = hasBS ? bsRatios.debtToEquity : null;
   const grossMargin = pnl.revenue > 0 ? pnl.grossMarginPct : null;
@@ -279,8 +279,7 @@ function RatiosSection({
   // replaces the generic guidance text and gets a met/off-target verdict.
   const buildRow = (
     key: RatioKey,
-    value: number | null,
-    fallbackGuidance: string
+    value: number | null
   ): { label: string; value: string; benchmark: string; benchmarkTitle?: string; status: string } => {
     const def = RATIO_DEF_MAP[key]!;
     const resolved = resolveRatioBenchmark(key, effectiveTargets);
@@ -300,20 +299,23 @@ function RatiosSection({
         status: verdict,
       };
     }
+    // No target set: use the SAME registry-derived default threshold the
+    // on-screen ratio cards show (defaultBenchmarkThreshold), so the PDF can't
+    // drift from the app (gross margin printed "30%" while the app used 40%).
     return {
       label: def.label,
       value: value !== null ? fmt(value) : '—',
-      benchmark: `${fallbackGuidance} (FinSight default)`,
+      benchmark: `${resolved.thresholdText} (FinSight default)`,
       status: '',
     };
   };
 
   const rows = [
-    buildRow('gross_margin', grossMargin, 'Healthy: 30%+'),
-    buildRow('net_margin', netMargin, 'Healthy: 10%+'),
-    buildRow('contribution_margin', contribMargin, 'Healthy: 40%+'),
-    buildRow('current_ratio', currentRatio, 'Healthy: 2.0+'),
-    buildRow('debt_to_equity', debtEquity, 'Healthy: <1.0'),
+    buildRow('gross_margin', grossMargin),
+    buildRow('net_margin', netMargin),
+    buildRow('contribution_margin', contribMargin),
+    buildRow('current_ratio', currentRatio),
+    buildRow('debt_to_equity', debtEquity),
   ];
 
   return (
@@ -434,7 +436,9 @@ function OperationalSection({
   const profile = ALL_PROFILES.find((p) => p.id === workspace.industryProfileId);
   if (!profile || profile.operationalMetrics.length === 0) return null;
 
-  const latest = latestPeriod(periods);
+  // Operational metrics derive from P&L financials, so anchor on the latest P&L
+  // period (a later BS-only month would zero out revenue/margin inputs).
+  const latest = latestPnLPeriod(workspace) ?? latestPeriod(periods);
   // computeMetricsForPeriod wants a FinancialSummary, which is derived
   // from a PnL for that period.
   const pnl = computePnL(workspace.accounts, workspace.values, latest);

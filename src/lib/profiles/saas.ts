@@ -149,7 +149,10 @@ export const saasProfile: IndustryProfile = {
       formula: 'MRR ÷ Active Customers',
       calculate: (inputs, financials) => {
         if (!inputs['active_customers'] || inputs['active_customers'] === 0) return null;
-        return (financials.revenue / 12) / inputs['active_customers'];
+        // financials.revenue is a SINGLE month's revenue (= MRR for a
+        // subscription business), so ARPU is MRR / customers directly — do NOT
+        // divide by 12 (that made ARPU/LTV 12x too small and payback 12x too big).
+        return financials.revenue / inputs['active_customers'];
       },
       format: 'currency',
     },
@@ -169,7 +172,7 @@ export const saasProfile: IndustryProfile = {
           ? (inputs['customers_churned'] ?? 0) / inputs['customers_start']
           : null;
         const arpu = inputs['active_customers']
-          ? (financials.revenue / 12) / inputs['active_customers']
+          ? financials.revenue / inputs['active_customers'] // MRR/customer (revenue is one month)
           : null;
         if (!churnRate || !arpu || churnRate === 0) return null;
         const grossMargin = financials.revenue ? financials.grossProfit / financials.revenue : 0.7;
@@ -206,7 +209,7 @@ export const saasProfile: IndustryProfile = {
         if (!inputs['new_customers'] || inputs['new_customers'] === 0) return null;
         if (!inputs['active_customers'] || inputs['active_customers'] === 0) return null;
         const cac = financials.marketingSpend / inputs['new_customers'];
-        const arpu = (financials.revenue / 12) / inputs['active_customers'];
+        const arpu = financials.revenue / inputs['active_customers']; // MRR/customer (revenue is one month)
         const gm = financials.revenue ? financials.grossProfit / financials.revenue : 0.7;
         if (arpu * gm === 0) return null;
         return cac / (arpu * gm);

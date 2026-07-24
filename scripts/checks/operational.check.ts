@@ -118,6 +118,37 @@ for (const profile of ALL_PROFILES) {
   );
 }
 
+// 7. Zero-input: a legitimately-zero required input is DATA, not "No data".
+//    (0 churned customers = a real 0% churn, colored against its benchmark.)
+{
+  const saas = ALL_PROFILES.find((p) => p.id === 'saas')!;
+  const churn = [saas.operationalMetrics.find((m) => m.id === 'churn_rate')!];
+  const pools: OperationalInputPool[] = [
+    { period: PERIOD, sharedInputs: { customers_start: 200, customers_churned: 0 } },
+  ];
+  const results = computeMetricsForPeriod(churn, [], FIN, PERIOD, pools);
+  check(
+    metric(results, 'churn_rate')?.value === 0,
+    `zero-input: 0 churned must yield 0% churn (data), got ${metric(results, 'churn_rate')?.value}`
+  );
+}
+
+// 8. ARPU: financials.revenue is a SINGLE month (= MRR), so ARPU = MRR/customers
+//    with NO /12 (the /12 made ARPU/LTV 12x too small, payback 12x too big).
+{
+  const saas = ALL_PROFILES.find((p) => p.id === 'saas')!;
+  const arpu = [saas.operationalMetrics.find((m) => m.id === 'arpu')!];
+  const pools: OperationalInputPool[] = [
+    { period: PERIOD, sharedInputs: { active_customers: 1000 } },
+  ];
+  const results = computeMetricsForPeriod(arpu, [], FIN, PERIOD, pools);
+  // FIN.revenue = 100000 (one month = MRR); ARPU = 100000/1000 = 100 (not 8.33).
+  check(
+    metric(results, 'arpu')?.value === 100,
+    `arpu: should be MRR/customers = 100 (no /12), got ${metric(results, 'arpu')?.value}`
+  );
+}
+
 if (failures > 0) {
   console.error(`\n${failures} operational check(s) FAILED`);
   process.exit(1);

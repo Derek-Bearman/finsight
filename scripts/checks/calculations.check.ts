@@ -456,6 +456,74 @@ function check(cond: boolean, label: string): void {
   check(periodAgg.workspaceDataRange([]) === null, 'range: workspaceDataRange of empty values must be null');
 }
 
+// ── Health: interest coverage = Times-Interest-Earned, not TIE-1 ─────────────
+// Interest is an ordinary expense (netted into operating income), so EBIT must
+// add it back for both interest coverage (EBIT/interest) and Altman X3.
+{
+  const accounts = [
+    acc('r1', 'Sales', 'revenue'),
+    acc('e1', 'Operating Expense', 'expense', { costBehavior: 'fixed' }),
+    acc('int', 'Interest Expense', 'expense'),
+    acc('a1', 'Equipment', 'asset', { number: '1500' }),
+    acc('eq1', 'Owner Equity', 'equity'),
+  ];
+  const values = [val('r1', 1, 10000), val('e1', 1, 1000), val('int', 1, 1000), val('a1', 1, 20000), val('eq1', 1, 19000)];
+  const h = health.computeHealthScores(accounts, values, { year: 2024, month: 1 });
+  // operatingIncome = 10000 - (1000 opex + 1000 interest) = 8000; EBIT = 8000 + 1000 = 9000.
+  // TIE = 9000/1000 = 9 (the buggy value was 8 = TIE - 1).
+  check(
+    h.interestCoverageRatio !== null && Math.abs(h.interestCoverageRatio - 9) < 1e-9,
+    `health: interest coverage should be TIE=9 (EBIT interest add-back), got ${h.interestCoverageRatio}`
+  );
+}
+
+// ── Health: a debt-free firm with positive equity is NOT distress ────────────
+// Altman X4 was forced to 0 when totalLiabilities===0 — the worst possible value
+// for the most solvent firms. It should reflect no leverage risk.
+{
+  const accounts = [
+    acc('r1', 'Sales', 'revenue'),
+    acc('e1', 'Operating Expense', 'expense', { costBehavior: 'fixed' }),
+    acc('a1', 'Equipment', 'asset', { number: '1500' }),
+    acc('eq1', 'Owner Equity', 'equity'),
+  ];
+  const values = [val('r1', 1, 100000), val('e1', 1, 95000), val('a1', 1, 200000), val('eq1', 1, 200000)];
+  const h = health.computeHealthScores(accounts, values, { year: 2024, month: 1 });
+  check(
+    h.altmanZScore !== null && h.altmanZScore >= 1.1,
+    `health: debt-free positive-equity firm must not read as distress, got Z=${h.altmanZScore}`
+  );
+}
+
+// ── Efficiency: an excluded-only inventory account → DIO/CCC null, not 0 ──────
+{
+  const accounts = [
+    acc('r1', 'Sales', 'revenue'),
+    acc('c1', 'COGS', 'cogs'),
+    acc('ar', 'Accounts Receivable', 'asset', { number: '1100' }),
+    acc('ap', 'Accounts Payable', 'liability', { number: '2010' }),
+    acc('inv', 'Total Inventory', 'asset', { number: '1300', isExcluded: true }),
+  ];
+  const values = [val('r1', 1, 10000), val('c1', 1, 5000), val('ar', 1, 3000), val('ap', 1, 1500), val('inv', 1, 2000)];
+  const e = efficiency.computeEfficiencyRatios(accounts, values, { year: 2024, month: 1 });
+  check(e.dio === null, `efficiency: DIO should be null when the only inventory account is excluded, got ${e.dio}`);
+  check(e.cashConversionCycle === null, `efficiency: CCC should be null when inventory is excluded, got ${e.cashConversionCycle}`);
+}
+
+// ── Breakeven: interest/tax 'variable' account rerouted to fixed, not counted twice ─
+{
+  const accounts = [
+    acc('r1', 'Sales', 'revenue'),
+    acc('tax', 'Income Tax Expense', 'expense', { costBehavior: 'variable' }),
+  ];
+  const values = [val('r1', 1, 10000), val('tax', 1, 1000)];
+  const b = breakeven.computeBreakeven(accounts, values, { year: 2024, month: 1 });
+  // tax → fixedCosts (1000); it must NOT also reduce CM (CM%=1.0), so breakeven
+  // = 1000/1.0 = 1000, not 1000/0.9 = 1111.11.
+  check(Math.abs(b.contributionMarginPct - 1) < 1e-9, `breakeven: CM% should be 1.0 (tax not reducing CM), got ${b.contributionMarginPct}`);
+  check(Math.abs(b.breakevenRevenue - 1000) < 1e-6, `breakeven: interest/tax double-count → breakeven should be 1000, got ${b.breakevenRevenue}`);
+}
+
 if (failures > 0) {
   console.error(`\n${failures} calculation check(s) FAILED`);
   process.exit(1);

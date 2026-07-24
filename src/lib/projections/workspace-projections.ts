@@ -16,6 +16,14 @@ export interface WorkspaceProjectionOptions {
   model?: ProjectionModel;
   horizonMonths: number; // e.g. 12, 36, 60, 120
   growthRateOverride?: number;
+  /**
+   * BASELINE (unadjusted) history, used ONLY as the driver-mode cost/revenue
+   * ratio denominator (trailing revenue). Pass this when `values` is a What-If
+   * scenario-adjusted set: otherwise the projected driver AND the ratio
+   * denominator both scale with a revenue scenario and cancel, leaving variable
+   * costs flat. Defaults to `values` (no scenario → identical behavior).
+   */
+  baselineValues?: AccountValue[];
 }
 
 export interface WorkspaceProjectionResult {
@@ -56,6 +64,30 @@ function periodToKey(p: Period): string {
 
 function comparePeriods(a: Period, b: Period): number {
   return a.year * 100 + a.month - (b.year * 100 + b.month);
+}
+
+/**
+ * Pad an account's (ascending) history with trailing $0 months up to `lastGlobal`
+ * so EVERY account's projection anchors to the same last period and its projected
+ * points align to the shared projected grid. Without this, an account that stops
+ * reporting before the dataset end projects on its OWN earlier anchor and
+ * mis-aligns in the roll-up (its tail projected months miss entirely → a spurious
+ * drop-off). A blank P&L month is $0 activity, so trailing zeros are the correct fill.
+ */
+function densifyHistory(
+  history: { period: Period; amount: number }[],
+  lastGlobal: Period | undefined
+): { period: Period; amount: number }[] {
+  if (!lastGlobal || history.length === 0) return history;
+  const last = history[history.length - 1]!.period;
+  if (comparePeriods(last, lastGlobal) >= 0) return history;
+  const padded = history.slice();
+  let p = addMonths(last, 1);
+  while (comparePeriods(p, lastGlobal) <= 0) {
+    padded.push({ period: p, amount: 0 });
+    p = addMonths(p, 1);
+  }
+  return padded;
 }
 
 // ─────────────────────────────────────────────
@@ -100,6 +132,7 @@ export function projectWorkspace(
     const driven = projectDriverAccounts({
       accounts,
       values,
+      baselineValues: options.baselineValues ?? values,
       historicalPeriods,
       lastHistoricalPeriod,
       horizonMonths,
@@ -129,7 +162,12 @@ export function projectWorkspace(
         continue;
       }
 
-      const history = acctValues.map((v) => ({ period: v.period, amount: v.amount }));
+      // Dense grid: pad trailing $0 up to the global last period so this
+      // account's projection aligns with the shared projected grid in the roll-up.
+      const history = densifyHistory(
+        acctValues.map((v) => ({ period: v.period, amount: v.amount })),
+        lastHistoricalPeriod
+      );
 
       let result = project({ history, horizonMonths, model, growthRateOverride });
 
@@ -310,10 +348,17 @@ export function projectWorkspace(
   // Build annual revenuePoint for projected years
   for (const [yr, entry] of annualMap) {
     if (entry.isProjected) {
-      // Find the projected revenue points for this year and sum
-      const yearRevRows = rolledUp.filter((r) => r.period.year === yr && r.revenueProjected !== null);
-      const revLow = yearRevRows.reduce((s, r) => s + (r.revenueProjected?.lower80 ?? 0), 0);
-      const revHigh = yearRevRows.reduce((s, r) => s + (r.revenueProjected?.upper80 ?? 0), 0);
+      // A partial transition year mixes ACTUAL months (no uncertainty) with
+      // projected months. entry.revenue (value) spans all 12; the band must
+      // span the same months, so add the certain actual portion to BOTH bounds —
+      // otherwise value (full year) exceeds upper80 (projected months only) and
+      // the point plots above its own confidence band.
+      const yearRows = rolledUp.filter((r) => r.period.year === yr);
+      const actualPortion = yearRows
+        .filter((r) => r.revenueProjected === null)
+        .reduce((s, r) => s + r.revenue, 0);
+      const revLow = actualPortion + yearRows.reduce((s, r) => s + (r.revenueProjected?.lower80 ?? 0), 0);
+      const revHigh = actualPortion + yearRows.reduce((s, r) => s + (r.revenueProjected?.upper80 ?? 0), 0);
       entry.revenuePoint = {
         period: { year: yr, month: 1 },
         value: entry.revenue,
@@ -342,6 +387,8 @@ interface DriverAccountsInput {
   /** Already filtered to !isExcluded by the caller. */
   accounts: Account[];
   values: AccountValue[];
+  /** Baseline (unadjusted) history for the cost/revenue ratio denominator. */
+  baselineValues: AccountValue[];
   /** Unique historical periods, sorted ascending. */
   historicalPeriods: Period[];
   lastHistoricalPeriod: Period | undefined;
@@ -381,7 +428,7 @@ function projectDriverAccounts(input: DriverAccountsInput): {
   accountProjections: AccountProjection[];
   projectedByAccount: Map<string, ProjectionPoint[]>;
 } {
-  const { accounts, values, historicalPeriods, lastHistoricalPeriod, horizonMonths, growthRateOverride } = input;
+  const { accounts, values, baselineValues, historicalPeriods, lastHistoricalPeriod, horizonMonths, growthRateOverride } = input;
 
   const accountProjections: AccountProjection[] = [];
   const projectedByAccount = new Map<string, ProjectionPoint[]>();
@@ -428,12 +475,20 @@ function projectDriverAccounts(input: DriverAccountsInput): {
 
   const revenueAccountIds = new Set(accounts.filter((a) => a.type === 'revenue').map((a) => a.id));
 
-  // Trailing total revenue + per-account trailing sums over the window.
-  let trailingRev = 0;
+  // Per-account trailing sums from the (possibly scenario-adjusted) values, so a
+  // cost scenario flows into projected costs.
   const acctWindowSum = new Map<string, number>();
   for (const v of values) {
     if (!windowKeys.has(periodToKey(v.period))) continue;
     acctWindowSum.set(v.accountId, (acctWindowSum.get(v.accountId) ?? 0) + v.amount);
+  }
+  // Trailing revenue for the cost/revenue RATIO denominator comes from the
+  // BASELINE history: under a What-If revenue scenario the projected driver
+  // scales with revenue, and if this denominator scaled too they would cancel,
+  // leaving variable costs flat. Defaults to `values` when no baseline supplied.
+  let trailingRev = 0;
+  for (const v of baselineValues) {
+    if (!windowKeys.has(periodToKey(v.period))) continue;
     if (revenueAccountIds.has(v.accountId)) trailingRev += v.amount;
   }
   const hasRev = trailingRev > 0;
@@ -448,7 +503,10 @@ function projectDriverAccounts(input: DriverAccountsInput): {
       pts = carryForward(account.id);
       if (pts.length === 0) continue;
     } else {
-      const history = vals.map((v) => ({ period: v.period, amount: v.amount }));
+      const history = densifyHistory(
+        vals.map((v) => ({ period: v.period, amount: v.amount })),
+        lastHistoricalPeriod
+      );
       const out = project({ history, horizonMonths, model: 'linear', growthRateOverride });
       // Linear already floors revenue at 0; strip its band for driver mode.
       pts = out.projected.map((pt) => ({

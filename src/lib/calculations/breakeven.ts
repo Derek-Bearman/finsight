@@ -136,10 +136,16 @@ export function computeBreakeven(
   const pnl = computePnL(accounts, filteredValues, periodArr);
 
   // Compute breakeven-specific fixed/variable split
-  const { fixedCosts } = computeBreakevenCosts(accounts, amountByAccount);
+  const { fixedCosts, variableCosts } = computeBreakevenCosts(accounts, amountByAccount);
 
   const revenue = pnl.revenue;
-  const contributionMarginPct = pnl.contributionMarginPct;
+  // Contribution margin CONSISTENT with the breakeven split: interest/tax
+  // 'variable' accounts are rerouted to fixedCosts above, so they must not also
+  // reduce the CM denominator — otherwise the same dollars are counted on both
+  // sides of (fixedCosts / CM%) and breakeven revenue is overstated. Derive CM
+  // from breakeven's own variableCosts rather than pnl.contributionMarginPct.
+  const contributionMargin = revenue - pnl.cogs - variableCosts;
+  const contributionMarginPct = revenue === 0 ? 0 : contributionMargin / revenue;
 
   // breakeven revenue = fixed costs / CM%
   let breakevenRevenue: number;

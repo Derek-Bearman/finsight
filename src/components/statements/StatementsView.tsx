@@ -237,7 +237,11 @@ function buildPnLRows(accounts: Account[], values: AccountValue[], buckets: Buck
   const netIncome = buckets.map((_, i) => (grossProfit[i] ?? 0) - (expenses.totals[i] ?? 0));
 
   const rows: Row[] = [...income.rows];
-  if (cogs.rows.length > 1) {
+  // section() always returns [header, ...accounts, subtotal], so length > 2 means
+  // there is at least one real COGS account. With zero COGS accounts (a services/
+  // SaaS P&L) the block — and the redundant Gross Profit = Total Income line —
+  // must not render.
+  if (cogs.rows.length > 2) {
     rows.push({ label: '', amounts: [], total: null, kind: 'spacer' });
     rows.push(...cogs.rows);
     rows.push({ label: 'Gross Profit', amounts: grossProfit, total: grossProfit.reduce((s, v) => s + v, 0), kind: 'total' });
@@ -257,12 +261,17 @@ function buildBalanceSheetRows(accounts: Account[], values: AccountValue[], buck
     const accts = active.filter((a) => a.type === type);
     if (accts.length === 0) return { rows: [], totals: buckets.map(() => null) };
     const rows: Row[] = [{ label, amounts: buckets.map(() => null), total: null, kind: 'header' }];
-    const totals = buckets.map(() => 0);
+    // null = "no balance data for this bucket" — a stock is UNKNOWN when not
+    // imported for that period, not $0. Only real balances feed the subtotal.
+    const totals: (number | null)[] = buckets.map(() => null);
     for (const a of accts) {
       const amts = byAcct.get(a.id) ?? new Map();
-      const perBucket = buckets.map((b) => snapshotInBucket(amts, b) ?? 0);
-      perBucket.forEach((v, i) => (totals[i]! += v));
-      // BS "Total" column = latest period balance, not a sum.
+      const perBucket = buckets.map((b) => snapshotInBucket(amts, b)); // null when no data
+      perBucket.forEach((v, i) => {
+        if (v !== null) totals[i] = (totals[i] ?? 0) + v;
+      });
+      // BS "Ending" column = the LAST bucket's balance (point-in-time), matching
+      // the subtotal below so account rows always foot to their section total.
       rows.push({ label: a.name, amounts: perBucket, total: perBucket[perBucket.length - 1] ?? null, kind: 'account' });
     }
     rows.push({ label: subtotalLabel, amounts: totals.slice(), total: totals[totals.length - 1] ?? null, kind: 'subtotal' });
@@ -282,8 +291,14 @@ function buildBalanceSheetRows(accounts: Account[], values: AccountValue[], buck
     rows.push({ label: '', amounts: [], total: null, kind: 'spacer' });
     rows.push(...equity.rows);
   }
-  // Liabilities + Equity total row for the balance check.
-  const lPlusE = buckets.map((_, i) => (liab.totals[i] ?? 0) + (equity.totals[i] ?? 0));
+  // Liabilities + Equity total row for the balance check. Null (blank) when
+  // neither side has data for a bucket, mirroring the Total Assets subtotal.
+  const lPlusE: (number | null)[] = buckets.map((_, i) => {
+    const l = liab.totals[i] ?? null;
+    const e = equity.totals[i] ?? null;
+    if (l === null && e === null) return null;
+    return (l ?? 0) + (e ?? 0);
+  });
   rows.push({ label: '', amounts: [], total: null, kind: 'spacer' });
   rows.push({ label: 'Total Liabilities + Equity', amounts: lPlusE, total: lPlusE[lPlusE.length - 1] ?? null, kind: 'total' });
   return rows;
@@ -559,7 +574,14 @@ export function StatementsView({
     const periodsAdded = new Set(
       patch.values.filter((v) => !periodsBefore.has(periodKey(v.period))).map((v) => periodKey(v.period))
     ).size;
-    const accountsAdded = patch.accounts.length - workspace.accounts.length;
+    // Count new accounts the SAME way the diff-review card does: only NEW ids
+    // that actually carry values. Counting every added account (incl. value-less
+    // QBO parent rows) made the toast overstate vs the number the user approved.
+    const existingIds = new Set(workspace.accounts.map((a) => a.id));
+    const valueBearingIds = new Set(patch.values.map((v) => v.accountId));
+    const accountsAdded = patch.accounts.filter(
+      (a) => !existingIds.has(a.id) && valueBearingIds.has(a.id)
+    ).length;
     const parts: string[] = [];
     if (periodsAdded > 0) parts.push(`${periodsAdded} new period${periodsAdded === 1 ? '' : 's'}`);
     if (accountsAdded > 0) parts.push(`${accountsAdded} new account${accountsAdded === 1 ? '' : 's'}`);

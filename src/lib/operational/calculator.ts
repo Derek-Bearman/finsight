@@ -125,6 +125,24 @@ export function getBenchmarkStatus(
   return { status, color: BENCHMARK_COLORS[status] };
 }
 
+/**
+ * Run a metric's calculate() defensively: swallow throws AND coerce any
+ * non-finite result (Infinity/NaN from an unguarded division) to null, so a
+ * card never renders ∞/NaN once the required-input gate allows genuine zeros.
+ */
+function safeCalculate(
+  def: OperationalMetricDef,
+  inputs: Record<string, number>,
+  financials: FinancialSummary
+): number | null {
+  try {
+    const v = def.calculate(inputs, financials);
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────
 // computeMetricsForPeriod
 // ─────────────────────────────────────────────
@@ -148,24 +166,21 @@ export function computeMetricsForPeriod(
 
     if (def.inputFields.length === 0) {
       // No inputs needed — calculate from financials only
-      try {
-        value = def.calculate({}, financialSummary);
-      } catch {
-        value = null;
-      }
+      value = safeCalculate(def, {}, financialSummary);
     } else if (hasAnyInput) {
-      // Check that all required fields have values
+      // Presence-only gate: a legitimately-zero required input (0 churned,
+      // 0 returns, 0 appointments — a real "perfect month") is DATA, not
+      // missing. The old `&& inputs[f.id] !== 0` suppressed the metric as
+      // "No data" and forfeited its benchmark verdict. Each metric's
+      // calculate() guards its own zero DENOMINATORS; safeCalculate additionally
+      // nulls any non-finite result so a genuine zero can never render ∞/NaN.
       const requiredFields = def.inputFields.filter((f) => !f.optional);
       const allRequiredFilled = requiredFields.every(
-        (f) => inputs[f.id] !== undefined && inputs[f.id] !== 0
+        (f) => inputs[f.id] !== undefined
       );
 
       if (allRequiredFilled) {
-        try {
-          value = def.calculate(inputs, financialSummary);
-        } catch {
-          value = null;
-        }
+        value = safeCalculate(def, inputs, financialSummary);
       }
     }
 

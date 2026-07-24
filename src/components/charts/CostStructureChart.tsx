@@ -56,7 +56,11 @@ function CustomTooltip({ active, payload, label }: TooltipProps) {
   const d = payload[0]?.payload;
   if (!d) return null;
 
-  const grossMarginPct =
+  // Revenue left after the two cost buckets shown here (fixed + variable
+  // OPERATING expenses). This deliberately excludes COGS, so it is NOT gross
+  // margin — labeling it "Gross Margin" contradicted the P&L's real gross
+  // margin. Name it for what it is: revenue net of the costs on this chart.
+  const marginAfterCostsPct =
     d.revenue > 0
       ? (((d.revenue - d.fixedCosts - d.variableCosts) / d.revenue) * 100).toFixed(1)
       : '—';
@@ -86,7 +90,7 @@ function CustomTooltip({ active, payload, label }: TooltipProps) {
           Variable Costs: {abbr(d.variableCosts)}
         </p>
         <p style={{ color: 'hsl(var(--muted-foreground))' }}>
-          Gross Margin: {grossMarginPct}%
+          Margin after these costs: {marginAfterCostsPct}%
         </p>
       </div>
     </div>

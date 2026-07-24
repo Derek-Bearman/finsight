@@ -53,7 +53,6 @@ import {
   CostStructureChart,
   MarginWaterfall,
   RatioDashboard,
-  ScenarioComparisonChart,
 } from '@/components/charts';
 import type {
   RatioSparklineProps,
@@ -952,39 +951,6 @@ function OverviewTab({
     ];
   }, [periodAggs, bsSeries, healthSeries, effectiveTargets, corporateSetLabel]);
 
-  // ── Scenario comparison data ─────────────────────────────────────────────
-  const scenarioChartData = useMemo(() => {
-    if (!workspace) return [];
-    const scenariosWithAdjustments = workspace.scenarios.filter(
-      (sc) => !sc.isBaseline && sc.adjustments.length > 0
-    );
-    if (scenariosWithAdjustments.length === 0) return [];
-
-    const SCENARIO_COLORS = [
-      'hsl(38 92% 50%)',
-      'hsl(270 70% 55%)',
-      'hsl(186 70% 45%)',
-    ];
-
-    // Baseline scenario data (actuals)
-    const baselineData = periodAggs.map((agg) => ({
-      label: agg.label,
-      revenue: agg.revenue,
-      netIncome: agg.netIncome,
-    }));
-
-    if (baselineData.length === 0) return [];
-
-    const baselineScenario = {
-      name: 'Baseline (Actuals)',
-      color: 'hsl(217 91% 55%)',
-      data: baselineData,
-      isBaseline: true,
-    };
-
-    return [baselineScenario];
-  }, [workspace?.scenarios, periodAggs]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── QBO connect affordance for the empty state ───────────────────────────
   // An empty workspace advertises the QuickBooks integration. Eligibility is
   // SERVER-owned: getQboStatus().canManage is true only for owner/admin of a
@@ -1211,26 +1177,6 @@ function OverviewTab({
         </div>
       )}
 
-      {/* Section 6: Scenario comparison (only if >1 scenario with adjustments) */}
-      {hasData && scenarioChartData.length > 1 && (
-        <div
-          className="rounded-xl border p-4"
-          style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))' }}
-        >
-          <h3
-            className="text-sm font-semibold mb-4"
-            style={{ color: 'hsl(var(--foreground))' }}
-          >
-            Scenario Comparison — Revenue
-          </h3>
-          <ScenarioComparisonChart
-            scenarios={scenarioChartData}
-            metric="revenue"
-            height={280}
-          />
-        </div>
-      )}
-
       {/* Scenarios list (keep from original) */}
       {workspace.scenarios.length > 0 && (
         <div>
@@ -1301,22 +1247,25 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
     if (defaults[0]) setActiveScenario(defaults[0].id);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!workspace) return null;
-
-  const scenarios = workspace.scenarios;
+  // The `if (!workspace) return null` guard lives just BEFORE the JSX return
+  // (not here): a conditional return above the hooks below would split the hook
+  // list across renders (Rules-of-Hooks violation → "Rendered more hooks than
+  // during the previous render"). Every hook body + dependency array below is
+  // null-safe on an undefined workspace.
+  const scenarios = workspace?.scenarios ?? [];
   const activeScenario = scenarios.find(s => s.id === activeScenarioId) ?? scenarios[0] ?? null;
   const baseScenario = scenarios.find(s => s.isBaseline) ?? null;
   const nonBaseScenario = activeScenario?.isBaseline ? null : activeScenario;
 
   // Compute quick impact for the active scenario
   const impact = useMemo(() => {
-    if (!nonBaseScenario || !baseScenario) return null;
+    if (!workspace || !nonBaseScenario || !baseScenario) return null;
     if (workspace.accounts.length === 0 || workspace.values.length === 0) return null;
     // Trailing 12 months — all-history totals read as nonsense once a client
     // has more than a year of data (30 months looked like "annual" revenue).
     const trailing12 = getUniquePeriods(workspace.values).slice(-12);
     return computeScenarioImpact(workspace.accounts, workspace.values, nonBaseScenario, trailing12);
-  }, [workspace.accounts, workspace.values, nonBaseScenario, baseScenario]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [workspace?.accounts, workspace?.values, nonBaseScenario, baseScenario]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const keyAccounts = useMemo(() => (workspace ? getKeyAccounts(workspace) : []), [workspace?.accounts, workspace?.values]); // eslint-disable-line react-hooks/exhaustive-deps
   const keyAccountIds = useMemo(() => new Set(keyAccounts.map(k => k.id)), [keyAccounts]);
@@ -1326,6 +1275,10 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
   const [costSlider, setCostSlider] = useState(0);
   const [accountSliders, setAccountSliders] = useState<Record<string, number>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Holds the currently-pending debounced write so a scenario switch can FLUSH
+  // it (see the reseed effect's cleanup) instead of a later slider drag's
+  // clearTimeout silently dropping the previous scenario's edit.
+  const pendingWriteRef = useRef<(() => void) | null>(null);
 
   // Sync sliders from active scenario
   useEffect(() => {
@@ -1340,6 +1293,17 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
       if (adj) perAccount[ka.id] = adj.value;
     }
     setAccountSliders(perAccount);
+    return () => {
+      // Flush any pending debounced write for the OUTGOING scenario before the
+      // next one reseeds (or on unmount), so a fast switch + edit can't cancel
+      // it via the shared debounce timer and silently lose the edit.
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      pendingWriteRef.current?.();
+      pendingWriteRef.current = null;
+    };
   }, [activeScenario?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const firstPeriod = useMemo((): import('@/types').Period => {
@@ -1356,7 +1320,9 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
   const persistSliders = useCallback((rv: number, cv: number, perAccount: Record<string, number>) => {
     if (!activeScenario || activeScenario.isBaseline) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
+    // Capture the write so a scenario switch can flush it (reseed effect cleanup)
+    // rather than a later persistSliders clearTimeout dropping it.
+    const write = () => {
       const baseAdjs = activeScenario.adjustments.filter(
         a => !(a.type === 'percent' &&
                (a.accountId === '_all_revenue_' || a.accountId === '_all_costs_' || keyAccountIds.has(a.accountId)))
@@ -1368,7 +1334,11 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
         if (v !== 0) sliderAdjs.push({ accountId: id, type: 'percent', value: v, appliesFrom: firstPeriod });
       }
       updateScenario(clientId, { ...activeScenario, adjustments: [...sliderAdjs, ...baseAdjs] });
-    }, 150);
+      pendingWriteRef.current = null;
+      debounceRef.current = null;
+    };
+    pendingWriteRef.current = write;
+    debounceRef.current = setTimeout(write, 150);
   }, [activeScenario, clientId, firstPeriod, updateScenario, keyAccountIds]);
 
   const handleAccountSlider = useCallback((id: string, v: number) => {
@@ -1380,6 +1350,9 @@ function WhatIfTabContent({ clientId }: { clientId: string }) {
   }, [revSlider, costSlider, persistSliders]);
 
   const isBaselineActive = activeScenario?.isBaseline ?? true;
+
+  // Guard AFTER all hooks so the hook count is identical on every render.
+  if (!workspace) return null;
 
   return (
     <div className="flex flex-col gap-6">

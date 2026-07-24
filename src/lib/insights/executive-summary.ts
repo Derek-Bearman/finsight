@@ -21,7 +21,7 @@ import { getProfile } from '@/lib/profiles';
 import type { PeriodAggregation } from '@/types';
 import { FUNNEL_INPUT_IDS } from '@/lib/operational/funnel';
 import { RATIO_DEF_MAP, meetsTarget, formatTargetThreshold, type RatioKey } from '@/lib/targets';
-import { formatCurrency, formatPercent } from '@/lib/utils/format';
+import { formatCurrency, formatPercent, formatMetricValue } from '@/lib/utils/format';
 
 export interface SummaryLine {
   text: string;
@@ -269,7 +269,7 @@ export function buildExecutiveSummary(
       } else if (!worst) {
         worst = {
           label: def.label,
-          valueText: formatMetric(value, def.format),
+          valueText: formatMetricValue(value, def.format),
           target: formatTargetThreshold(target, def.format),
         };
       }
@@ -300,7 +300,7 @@ export function buildExecutiveSummary(
         } else if (!worst) {
           worst = {
             label: result.label,
-            valueText: formatMetric(result.value, result.format),
+            valueText: formatMetricValue(result.value, result.format),
             target: formatTargetThreshold(target, result.format),
           };
         }
@@ -385,10 +385,3 @@ export function buildExecutiveSummary(
   return lines.slice(0, 7);
 }
 
-// Local import-cycle-free formatter for target sentences.
-function formatMetric(value: number, format: string): string {
-  if (format === 'percent') return formatPercent(value);
-  if (format === 'currency') return formatCurrency(value);
-  if (format === 'ratio') return value.toFixed(2);
-  return value.toFixed(2);
-}

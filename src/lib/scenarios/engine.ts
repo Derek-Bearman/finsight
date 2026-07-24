@@ -273,9 +273,10 @@ export function buildScenarioSeries(
   if (uniquePeriods.length === 0) return [];
 
   return scenarios.map((scenario, idx) => {
-    const color = scenario.isBaseline
-      ? SCENARIO_COLORS[0]!
-      : SCENARIO_COLORS[((idx) % (SCENARIO_COLORS.length - 1)) + 1]!;
+    // One shared color mapping keyed by the scenario's index — MUST match the
+    // scenario cards / impact-table headers (SCENARIO_COLORS[idx % length]);
+    // the old ((idx)%(len-1))+1 formula shifted the chart line off its card color.
+    const color = SCENARIO_COLORS[idx % SCENARIO_COLORS.length]!;
 
     // Apply scenario adjustments to the base values
     const adjustedValues = applyScenario(baseValues, scenario, accounts);

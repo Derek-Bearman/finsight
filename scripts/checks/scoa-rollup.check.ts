@@ -9,7 +9,7 @@
  */
 
 import type { Account, AccountValue, FranchiseScoaAccount, Period } from '../../src/types';
-import { rollupByScoa, scoaLineSnapshot } from '../../src/lib/franchise/scoa-rollup';
+import { rollupByScoa, scoaLineSnapshot, buildScoaComparisonLines, type ScoaLineSnapshot } from '../../src/lib/franchise/scoa-rollup';
 import { median } from '../../src/lib/franchise/peer-metrics';
 
 let failures = 0;
@@ -120,6 +120,79 @@ check(approx(oRoll.coveragePct, 1 / 3), 'coverage excludes the orphan');
 const orphanLinesSum = oRoll.lines.reduce((s, l) => s + l.total, 0);
 check(approx(orphanLinesSum + oRoll.unmappedTotal, 6_200), 'reconciles: sum(lines) + unmapped == total non-excluded');
 check(oRoll.lines.find((l) => l.number === '6000')!.total === 1_000, 'orphan dollars do NOT leak into line 6000');
+
+// Stock-aware: a balance-sheet line uses the ENDING balance across a multi-month
+// window, NOT the sum (a $50k→$60k monthly cash balance over 3 months must read
+// as its ending $60k, not $165k). Flow lines still sum. This is the ~N-months
+// overstatement fix for the SCOA comparison's balance-sheet lines.
+{
+  const bsScoa: FranchiseScoaAccount[] = [
+    { number: '1000', name: 'Cash', statementType: 'balance' },
+    { number: '4000', name: 'Revenue', statementType: 'pnl' },
+  ];
+  const bsAccts: Account[] = [
+    acct({ id: 'chk', name: 'Checking', type: 'asset', scoaNumber: '1000' }),
+    acct({ id: 'rev', name: 'Sales', type: 'revenue', scoaNumber: '4000' }),
+  ];
+  const M1: Period = { year: 2025, month: 1 };
+  const M2: Period = { year: 2025, month: 2 };
+  const M3: Period = { year: 2025, month: 3 };
+  const bsVals: AccountValue[] = [
+    val('chk', 50_000, M1), val('chk', 55_000, M2), val('chk', 60_000, M3), // ending = 60k
+    val('rev', 100_000, M1), val('rev', 100_000, M2), val('rev', 100_000, M3), // flow sums to 300k
+  ];
+  const bsRoll = rollupByScoa(bsScoa, bsAccts, bsVals, [M1, M2, M3]);
+  check(approx(bsRoll.lines.find((l) => l.number === '1000')!.total, 60_000), 'stock line uses ending balance (60k) not sum (165k)');
+  check(approx(bsRoll.lines.find((l) => l.number === '4000')!.total, 300_000), 'flow line still sums across the window (300k)');
+  const bsSnap = scoaLineSnapshot(bsScoa, bsAccts, bsVals, [M1, M2, M3]);
+  check(approx(bsSnap.lineTotals['1000']!.pctRevenue!, 0.2), 'stock %-of-revenue = endingBalance/revenue = 60k/300k = 0.2');
+}
+
+// Peer-comparison assembly: this-vs-peer-median + sample-size counts. A peer
+// with a total but ZERO revenue (pctRevenue null) counts toward peerCount but
+// NOT peerPctCount — the distinction the Reports-tab comparison relies on.
+{
+  const cmpScoa: FranchiseScoaAccount[] = [{ number: '6000', name: 'Marketing', statementType: 'pnl' }];
+  const mk = (total: number | null, pct: number | null): ScoaLineSnapshot => ({
+    lineTotals: total === null ? {} : { '6000': { total, pctRevenue: pct } },
+    revenue: 0,
+  });
+  const lines = buildScoaComparisonLines(cmpScoa, mk(1000, 0.1), [mk(2000, 0.2), mk(4000, 0.4), mk(600, null)]);
+  const l = lines[0]!;
+  check(l.thisTotal === 1000 && l.thisPct === 0.1, 'assembly: this franchisee values');
+  check(l.peerMedianTotal === 2000, `assembly: peer median total median(600,2000,4000)=2000, got ${l.peerMedianTotal}`);
+  check(approx(l.peerMedianPct!, 0.3), `assembly: peer median pct median(0.2,0.4)=0.3, got ${l.peerMedianPct}`);
+  check(l.peerCount === 3, `assembly: peerCount counts all 3 peers with a total, got ${l.peerCount}`);
+  check(l.peerPctCount === 2, `assembly: peerPctCount excludes the zero-revenue peer (=2), got ${l.peerPctCount}`);
+}
+
+// Global ending month for stocks: an account that stops reporting before the
+// window end contributes 0 at the ending month (matches computeBalanceSheetSeries),
+// NOT a stale carry-forward — so the SCOA comparison agrees with the franchisee's
+// own balance sheet.
+{
+  const gScoa: FranchiseScoaAccount[] = [
+    { number: '1000', name: 'Cash', statementType: 'balance' },
+    { number: '1500', name: 'Equipment', statementType: 'balance' },
+  ];
+  const gAccts: Account[] = [
+    acct({ id: 'a', name: 'Cash', type: 'asset', scoaNumber: '1000' }),
+    acct({ id: 'b', name: 'Old Equipment', type: 'asset', scoaNumber: '1500' }),
+  ];
+  const J: Period = { year: 2026, month: 1 };
+  const F: Period = { year: 2026, month: 2 };
+  const Mar: Period = { year: 2026, month: 3 };
+  const gVals: AccountValue[] = [
+    val('a', 1000, J), val('a', 1000, F), val('a', 1000, Mar), // reports through Mar (global end)
+    val('b', 500, J), // stops after Jan → no Mar row
+  ];
+  const gRoll = rollupByScoa(gScoa, gAccts, gVals, [J, F, Mar]);
+  check(gRoll.lines.find((l) => l.number === '1000')!.total === 1000, 'global-end: Cash at ending month Mar = 1000');
+  check(
+    gRoll.lines.find((l) => l.number === '1500')!.total === 0,
+    `global-end: Equipment (no Mar row) contributes 0, not a stale 500, got ${gRoll.lines.find((l) => l.number === '1500')!.total}`
+  );
+}
 
 // Median helper (used to build peer medians in the comparison).
 check(median([2, 4, 6]) === 4, 'median odd');

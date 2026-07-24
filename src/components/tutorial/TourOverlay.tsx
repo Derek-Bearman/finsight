@@ -41,6 +41,9 @@ export function TourOverlay({ steps, onComplete, onSkip, startAtStep = 0, tourLa
   const [targetRadius, setTargetRadius] = useState(8);
   const [bubblePos, setBubblePos] = useState<BubblePosition>({ top: 0, left: 0, arrowSide: null });
   const bubbleRef = useRef<HTMLDivElement>(null);
+  // What had focus before the tour opened (the "?" HelpButton), so it can be
+  // restored on close — otherwise a keyboard user is stranded on <body>.
+  const prevFocusRef = useRef<HTMLElement | null>(null);
 
   // Snapshot only the steps whose target actually exists right now. The tour
   // opens after its surface has rendered, so conditionally-absent targets (a
@@ -157,12 +160,49 @@ export function TourOverlay({ steps, onComplete, onSkip, startAtStep = 0, tourLa
     if (prev >= 0) setCurrentIdx(prev);
   }, [currentIdx, findNextValidStep]);
 
-  // Keyboard handling
+  // Capture the pre-tour focus once (mount) and restore it on unmount (close),
+  // so a keyboard/AT user is returned to the control that opened the tour.
   useEffect(() => {
+    if (typeof document === 'undefined') return;
+    prevFocusRef.current = document.activeElement as HTMLElement | null;
+    return () => prevFocusRef.current?.focus?.();
+  }, []);
+
+  // Keyboard handling: Esc/arrows drive the tour, Tab is trapped in the bubble.
+  useEffect(() => {
+    const isTyping = (target: EventTarget | null): boolean => {
+      const el = target as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+    };
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onSkip();
-      if (e.key === 'ArrowRight') handleNext();
-      if (e.key === 'ArrowLeft') handleBack();
+      // Don't hijack Esc/arrows while the user types in a targeted field (the
+      // caret/native autocomplete must win over tour navigation).
+      const typing = isTyping(e.target);
+      if (e.key === 'Escape' && !typing) { onSkip(); return; }
+      if (e.key === 'ArrowRight' && !typing) { handleNext(); return; }
+      if (e.key === 'ArrowLeft' && !typing) { handleBack(); return; }
+      // Trap Tab within the bubble (mirrors HelpPanel). Boundary-only: it never
+      // yanks focus out of a targeted page input the user is intentionally in.
+      if (e.key === 'Tab' && bubbleRef.current) {
+        const focusables = Array.from(
+          bubbleRef.current.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          )
+        ).filter((el) => el.offsetParent !== null);
+        if (focusables.length === 0) return;
+        const first = focusables[0]!;
+        const last = focusables[focusables.length - 1]!;
+        const active = document.activeElement;
+        if (e.shiftKey && (active === first || active === bubbleRef.current)) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);

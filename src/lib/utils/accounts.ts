@@ -56,11 +56,3 @@ export function columnTotal(
   return accountIds.reduce((sum, id) => sum + (latestAmounts.get(id) ?? 0), 0);
 }
 
-/** Format a number as currency */
-export function formatCurrency(n: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0,
-  }).format(n);
-}

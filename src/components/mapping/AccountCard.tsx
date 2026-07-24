@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import type { Account } from '@/types';
-import { formatCurrency } from '@/lib/utils/accounts';
+import { formatCurrency } from '@/lib/utils/format';
 
 export interface AccountCardProps {
   account: Account;
@@ -160,7 +160,8 @@ function AccountCardInner({
             <div className="relative">
               <button
                 type="button"
-                className="text-amber-500 text-sm leading-none"
+                className="text-sm leading-none"
+                style={{ color: 'hsl(38 80% 35%)' }}
                 onMouseEnter={() => setShowTooltip(true)}
                 onMouseLeave={() => setShowTooltip(false)}
                 aria-label="Conflict warning"

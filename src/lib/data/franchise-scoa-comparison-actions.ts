@@ -16,8 +16,7 @@
 import { resolveUserContext } from '@/lib/data/context';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getFranchise } from '@/lib/data/franchises';
-import { scoaLineSnapshot, type ScoaComparisonLine } from '@/lib/franchise/scoa-rollup';
-import { median } from '@/lib/franchise/peer-metrics';
+import { scoaLineSnapshot, buildScoaComparisonLines, type ScoaComparisonLine } from '@/lib/franchise/scoa-rollup';
 import { getTrailingPeriods } from '@/lib/calculations/period-aggregation';
 import type { Account, AccountValue, ClientWorkspace } from '@/types';
 
@@ -68,23 +67,7 @@ export async function getFranchiseScoaComparisonAction(params: {
       else peerSnaps.push(snap);
     }
 
-    const lines: ScoaComparisonLine[] = scoa.accounts.map((s) => {
-      const mine = thisSnap?.lineTotals[s.number];
-      const peerTotals = peerSnaps.map((p) => p.lineTotals[s.number]?.total ?? null);
-      const peerPcts = peerSnaps.map((p) => p.lineTotals[s.number]?.pctRevenue ?? null);
-      const line: ScoaComparisonLine = {
-        number: s.number,
-        name: s.name,
-        thisTotal: mine?.total ?? null,
-        thisPct: mine?.pctRevenue ?? null,
-        peerMedianTotal: median(peerTotals),
-        peerMedianPct: median(peerPcts),
-        peerCount: peerTotals.filter((v) => v !== null).length,
-        peerPctCount: peerPcts.filter((v) => v !== null).length,
-      };
-      if (s.statementType) line.statementType = s.statementType;
-      return line;
-    });
+    const lines = buildScoaComparisonLines(scoa.accounts, thisSnap, peerSnaps);
 
     return { ok: true, franchiseName: franchise.name, hasScoa: true, peerCount: peerSnaps.length, lines };
   } catch (err) {

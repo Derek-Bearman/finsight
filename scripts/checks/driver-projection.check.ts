@@ -307,6 +307,74 @@ const pointsFor = (proj: typeof projA, id: string) =>
   check(allFinite, '(v) rolled-up series must stay finite when trailing revenue is 0');
 }
 
+// ── M9: an account that stops reporting early aligns to the GLOBAL grid ──────
+{
+  const accounts: Account[] = [
+    acc('a', 'Interest Income', 'revenue'),
+    acc('b', 'Product Sales', 'revenue'),
+  ];
+  const values: AccountValue[] = [];
+  for (let m = 1; m <= 12; m++) {
+    values.push({ accountId: 'b', period: { year: 2024, month: m }, amount: 1000 });
+    if (m <= 8) values.push({ accountId: 'a', period: { year: 2024, month: m }, amount: 1000 }); // A stops after Aug
+  }
+  const proj = projectWorkspace(accounts, values, { model: 'linear', horizonMonths: 12 });
+  const aPts = proj.accountProjections.find((p) => p.accountId === 'a')?.points ?? [];
+  check(
+    aPts.length === 12 && periodKey(aPts[0]!.period) === '2025-01' && periodKey(aPts[11]!.period) === '2025-12',
+    `M9: account that stops early must project on the global grid 2025-01..2025-12, got ${aPts.map((p) => periodKey(p.period)).join(',')}`
+  );
+  const projRows = proj.rolledUp.filter((r) => r.isProjected);
+  check(
+    projRows.length === 12 && periodKey(projRows[projRows.length - 1]!.period) === '2025-12',
+    `M9: rolled-up projected periods should be the 12 global months ending 2025-12, got ${projRows.length}`
+  );
+}
+
+// ── M10: a driver-mode revenue scenario LIFTS projected variable costs ───────
+{
+  const accounts: Account[] = [
+    acc('rev', 'Revenue', 'revenue'),
+    acc('var', 'Variable COGS', 'cogs', { costBehavior: 'variable' }),
+  ];
+  const base: AccountValue[] = [];
+  for (let m = 1; m <= 12; m++) {
+    const period: Period = { year: 2025, month: m };
+    base.push({ accountId: 'rev', period, amount: 1000 });
+    base.push({ accountId: 'var', period, amount: 300 }); // 30% ratio
+  }
+  // Scenario: revenue +20% (cost accounts untouched).
+  const adjusted = base.map((v) => (v.accountId === 'rev' ? { ...v, amount: v.amount * 1.2 } : v));
+  const proj = projectWorkspace(accounts, adjusted, {
+    model: 'driver',
+    horizonMonths: 3,
+    growthRateOverride: 0,
+    baselineValues: base,
+  });
+  const varPts = proj.accountProjections.find((p) => p.accountId === 'var')?.points ?? [];
+  check(
+    varPts.length === 3 && approx(varPts[0]!.value, 360, 0.5),
+    `M10: revenue +20% driver scenario should lift variable cost to ~360 (0.3*1200), got ${varPts[0]?.value}`
+  );
+  const revPts = proj.accountProjections.find((p) => p.accountId === 'rev')?.points ?? [];
+  check(
+    revPts.length === 3 && approx(revPts[0]!.value, 1200, 1),
+    `M10: projected revenue should reflect the +20% scenario (~1200), got ${revPts[0]?.value}`
+  );
+  // Control: WITHOUT baselineValues the denominator scales too and the effect
+  // cancels back to ~300 — this documents that the fix requires baselineValues.
+  const projNoBase = projectWorkspace(accounts, adjusted, {
+    model: 'driver',
+    horizonMonths: 3,
+    growthRateOverride: 0,
+  });
+  const varNoBase = projNoBase.accountProjections.find((p) => p.accountId === 'var')?.points ?? [];
+  check(
+    approx(varNoBase[0]!.value, 300, 0.5),
+    `M10 control: without baselineValues the ratio denominator cancels → ~300, got ${varNoBase[0]?.value}`
+  );
+}
+
 if (failures > 0) {
   console.error(`\n${failures} driver-projection check(s) FAILED`);
   process.exit(1);

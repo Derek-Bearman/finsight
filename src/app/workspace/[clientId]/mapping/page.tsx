@@ -195,6 +195,16 @@ export default function MappingPage({ params }: PageProps) {
     showToast(`${manualCount} account${manualCount !== 1 ? 's' : ''} reclassified`);
   }, [workspace, clientId, batchUpdateAccounts, appendAuditEntry, inferStatementType]);
 
+  // MUST run before the early returns below — a hook after a conditional return
+  // is a Rules-of-Hooks violation. `hydrated` starts false (spinner return),
+  // then flips true, so render 2 would call one more hook than render 1 and
+  // React 19 throws "Rendered more hooks than during the previous render",
+  // blanking the page. Guard the (possibly undefined) workspace here.
+  const sourceCounts = useMemo(
+    () => computeSourceCounts(workspace?.accounts ?? []),
+    [workspace?.accounts]
+  );
+
   if (!hydrated) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: 'hsl(var(--background))' }}>
@@ -230,7 +240,6 @@ export default function MappingPage({ params }: PageProps) {
 
   const profile = getProfile(workspace.industryProfileId);
   const manualCount = workspace.accounts.filter((a) => a.isManuallyClassified).length;
-  const sourceCounts = useMemo(() => computeSourceCounts(workspace.accounts), [workspace.accounts]);
 
   // An account is "reviewed" if it was manually classified OR has high/medium confidence.
   // Once all accounts are reviewed, show the "Ready to analyze" banner.

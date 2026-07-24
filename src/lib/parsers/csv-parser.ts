@@ -125,8 +125,11 @@ export function parseAmount(raw: string): number {
   const trimmed = raw.replace(/[\t\r\n]/g, ' ').trim();
   if (trimmed === '' || trimmed === '-') return 0;
 
-  // Detect negative via parentheses (before or after dollar sign)
-  const isNegative = /[($]/.test(trimmed.slice(0, 2)) && trimmed.includes('(');
+  // Detect negative via parentheses (before or after dollar sign) OR a trailing
+  // minus ("1,234-"), the convention some non-QBO accounting exports use.
+  // (Leading-minus is preserved by parseFloat; trailing-minus is not.)
+  const isNegative =
+    (/[($]/.test(trimmed.slice(0, 2)) && trimmed.includes('(')) || /-\s*$/.test(trimmed);
 
   // Strip dollar signs, commas, parentheses, spaces, tabs
   const cleaned = trimmed
@@ -175,18 +178,23 @@ function periodKey(p: Period): string {
 export function parsePeriodHeader(header: string): Period | null {
   const h = header.trim();
 
-  // "Jan 2024" or "Jan-2024"
-  const longMonthYear = h.match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s-]+(\d{4})$/i);
+  // Abbreviated OR full month name + year. Matches "Jan 2024", "January 2024",
+  // "Sept 2024", "Jan-2024". The .slice(0,3) lookup maps every variant to the
+  // canonical 3-letter key. XLSX date-typed headers rendered "mmmm yyyy" land here.
+  const MONTH_WORD = '(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sept?(?:ember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)';
+
+  // "Jan 2024" / "January 2024" / "Jan-2024"
+  const longMonthYear = h.match(new RegExp(`^${MONTH_WORD}[\\s-]+(\\d{4})$`, 'i'));
   if (longMonthYear) {
-    const month = MONTH_NAMES[longMonthYear[1]!.toLowerCase()];
+    const month = MONTH_NAMES[longMonthYear[1]!.slice(0, 3).toLowerCase()];
     const year = parseInt(longMonthYear[2]!, 10);
     if (month !== undefined) return { year, month };
   }
 
-  // "Jan-24" or "Jan 24" (short year)
-  const shortMonthYear = h.match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[-\s](\d{2})$/i);
+  // "Jan-24" / "Jan 24" / "January 24" (short year)
+  const shortMonthYear = h.match(new RegExp(`^${MONTH_WORD}[-\\s](\\d{2})$`, 'i'));
   if (shortMonthYear) {
-    const month = MONTH_NAMES[shortMonthYear[1]!.toLowerCase()];
+    const month = MONTH_NAMES[shortMonthYear[1]!.slice(0, 3).toLowerCase()];
     const shortYear = parseInt(shortMonthYear[2]!, 10);
     const year = shortYear >= 50 ? 1900 + shortYear : 2000 + shortYear;
     if (month !== undefined) return { year, month };
@@ -348,6 +356,32 @@ function isTotalsRow(name: string): boolean {
 
 type RowKind = 'total' | 'section' | 'data';
 
+// The only "Net …" names that are a real EQUITY LEAF on a balance sheet
+// (current-year earnings), not a subtotal. Everything else starting with "Net"
+// on a BS (e.g. "Net Fixed Assets") is treated as a total.
+const BS_EQUITY_NET_LEAVES = new Set<string>([
+  'net income', 'net operating income', 'net earnings',
+  'net income (loss)', 'net loss', 'net profit',
+]);
+
+// Section-header labels — category groupings, not leaf accounts. Module scope so
+// the row loop can also detect a SPANNING header ("Liabilities and Equity") to
+// reset the running section (it maps to no single section in SECTION_FROM_NAME).
+const SECTION_HEADER_LABELS = new Set<string>([
+  'income', 'cost of goods sold', 'cogs', 'expenses', 'expense',
+  'other income', 'other expenses', 'other expense',
+  'assets', 'current assets', 'fixed assets', 'other assets',
+  'liabilities', 'current liabilities', 'long-term liabilities',
+  'equity', 'bank accounts', 'other current assets',
+  'other current liabilities', 'credit cards',
+  'liabilities and equity', 'total liabilities and equity',
+  'property, plant & equipment', 'property plant & equipment',
+  'property plant and equipment',
+  "stockholders' equity", "stockholder's equity",
+  'stockholders equity', "shareholders' equity", "shareholder's equity",
+  'members equity', "member's equity",
+]);
+
 /**
  * More precise version of isTotalsRow that distinguishes:
  *   - 'total'   — subtotal/total/grand-total/net row, always skip
@@ -356,10 +390,18 @@ type RowKind = 'total' | 'section' | 'data';
  *                 the same name can appear as both a section header and an
  *                 individual account, e.g. "Other Assets" twice in a BS)
  *   - 'data'    — keep
+ *
+ * `isBalanceSheet` toggles the 'net' rule: on a P&L, "Net Income"/"Net Operating
+ * Income" are summary rows to drop; on a BALANCE SHEET, "Net Income" is a real
+ * equity leaf (current-year earnings, present on every QBO balance sheet) and
+ * MUST NOT be dropped, or equity is understated and the sheet won't balance.
  */
-function classifyRowKind(name: string): RowKind {
+function classifyRowKind(name: string, isBalanceSheet = false): RowKind {
   const trimmed = name.trim();
-  // Explicit total/subtotal/net patterns
+  // On a balance sheet, "Net Income" (and family) is a REAL equity leaf
+  // (current-year earnings, present on every QBO balance sheet) — keep it.
+  // Other "Net X" (e.g. "Net Fixed Assets", "Net PP&E") stay subtotals to drop.
+  if (isBalanceSheet && BS_EQUITY_NET_LEAVES.has(trimmed.toLowerCase())) return 'data';
   if (/^(total|subtotal|net|grand\s+total)\b/i.test(trimmed)) return 'total';
   // Explicit QBO P&L summary row names that must always be excluded
   const EXPLICIT_TOTALS = [
@@ -368,35 +410,23 @@ function classifyRowKind(name: string): RowKind {
     'total other expenses', 'total other expense',
   ];
   if (EXPLICIT_TOTALS.includes(trimmed.toLowerCase())) return 'total';
-  // QBO section header labels — these are category groupings, not leaf accounts
-  const SECTION_HEADERS = [
-    'income', 'cost of goods sold', 'cogs', 'expenses', 'expense',
-    'other income', 'other expenses', 'other expense',
-    'assets', 'current assets', 'fixed assets', 'other assets',
-    'liabilities', 'current liabilities', 'long-term liabilities',
-    'equity', 'bank accounts', 'other current assets',
-    'other current liabilities', 'credit cards',
-    'liabilities and equity',
-    'property, plant & equipment', 'property plant & equipment',
-    'property plant and equipment',
-    "stockholders' equity", "stockholder's equity",
-    'stockholders equity', "shareholders' equity", "shareholder's equity",
-    'members equity', "member's equity",
-  ];
-  if (SECTION_HEADERS.includes(trimmed.toLowerCase())) return 'section';
+  if (SECTION_HEADER_LABELS.has(trimmed.toLowerCase())) return 'section';
   return 'data';
 }
 
 /**
- * Remove parent rows when they have child rows.
- * In QBO P&L exports, parent category rows (lower indentLevel) repeat the sum
- * of their children — importing both would double-count revenue/expenses.
- * We keep only the leaf (child) rows and drop any row immediately followed by
- * a row with a HIGHER indent level (indicating the prior row is a parent).
+ * Remove parent rows that merely REPEAT the sum of their children.
+ * In QBO exports, a parent category row (lower indentLevel) can restate the sum
+ * of its sub-accounts — importing both would double-count.
  *
- * Only applied for P&L data (revenue/expense sections). Balance sheet assets /
- * liabilities have a different structure and are not affected because their
- * section headers are already removed by isTotalsRow.
+ * A row immediately followed by a MORE-INDENTED row is only a candidate parent.
+ * It is dropped ONLY when it is a genuine rollup: it carries no values of its own
+ * (a blank grouping header), OR its per-period values equal the sum of its
+ * immediate (indentLevel+1) children. A value-carrying LEAF that just happens to
+ * precede a deeper account (e.g. "Undeposited Funds" before "Bank Accounts →
+ * Checking", after the zero-value "Bank Accounts" header is filtered) must be
+ * KEPT — the old pure-indent heuristic silently dropped it and its amounts,
+ * understating the balance sheet.
  */
 function deduplicateParentRows(rows: ParsedRow[]): ParsedRow[] {
   if (rows.length === 0) return rows;
@@ -404,13 +434,54 @@ function deduplicateParentRows(rows: ParsedRow[]): ParsedRow[] {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!;
     const nextRow = rows[i + 1];
-    // If the very next row has a HIGHER indent level, this row is a parent — skip it
-    if (nextRow && nextRow.indentLevel > row.indentLevel) {
-      continue; // drop the parent row to avoid double-counting
+    if (nextRow && nextRow.indentLevel > row.indentLevel && isRedundantRollup(row, rows, i)) {
+      continue; // drop only a genuine summary parent, never a real leaf
     }
     result.push(row);
   }
   return result;
+}
+
+/**
+ * True when `rows[i]` is a blank grouping header, or its per-period values equal
+ * the sum of its LEAF DESCENDANTS (any depth) that share its section — i.e. a
+ * redundant rollup that merely restates its children, safe to drop.
+ *
+ * Compares against LEAF descendants (not just immediate children) and by
+ * RELATIVE depth (not a hardcoded indentLevel+1), so nested groups and any
+ * indentation width work. Requires the same section so that, once zero-value
+ * section headers are filtered, a cross-section neighbor (e.g. a balance sheet's
+ * asset leaf followed by liability/equity rows whose total happens to equal it)
+ * is never mistaken for a child. A parent whose value does NOT equal its
+ * children's sum is kept — it carries a direct amount of its own, not a pure
+ * restatement, and dropping it would lose real data.
+ */
+function isRedundantRollup(row: ParsedRow, rows: ParsedRow[], i: number): boolean {
+  const keys = Object.keys(row.values);
+  // Blank / all-zero parent (a pure grouping header) — safe to drop.
+  if (keys.length === 0 || keys.every((k) => row.values[k] === 0)) return true;
+
+  const leafSum: Record<string, number> = {};
+  let leaves = 0;
+  for (let j = i + 1; j < rows.length; j++) {
+    const r = rows[j]!;
+    if (r.indentLevel <= row.indentLevel) break; // left the parent's block
+    // A leaf carries no deeper child (the next row isn't more indented).
+    const next = rows[j + 1];
+    const isLeaf = !next || next.indentLevel <= r.indentLevel;
+    if (isLeaf && r.section === row.section) {
+      leaves++;
+      for (const [k, v] of Object.entries(r.values)) leafSum[k] = (leafSum[k] ?? 0) + v;
+    }
+  }
+  // No same-section leaf descendants → this is a leaf, not a rollup: keep it.
+  if (leaves === 0) return false;
+
+  const EPS = 0.01;
+  for (const k of new Set([...keys, ...Object.keys(leafSum)])) {
+    if (Math.abs((row.values[k] ?? 0) - (leafSum[k] ?? 0)) > EPS) return false;
+  }
+  return true;
 }
 
 /**
@@ -530,12 +601,21 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
   let headerRowIndex = 0;
   for (let i = 0; i < Math.min(10, data.length); i++) {
     const row = data[i] ?? [];
-    const hasPeriodCol = row.some((cell) => expandPeriodHeader(String(cell ?? '').trim()) !== null);
+    const periodCells = row.filter((cell) => expandPeriodHeader(String(cell ?? '').trim()) !== null).length;
     const firstCellBlank = String(row[0] ?? '').trim() === '';
+    const firstCellIsPeriod = expandPeriodHeader(String(row[0] ?? '').trim()) !== null;
     const secondCellIsPeriod = row.length > 1 && expandPeriodHeader(String(row[1] ?? '').trim()) !== null;
-    // QBO single-period: blank first cell + second cell is 'Total' = this is the header row
+    // QBO single-period: blank first cell + second cell is 'Total' = the header row
     const secondCellIsTotal = row.length > 1 && /^total$/i.test(String(row[1] ?? '').trim());
-    if (hasPeriodCol || (firstCellBlank && secondCellIsPeriod) || (firstCellBlank && secondCellIsTotal && row.length >= 2)) {
+    // A lone date SUBTITLE ("December 2024" in the first cell, nothing else) must
+    // NOT be picked as the header — a real header has a blank/name account column
+    // with the period(s) in LATER columns, OR two-plus period columns. (This also
+    // hardens the pre-existing case of a bare "Dec 2024" subtitle.)
+    const looksLikeHeader =
+      (firstCellBlank && (secondCellIsPeriod || secondCellIsTotal)) ||
+      periodCells >= 2 ||
+      (periodCells >= 1 && !firstCellIsPeriod);
+    if (looksLikeHeader) {
       headerRowIndex = i;
       break;
     }
@@ -589,16 +669,49 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
     periods: Period[];
     divisor: number;
   }
-  const richPeriodCols: RichPeriodCol[] = [];
+  const rawPeriodCols: RichPeriodCol[] = [];
   for (let i = 0; i < rawHeaders.length; i++) {
     const h = rawHeaders[i] ?? '';
     // Skip summary columns like QBO's trailing "Total" column
     if (isSummaryColumn(h)) continue;
     const expanded = expandPeriodHeader(h);
     if (expanded) {
-      richPeriodCols.push({ colIndex: i, ...expanded });
+      rawPeriodCols.push({ colIndex: i, ...expanded });
     }
   }
+
+  // A file may carry BOTH single-month columns AND a quarter/annual subtotal
+  // column (e.g. Jan, Feb, Mar, Q1). Without dedup, the coarser column's
+  // per-month share is SUMMED onto the monthly values → every amount doubled.
+  // Drop any column whose period keys are already covered by a STRICTLY finer
+  // (smaller-divisor) column; genuine same-granularity duplicates are kept (they
+  // legitimately accumulate — see csv-parser.check.ts dup-period fixture).
+  const finestDivisor = new Map<string, number>();
+  for (const c of rawPeriodCols) {
+    for (const p of c.periods) {
+      const k = periodKey(p);
+      const cur = finestDivisor.get(k);
+      if (cur === undefined || c.divisor < cur) finestDivisor.set(k, c.divisor);
+    }
+  }
+  const richPeriodCols = rawPeriodCols.filter(
+    (c) => !c.periods.some((p) => (finestDivisor.get(periodKey(p)) ?? c.divisor) < c.divisor)
+  );
+
+  // Effective statement type, resolved BEFORE the row loop so balance-sheet
+  // handling applies (stock columns = ending balances; "Net Income" kept as an
+  // equity account). Prefer the caller's explicit type. When absent (the
+  // home-wizard auto-detect path), require an actual BS SECTION-HEADER row —
+  // NOT a substring — so a P&L with a leaf like "Gain on Sale of Assets" or
+  // "Equity in Earnings" is never mis-typed as a balance sheet (which would
+  // mangle its quarter/annual columns).
+  const isBalanceSheet = statementType
+    ? statementType === 'balance_sheet'
+    : dataRows.some((r) => {
+        const nm = nameColIndex !== null ? String(r[nameColIndex] ?? '').trim() : '';
+        const sec = sectionFromName(nm);
+        return sec === 'asset' || sec === 'liability' || sec === 'equity';
+      });
 
   const rows: ParsedRow[] = [];
   let currentSection: Section | null = null;
@@ -617,7 +730,15 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
     // filtered out as data rows) still need to update state for downstream
     // rows that ARE kept.
     const detectedSection = sectionFromName(trimmedName);
-    if (detectedSection !== null) currentSection = detectedSection;
+    if (detectedSection !== null) {
+      currentSection = detectedSection;
+    } else if (SECTION_HEADER_LABELS.has(trimmedName.toLowerCase())) {
+      // A recognized grouping header that maps to NO single section (e.g.
+      // "Liabilities and Equity"): clear the running section so the accounts
+      // that follow don't inherit the previous one (was typing liabilities as
+      // assets under it).
+      currentSection = null;
+    }
 
     // Decide whether to skip this row.
     //  - 'total' rows (Total Current Assets, Net Income, etc.) — always skip
@@ -626,7 +747,7 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
     //    This handles the common case where a financial model uses the same
     //    name for both the section header and a leaf account (e.g. "Other
     //    Assets" appears twice in some balance sheet templates).
-    const rowKind = classifyRowKind(trimmedName);
+    const rowKind = classifyRowKind(trimmedName, isBalanceSheet);
     if (rowKind === 'total') continue;
     if (rowKind === 'section') {
       // Sum absolute values across detected period columns to decide if the
@@ -654,10 +775,18 @@ export function parseCSV(csvText: string, statementType?: StatementType): ParseR
       const raw = String(row[colIndex] ?? '').trim();
       if (raw === '') continue;
       const total = parseAmount(raw);
-      const perMonth = divisor > 1 ? total / divisor : total;
-      for (const p of periods) {
-        const key = periodKey(p);
-        values[key] = (values[key] ?? 0) + perMonth;
+      if (isBalanceSheet && divisor > 1) {
+        // Balance-sheet stock: a quarter/annual column holds the ENDING balance
+        // at period end, not a flow to spread. Assign the full amount to the
+        // LAST month of the range; dividing would understate the balance ~N-fold.
+        const key = periodKey(periods[periods.length - 1]!);
+        values[key] = (values[key] ?? 0) + total;
+      } else {
+        const perMonth = divisor > 1 ? total / divisor : total;
+        for (const p of periods) {
+          const key = periodKey(p);
+          values[key] = (values[key] ?? 0) + perMonth;
+        }
       }
     }
 

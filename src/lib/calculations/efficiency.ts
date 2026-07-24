@@ -175,8 +175,11 @@ export function computeEfficiencyRatios(
   // Ratios
   const assetTurnover = safeDivide(revenue, avgTotalAssets);
 
-  // Inventory turnover: null if no inventory accounts exist
-  const hasInventory = accounts.some(isInventory);
+  // Inventory turnover: null if no inventory accounts exist. Honor isExcluded
+  // (like getAccountBalance) so an excluded-only inventory summary row doesn't
+  // make hasInventory true while avgInventory is 0 (which would render DIO=0 and
+  // a non-null cash-conversion-cycle instead of null).
+  const hasInventory = accounts.some(a => !a.isExcluded && isInventory(a));
   const inventoryTurnover = hasInventory ? safeDivide(cogs, avgInventory) : null;
 
   // DSO = (avg AR / revenue) * days

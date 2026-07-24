@@ -13,8 +13,14 @@
  */
 
 import type { Account, AccountValue, FranchiseScoaAccount, Period } from '@/types';
+import { median } from '@/lib/franchise/peer-metrics';
 
 const periodKey = (p: Period) => `${p.year}-${p.month}`;
+const comparePeriods = (a: Period, b: Period) =>
+  a.year !== b.year ? a.year - b.year : a.month - b.month;
+
+/** Balance-sheet (stock) account types — point-in-time balances, not flows. */
+const STOCK_TYPES = new Set<Account['type']>(['asset', 'liability', 'equity']);
 
 function pushInto(map: Map<string, Account[]>, key: string, a: Account): void {
   const list = map.get(key);
@@ -22,18 +28,45 @@ function pushInto(map: Map<string, Account[]>, key: string, a: Account): void {
   else map.set(key, [a]);
 }
 
-/** Per-account amount summed over the requested periods (non-excluded only). */
+/**
+ * Per-account amount over the requested periods (non-excluded only).
+ *
+ * FLOW accounts (revenue/cogs/expense) SUM across the window. STOCK accounts
+ * (asset/liability/equity) are point-in-time balances — summing them across a
+ * 12-month window overstates them ~12x — so they use the ENDING balance at a
+ * SINGLE GLOBAL ending month (the latest in-window period with ANY stock data),
+ * exactly like computeBalanceSheetSeries: a stock account with no row at that
+ * month contributes 0. This keeps the SCOA comparison consistent with the
+ * franchisee's own balance sheet.
+ */
 function perAccountTotals(
   accounts: Account[],
   values: AccountValue[],
   periods: Period[]
 ): Map<string, number> {
   const keys = new Set(periods.map(periodKey));
-  const included = new Set(accounts.filter((a) => !a.isExcluded).map((a) => a.id));
+  const byId = new Map<string, Account>();
+  for (const a of accounts) if (!a.isExcluded) byId.set(a.id, a);
+
+  // Pass 1: the single global ending month = latest in-window period with ANY
+  // stock (asset/liability/equity) data.
+  let stockEnd: Period | null = null;
+  for (const v of values) {
+    const acct = byId.get(v.accountId);
+    if (!acct || !STOCK_TYPES.has(acct.type)) continue;
+    if (!keys.has(periodKey(v.period))) continue;
+    if (!stockEnd || comparePeriods(v.period, stockEnd) > 0) stockEnd = v.period;
+  }
+
+  // Pass 2: sum flows across the window; for stocks add only the global ending month.
   const totals = new Map<string, number>();
   for (const v of values) {
-    if (!included.has(v.accountId)) continue;
+    const acct = byId.get(v.accountId);
+    if (!acct) continue;
     if (!keys.has(periodKey(v.period))) continue;
+    if (STOCK_TYPES.has(acct.type)) {
+      if (!stockEnd || v.period.year !== stockEnd.year || v.period.month !== stockEnd.month) continue;
+    }
     totals.set(v.accountId, (totals.get(v.accountId) ?? 0) + v.amount);
   }
   return totals;
@@ -169,4 +202,36 @@ export function scoaLineSnapshot(
     };
   }
   return { lineTotals, revenue: roll.revenueTotal };
+}
+
+/**
+ * Assemble the per-line THIS-vs-peer-median comparison from pre-computed
+ * snapshots (this franchisee + peers). Pure — extracted from the `'use server'`
+ * action (whose DB I/O can't run headless) so the money math (peer median,
+ * sample-size counts, the total-with-zero-revenue → no-% distinction) is
+ * unit-checkable. A peer with a total but zero revenue counts toward peerCount
+ * but not peerPctCount.
+ */
+export function buildScoaComparisonLines(
+  scoaAccounts: FranchiseScoaAccount[],
+  thisSnap: ScoaLineSnapshot | null,
+  peerSnaps: ScoaLineSnapshot[]
+): ScoaComparisonLine[] {
+  return scoaAccounts.map((s) => {
+    const mine = thisSnap?.lineTotals[s.number];
+    const peerTotals = peerSnaps.map((p) => p.lineTotals[s.number]?.total ?? null);
+    const peerPcts = peerSnaps.map((p) => p.lineTotals[s.number]?.pctRevenue ?? null);
+    const line: ScoaComparisonLine = {
+      number: s.number,
+      name: s.name,
+      thisTotal: mine?.total ?? null,
+      thisPct: mine?.pctRevenue ?? null,
+      peerMedianTotal: median(peerTotals),
+      peerMedianPct: median(peerPcts),
+      peerCount: peerTotals.filter((v) => v !== null).length,
+      peerPctCount: peerPcts.filter((v) => v !== null).length,
+    };
+    if (s.statementType) line.statementType = s.statementType;
+    return line;
+  });
 }

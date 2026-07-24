@@ -4,7 +4,7 @@ import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import type { Account } from '@/types';
 import { AccountCard, accountNeedsReview } from './AccountCard';
-import { formatCurrency } from '@/lib/utils/accounts';
+import { formatCurrency } from '@/lib/utils/format';
 
 export interface DropColumnProps {
   id: string;

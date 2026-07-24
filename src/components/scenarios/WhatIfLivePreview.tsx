@@ -194,7 +194,14 @@ export function WhatIfLivePreview({
     return projectWorkspace(
       workspace.accounts,
       adjustedValues,
-      { horizonMonths: HORIZON_MONTHS, model: effectiveModel, growthRateOverride: growthOverride }
+      {
+        horizonMonths: HORIZON_MONTHS,
+        model: effectiveModel,
+        growthRateOverride: growthOverride,
+        // Baseline revenue for the driver ratio denominator, so a revenue
+        // scenario actually lifts projected variable costs (not cancels out).
+        baselineValues: workspace.values,
+      }
     );
     // scenario is intentionally read through adjustmentsKey to avoid recomputing
     // on unrelated parent re-renders.

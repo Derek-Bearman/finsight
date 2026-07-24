@@ -163,6 +163,18 @@ function ScenarioCard({
   return (
     <div
       onClick={onSelect}
+      role="button"
+      tabIndex={0}
+      aria-pressed={isActive}
+      onKeyDown={(e) => {
+        // Only act when the card ITSELF is focused, so typing in the rename
+        // input or pressing a nested action button isn't hijacked.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
       className="relative group rounded-xl border p-3 cursor-pointer transition-all"
       style={{
         borderColor: isActive ? color : 'hsl(var(--border))',
