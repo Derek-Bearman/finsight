@@ -169,6 +169,10 @@ export const PAGE_FAQ: Record<string, FaqEntry[]> = {
       a: `It is the midpoint of all linked franchisees for each column, so half sit above and half below. For an even number of peers it can land on a half value, which is shown honestly rather than rounded. Your current client's own row is highlighted with a "this client" pill.`,
     },
     {
+      q: `What is the corporate-line comparison?`,
+      a: `For franchise-linked clients whose franchise has a corporate chart of accounts, it folds every client account you mapped (on the Mapping tab) into its corporate line and compares this client's trailing-12 value against the peer median, in % of revenue or dollars. So several checking or marketing accounts roll up into one corporate line. Expand a line to see which accounts roll up. It only shows lines that at least one franchisee has data for.`,
+    },
+    {
       q: `What is the View Full Reports link at the top?`,
       a: `It opens a dedicated, larger reports page for this workspace, useful for a fuller or more printable layout. The tab you are on gives you the same core income statement and ratios inline.`,
     },

@@ -152,8 +152,8 @@ export const PAGE_TOURS: Record<PageTourId, TourStep[]> = {
     },
     {
       id: 'mapping-scoa',
-      title: 'Reconcile Against Corporate',
-      body: `If this client is linked to a franchise that uploaded a corporate standard chart of accounts, an SCOA section appears here. Expand it to auto-match accounts by number then name, apply the safe matches in one click, and see a table of accounts that drifted, are missing, or are extra versus corporate.`,
+      title: 'Fold Into Corporate Lines',
+      body: `If this client is linked to a franchise with a corporate standard chart of accounts, an SCOA mapping section appears here. Expand it to fold your accounts into the corporate lines: auto-match handles the obvious ones, then drag any unmapped account onto a corporate line. Many accounts can share one line. What you map here rolls up into the corporate-line comparison on Reports.`,
       target: '[data-testid="scoa-mapping-toggle"]',
       position: 'above',
       waitForTarget: true,
@@ -206,6 +206,13 @@ export const PAGE_TOURS: Record<PageTourId, TourStep[]> = {
       title: 'Rank, Median, And This Client',
       body: `Click any column header to re-rank the franchisees, with blanks always sorted last. This client's row is highlighted with a "this client" pill, and the bottom median row shows the group midpoint so you can see where they stand against the pack.`,
       target: '[data-testid="franchise-comparison-median-row"]',
+      position: 'above',
+    },
+    {
+      id: 'reports-scoa-comparison',
+      title: 'Corporate Line Comparison',
+      body: `For franchise-linked clients with a corporate chart, this section folds every account you mapped into its corporate line and compares this client against the peer median, in % of revenue or dollars. Expand a line to see which accounts roll up. Map accounts on the Mapping tab to populate it.`,
+      target: '[data-tour="reports-scoa-comparison"]',
       position: 'above',
     },
     {

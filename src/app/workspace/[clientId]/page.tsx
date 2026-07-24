@@ -22,6 +22,7 @@ import {
   MappingToolbar,
   MappingViewA,
   MappingViewB,
+  ScoaBucketMapper,
   computeSourceCounts,
 } from '@/components/mapping';
 import type { SourceFilter } from '@/components/mapping';
@@ -76,6 +77,7 @@ import { ExecutiveSummary } from '@/components/insights/ExecutiveSummary';
 import { TargetsEditor } from '@/components/app/TargetsEditor';
 import { FranchiseLinkControl } from '@/components/franchise/FranchiseLinkControl';
 import { FranchiseComparison } from '@/components/franchise/FranchiseComparison';
+import { ScoaLineComparison } from '@/components/franchise/ScoaLineComparison';
 import { RATIO_DEF_MAP, resolveRatioBenchmark, type RatioKey } from '@/lib/targets';
 import { useEffectiveTargets } from '@/lib/franchise/useEffectiveTargets';
 import { INDUSTRY_BENCHMARK_DISCLAIMER } from '@/lib/benchmarks/packs';
@@ -368,6 +370,15 @@ function MappingTab({ clientId }: { clientId: string }) {
           sourceFilter={sourceFilter}
         />
       )}
+
+      {/* Corporate SCOA bucket mapper — franchise-linked clients with an
+          uploaded corporate chart. Self-hides otherwise. Feeds the Reports-tab
+          corporate-line comparison. */}
+      <ScoaBucketMapper
+        workspace={workspace}
+        onAccountsChange={handleAccountsChange}
+        onNotify={showToast}
+      />
 
       {/* Toast */}
       {toast && (
@@ -760,6 +771,19 @@ function ReportsTab({
             Franchise comparison
           </h3>
           <FranchiseComparison franchiseId={workspace.franchiseId} workspaceId={workspace.id} />
+        </div>
+      )}
+
+      {/* Corporate-line comparison — folds this client's accounts up by
+          scoaNumber into the franchisor's corporate lines and compares each
+          against the peer median. Franchise-linked only; the component itself
+          handles the no-SCOA case. */}
+      {workspace.franchiseId && (
+        <div data-tour="reports-scoa-comparison">
+          <h3 className="text-sm font-semibold mb-3" style={{ color: 'hsl(var(--foreground))' }}>
+            Corporate line comparison
+          </h3>
+          <ScoaLineComparison workspace={workspace} />
         </div>
       )}
     </div>

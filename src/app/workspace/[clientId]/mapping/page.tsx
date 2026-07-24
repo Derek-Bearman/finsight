@@ -9,7 +9,7 @@ import {
   MappingToolbar,
   MappingViewA,
   MappingViewB,
-  ScoaMappingSection,
+  ScoaBucketMapper,
   computeSourceCounts,
 } from '@/components/mapping';
 import type { SourceFilter } from '@/components/mapping';
@@ -346,7 +346,7 @@ export default function MappingPage({ params }: PageProps) {
               linked to a franchise with an uploaded corporate chart (F4).
               Persists Account.scoaNumber through the same store path as the
               mapping views above. */}
-          <ScoaMappingSection
+          <ScoaBucketMapper
             workspace={workspace}
             onAccountsChange={handleAccountsChange}
             onNotify={showToast}

@@ -3,6 +3,42 @@
 **Last updated:** 2026-07-23
 **Live app:** https://finsight.arktosmarketing.com (+ workers.dev), branch `phase-2a-tenancy`
 
+>  **2026-07-24 — SCOA ROLL-UP + CORPORATE-LINE COMPARISON + BUCKET MAPPER LIVE
+> (version `1216fe7f`).** Turned the SCOA feature from a 1-to-1 audit into a real
+> many-to-one roll-up so a franchisee's granular COA (3 checking, 5 marketing, 2
+> buildings) folds into the franchisor's generic corporate lines for comparison.
+> Full spec in `SCOA_ROLLUP_PLAN.md`. Three phases:
+> - **Engine** `lib/franchise/scoa-rollup.ts`: `rollupByScoa()` groups
+>   non-excluded accounts by `Account.scoaNumber` and sums by period;
+>   `scoaLineSnapshot()` gives per-line total + % of revenue (the size-neutral
+>   comparison normalizer). Orphan scoaNumbers (matching no current line, e.g.
+>   after a SCOA re-upload) route to the unmapped bucket so reconciliation holds
+>   and coverage never over-credits. `scripts/checks/scoa-rollup.check.ts` (18
+>   suites now) pins many-to-one summing, excluded-skip, orphan reconciliation,
+>   %-of-revenue, multi-period, median.
+> - **Comparison** `lib/data/franchise-scoa-comparison-actions.ts` (`'use server'`,
+>   peers' blobs stay server-side, mirrors getFranchisePeersAction) +
+>   `components/franchise/ScoaLineComparison.tsx` on the Reports tab: each
+>   corporate line, THIS client vs the peer median, %/$ toggle, expandable to the
+>   underlying (local-only) accounts. Franchise-linked + SCOA-present only.
+> - **Bucket mapper** `components/mapping/ScoaBucketMapper.tsx`: dnd two-column
+>   many-to-one UI (unmapped accounts left → corporate-line buckets right, drag
+>   or dropdown, many per line, auto-match, coverage bar). Replaced + DELETED the
+>   old 1-to-1 `ScoaMappingSection`; now on the embedded Mapping tab (which had
+>   NO SCOA section before) + the standalone /mapping. Kept
+>   scoa-mapping-section/-toggle/-apply-suggested testids for the tour.
+> Benchmarking/ratios stay type-based and unchanged; the roll-up is additive.
+> Built + 8-agent adversarial review (4 confirmed findings ALL FIXED: orphan
+> scoaNumber vanishing from roll-up + mapper, excluded-account auto-match, %-mode
+> peer `n=` sample-size label; a single-peer-median "leak" was verified
+> false-positive — franchisees are all the firm's own clients, same as the
+> existing peer comparison). tsc + 18 checks + cf:build green; ONE cf:deploy.
+> Prod no-regression verified on the demo (non-franchise: both SCOA sections
+> self-hide, zero console errors). Tutorial copy updated (mapping tour step +
+> reports tour step + reports FAQ). **NOT click-verified on a franchise-populated
+> surface** (the practice firm needs OTP login) — Derek to eyeball the bucket
+> mapper + comparison on bearman.derek+franchise's Pizza Palace.
+>
 >  **2026-07-23 (latest+1) — Tour spotlight + step-count fixes (version `1aa2fed3`).**
 > Derek's first-use feedback on the new tours (tested on his franchise practice
 > firm) surfaced two `TourOverlay` bugs, both fixed:
